@@ -245,6 +245,18 @@ fn current_user(state: &AppState, headers: &HeaderMap) -> Option<User> {
     state.auth.get_session(&sid).map(|(_, u)| u)
 }
 
+fn verify_main_admin(state: &AppState, headers: &HeaderMap) -> Result<User, (StatusCode, String)> {
+    let u = current_user(state, headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized session".to_string()))?;
+    if !u.is_main_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Only the Main Admin can perform this action.".to_string(),
+        ));
+    }
+    Ok(u)
+}
+
 fn verify_power(
     state: &AppState,
     headers: &HeaderMap,
@@ -775,7 +787,7 @@ async fn admin_reset_user_2fa_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let actor = verify_main_admin(&state, &headers)?;
     if !actor.is_main_admin {
         return Err((
             StatusCode::FORBIDDEN,
@@ -1802,7 +1814,7 @@ async fn restart_panel_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let actor = verify_main_admin(&state, &headers)?;
     log_audit(
         &state,
         &actor.username,
@@ -2186,7 +2198,7 @@ async fn list_users_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<User>>, (StatusCode, String)> {
-    let _actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let _actor = verify_main_admin(&state, &headers)?;
     let conn = state.db.lock().unwrap();
     let mut stmt = conn
         .prepare("SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users ORDER BY id ASC")
@@ -2231,7 +2243,7 @@ async fn create_user_handler(
     headers: HeaderMap,
     Json(payload): Json<CreateUserPayload>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let actor = verify_main_admin(&state, &headers)?;
 
     let uname = payload.username.trim().to_string();
     if uname.is_empty() || payload.password.len() < 6 {
@@ -2303,7 +2315,7 @@ async fn update_user_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<UpdateUserPayload>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let actor = verify_main_admin(&state, &headers)?;
 
     let existing = state
         .auth
@@ -2378,7 +2390,7 @@ async fn delete_user_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let actor = verify_main_admin(&state, &headers)?;
 
     let target = state
         .auth

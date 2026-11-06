@@ -409,7 +409,7 @@ function showLogin() {
 
 function hasPower(power) {
   if (!state.user) return false;
-  if (state.user.isMainAdmin || state.user.role === 'admin') return true;
+  if (state.user.isMainAdmin) return true;
   const perms = state.user.permissions || [];
   return perms.includes('*') || perms.includes(power);
 }
@@ -967,7 +967,7 @@ async function openEditWebsiteModal(projectId) {
   const detectBtn = document.getElementById('website-detect-btn');
   if (detectBtn) detectBtn.style.display = 'inline-flex';
 
-  document.querySelectorAll('.preset-chip').forEach((c) => {
+  document.querySelectorAll('#preset-buttons .preset-chip').forEach((c) => {
     c.classList.toggle('active', c.getAttribute('data-type') === p.project_type);
   });
 
@@ -985,7 +985,7 @@ async function detectProjectConfiguration() {
     if (res.build) document.getElementById('website-build-cmd').value = res.build;
     if (res.start) document.getElementById('website-start-cmd').value = res.start;
     if (res.type) {
-      document.querySelectorAll('.preset-chip').forEach((c) => {
+      document.querySelectorAll('#preset-buttons .preset-chip').forEach((c) => {
         c.classList.toggle('active', c.getAttribute('data-type') === res.type);
       });
     }
@@ -1008,7 +1008,7 @@ function getNextAvailablePort(basePort = 3000) {
 
 function applyPreset(type) {
   const conf = PRESETS[type] || PRESETS.node;
-  document.querySelectorAll('.preset-chip').forEach((c) => {
+  document.querySelectorAll('#preset-buttons .preset-chip').forEach((c) => {
     c.classList.toggle('active', c.getAttribute('data-type') === type);
   });
 
@@ -1025,7 +1025,7 @@ function applyPreset(type) {
 }
 
 // Preset chips click
-document.querySelectorAll('.preset-chip').forEach((chip) => {
+document.querySelectorAll('#preset-buttons .preset-chip').forEach((chip) => {
   chip.addEventListener('click', () => applyPreset(chip.getAttribute('data-type')));
 });
 
@@ -2246,11 +2246,14 @@ async function loadSettingsView() {
   renderSecurityStatusSummary();
 
   const canManagePlatform = hasPower('settings_manage');
+  const isMain = Boolean(state.user && state.user.isMainAdmin);
   const globalCard = document.getElementById('settings-global-config-card');
   const usersCard = document.getElementById('settings-users-card');
+  const panelCard = document.getElementById('settings-panel-card');
   if (globalCard) globalCard.style.display = canManagePlatform ? '' : 'none';
-  if (usersCard) usersCard.style.display = canManagePlatform ? '' : 'none';
-  if (!canManagePlatform) return;
+  if (usersCard) usersCard.style.display = isMain ? '' : 'none';
+  if (panelCard) panelCard.style.display = isMain ? '' : 'none';
+  if (!canManagePlatform && !isMain) return;
 
   try {
     const s = await api('/api/settings');
@@ -2276,7 +2279,7 @@ async function loadSettingsView() {
     }
 
     // Users list
-    if (canManagePlatform) {
+    if (isMain) {
       const users = await api('/api/users');
       state.usersList = users;
       const tbody = document.getElementById('users-table-body');
@@ -3234,10 +3237,6 @@ document.getElementById('pwd-next')?.addEventListener('input', (e) => {
     lbl.textContent = 'Strong';
     lbl.style.color = 'var(--success-light)';
   }
-});
-
-document.getElementById('user-profile-snippet')?.addEventListener('click', () => {
-  openSecurityModal('password');
 });
 
 document.getElementById('save-change-password-btn')?.addEventListener('click', async (e) => {

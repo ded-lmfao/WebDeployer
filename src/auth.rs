@@ -85,7 +85,7 @@ impl User {
     }
 
     pub fn has_power(&self, power: &str) -> bool {
-        if self.is_main_admin || self.role == "admin" {
+        if self.is_main_admin {
             return true;
         }
         self.permissions.iter().any(|p| p == "*" || p == power)
