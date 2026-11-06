@@ -6,6 +6,8 @@
 // ============================================================================
 // State Management
 // ============================================================================
+const PAGE_SIZE = 20;
+
 const state = {
   user: null,
   csrf: null,
@@ -20,7 +22,72 @@ const state = {
   logLines: [],
   revealingEnvKey: null,
   projectStatusFilter: 'all',
+  pages: {
+    overviewRecent: 1,
+    commits: 1,
+    deployments: 1,
+    releases: 1,
+    rollbacks: 1,
+    envVars: 1,
+    backups: 1,
+    users: 1,
+    audit: 1,
+  },
+  pageRenderers: {},
 };
+
+function paginateAndRender(items, pageKey, paginationElId, renderPageFn) {
+  const list = Array.isArray(items) ? items : [];
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  let curPage = state.pages[pageKey] || 1;
+  if (curPage > totalPages) curPage = totalPages;
+  if (curPage < 1) curPage = 1;
+  state.pages[pageKey] = curPage;
+
+  const startIdx = (curPage - 1) * PAGE_SIZE;
+  const slice = list.slice(startIdx, startIdx + PAGE_SIZE);
+  renderPageFn(slice, total, startIdx);
+
+  state.pageRenderers[pageKey] = () => paginateAndRender(list, pageKey, paginationElId, renderPageFn);
+
+  const bar = document.getElementById(paginationElId);
+  if (!bar) return;
+
+  if (total === 0) {
+    bar.innerHTML = '';
+    return;
+  }
+
+  const endIdx = Math.min(startIdx + PAGE_SIZE, total);
+  const pagesToShow = [];
+  const startPage = Math.max(1, curPage - 2);
+  const endPage = Math.min(totalPages, startPage + 4);
+  for (let p = Math.max(1, endPage - 4); p <= endPage; p++) {
+    pagesToShow.push(p);
+  }
+
+  bar.innerHTML = `
+    <div class="pagination-info">
+      Showing <strong>${startIdx + 1}&ndash;${endIdx}</strong> of <strong>${total}</strong> <span style="opacity:0.65;">(${PAGE_SIZE} per page)</span>
+    </div>
+    <div class="pagination-controls">
+      <button type="button" class="page-btn" ${curPage <= 1 ? 'disabled' : ''} onclick="goToTablePage('${pageKey}', ${curPage - 1})">&lsaquo; Prev</button>
+      ${pagesToShow.map((p) => `
+        <button type="button" class="page-btn ${p === curPage ? 'active' : ''}" onclick="goToTablePage('${pageKey}', ${p})">${p}</button>
+      `).join('')}
+      <button type="button" class="page-btn" ${curPage >= totalPages ? 'disabled' : ''} onclick="goToTablePage('${pageKey}', ${curPage + 1})">Next &rsaquo;</button>
+    </div>
+  `;
+}
+
+function goToTablePage(pageKey, pageNum) {
+  state.pages[pageKey] = Number(pageNum) || 1;
+  if (typeof state.pageRenderers[pageKey] === 'function') {
+    state.pageRenderers[pageKey]();
+  }
+}
+window.goToTablePage = goToTablePage;
 
 // Pipeline stages in order
 const PIPELINE_STAGES = [
@@ -307,6 +374,7 @@ function updateBreadcrumbs() {
     const globalLabels = {
       overview: 'System Overview',
       projects: 'Hosted Websites',
+      'global-audit': 'Platform Audit Trail',
       settings: 'Platform Settings',
     };
     secEl.textContent = globalLabels[state.currentView] || state.currentView;
@@ -343,20 +411,15 @@ function renderWebsiteWorkspaceHeader() {
   if (links) {
     const url = p.port ? `http://127.0.0.1:${p.port}` : null;
     const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
-    const ctrId = `webdep-ctr-${p.id}-${p.slug}`;
     links.innerHTML = `
       ${url ? (isOnline
         ? `<a class="domain-badge" href="${url}" target="_blank">${url} &nearr;</a>`
         : `<span class="domain-badge" style="opacity:0.55; cursor:not-allowed;" title="Container is stopped">${url} (Offline)</span>`
       ) : ''}
-      <span>Container: <code>${escapeHtml(ctrId)}</code></span>
-      <span>&bull;</span>
-      <span>Isolated DB: <code>data/containers/${escapeHtml(p.slug)}/db</code></span>
-      <span>&bull;</span>
-      <span>Branch: <strong>${escapeHtml(p.branch || 'main')}</strong></span>
-      <span>&bull;</span>
-      <span>SHA: <code>${escapeHtml(sha)}</code></span>
-      ${p.port ? `<span>&bull; Port: <strong>${p.port}</strong></span>` : ''}
+      <span class="ws-meta-chip">Branch: <strong style="color:var(--text-main);">${escapeHtml(p.branch || 'main')}</strong></span>
+      <span class="ws-meta-chip">SHA: <code style="color:var(--accent-light);">${escapeHtml(sha)}</code></span>
+      ${p.port ? `<span class="ws-meta-chip">Port: <strong style="color:var(--text-main);">${p.port}</strong></span>` : ''}
+      <span class="ws-meta-chip" title="Isolated container & database">Container: <code>ctr-${escapeHtml(p.slug)}</code></span>
     `;
   }
 
@@ -365,7 +428,7 @@ function renderWebsiteWorkspaceHeader() {
     actions.innerHTML = `
       ${hasPower('deploy') ? `
         <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
-        <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})">Fetch Git</button>
+        <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})">Fetch</button>
       ` : ''}
       ${hasPower('process') ? `
         ${isOnline
@@ -375,10 +438,10 @@ function renderWebsiteWorkspaceHeader() {
         <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})">Restart</button>
       ` : ''}
       ${hasPower('domains') ? `
-        <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">Caddy / SSL</button>
+        <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">Domains / SSL</button>
       ` : ''}
       ${hasPower('projects_manage') ? `
-        <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">Website Config</button>
+        <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">Settings</button>
         <button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">Delete</button>
       ` : ''}
     `;
@@ -389,7 +452,7 @@ function renderWebsiteWorkspaceHeader() {
     backups: 'backups',
   };
 
-  document.querySelectorAll('#ws-tabs-bar .ws-tab-btn').forEach((btn) => {
+  document.querySelectorAll('#ws-tabs-bar .ws-tab-item').forEach((btn) => {
     const tab = btn.getAttribute('data-ws-tab');
     const reqPower = tabPowerMap[tab];
     if (reqPower && !hasPower(reqPower)) {
@@ -397,8 +460,7 @@ function renderWebsiteWorkspaceHeader() {
     } else {
       btn.style.display = '';
     }
-    const isActive = tab === state.currentView;
-    btn.className = `btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm ws-tab-btn`;
+    btn.classList.toggle('active', tab === state.currentView);
   });
 }
 
@@ -431,7 +493,8 @@ function renderCurrentView() {
     sec.classList.remove('active');
   });
 
-  const activeSection = document.getElementById(`view-${state.currentView}`);
+  const sectionId = state.currentView === 'global-audit' ? 'view-audit' : `view-${state.currentView}`;
+  const activeSection = document.getElementById(sectionId);
   if (activeSection) activeSection.classList.add('active');
 
   // Load relevant view data
@@ -447,7 +510,10 @@ function renderCurrentView() {
     case 'backups': loadBackupsView(); break;
     case 'monitor': loadMonitorView(); break;
     case 'settings': loadSettingsView(); break;
-    case 'audit': loadAuditView(); break;
+    case 'audit':
+    case 'global-audit':
+      loadAuditView();
+      break;
   }
 }
 
@@ -573,12 +639,16 @@ async function loadOverview() {
         }).join('');
       }
 
-      // Recent Deployments
+      // Recent Deployments (paginated max 20 per page)
       const recBody = document.getElementById('overview-recent-table');
       if (!data.recent || !data.recent.length) {
         recBody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 24px;">No recent deployments recorded.</td></tr>';
+        const bar = document.getElementById('overview-recent-pagination');
+        if (bar) bar.innerHTML = '';
       } else {
-        recBody.innerHTML = data.recent.map((d) => renderDeploymentRow(d)).join('');
+        paginateAndRender(data.recent, 'overviewRecent', 'overview-recent-pagination', (slice) => {
+          recBody.innerHTML = slice.map((d) => renderDeploymentRow(d)).join('');
+        });
       }
     }
 
@@ -737,7 +807,10 @@ async function openEditWebsiteModal(projectId) {
   document.getElementById('website-branch').value = p.branch || 'main';
   document.getElementById('website-domains').value = (p.domains || []).join(', ');
   document.getElementById('website-port').value = p.port || '';
-  document.getElementById('website-deploy-dir').value = p.deploy_dir || '';
+  const cleanDeployDir = (!p.deploy_dir || p.deploy_dir.includes('/var/www/') || p.deploy_dir.includes('\\var\\www\\'))
+    ? `./data/sites/${p.slug}`
+    : p.deploy_dir;
+  document.getElementById('website-deploy-dir').value = cleanDeployDir;
   document.getElementById('website-deploy-method').value = p.deploy_method || 'managed';
   document.getElementById('website-health-url').value = p.health_url || '';
   document.getElementById('website-install-cmd').value = p.install_cmd || '';
@@ -975,29 +1048,33 @@ async function loadGithubView() {
     const commits = await api(`/api/projects/${p.id}/commits`);
     if (!commits.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No commits found. Click "Fetch Updates" above to sync with GitHub.</td></tr>';
+      const bar = document.getElementById('github-commits-pagination');
+      if (bar) bar.innerHTML = '';
       return;
     }
-    tbody.innerHTML = commits.map((c) => {
-      const isLive = c.live;
-      return `
-        <tr>
-          <td><span class="sha-pill">${c.shortSha || c.sha.slice(0, 7)}</span></td>
-          <td style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;">
-            ${escapeHtml(c.message)}
-          </td>
-          <td>${escapeHtml(c.author || 'Unknown')}</td>
-          <td>${formatDate(c.date)}</td>
-          <td>
-            ${isLive ? '<span class="badge badge-success">LIVE</span>' : c.deployedBefore ? '<span class="badge badge-neutral">Previously Deployed</span>' : '<span style="color:var(--text-dim)">-</span>'}
-          </td>
-          <td>
-            <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id}, '${c.sha}')" ${isLive ? 'disabled' : ''}>
-              Deploy Commit
-            </button>
-          </td>
-        </tr>
-      `;
-    }).join('');
+    paginateAndRender(commits, 'commits', 'github-commits-pagination', (slice) => {
+      tbody.innerHTML = slice.map((c) => {
+        const isLive = c.live;
+        return `
+          <tr>
+            <td><span class="sha-pill">${c.shortSha || c.sha.slice(0, 7)}</span></td>
+            <td style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;">
+              ${escapeHtml(c.message)}
+            </td>
+            <td>${escapeHtml(c.author || 'Unknown')}</td>
+            <td>${formatDate(c.date)}</td>
+            <td>
+              ${isLive ? '<span class="badge badge-success">LIVE</span>' : c.deployedBefore ? '<span class="badge badge-neutral">Previously Deployed</span>' : '<span style="color:var(--text-dim)">-</span>'}
+            </td>
+            <td>
+              <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id}, '${c.sha}')" ${isLive ? 'disabled' : ''}>
+                Deploy Commit
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -1084,13 +1161,15 @@ window.fetchProjectUpdates = fetchProjectUpdates;
 // ============================================================================
 async function loadDeploymentsView() {
   const p = getSelectedProject();
-  const query = p ? `?project=${p.id}&limit=50` : '?limit=50';
+  const query = p ? `?project=${p.id}&limit=200` : '?limit=200';
   const tbody = document.getElementById('deployments-table-body');
 
   try {
     const deployments = await api(`/api/deployments${query}`);
     if (!deployments.length) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 24px;">No deployments found.</td></tr>';
+      const bar = document.getElementById('deployments-pagination');
+      if (bar) bar.innerHTML = '';
       return;
     }
 
@@ -1108,7 +1187,9 @@ async function loadDeploymentsView() {
       renderPipelineStages('main-pipeline-track', 'idle', 'idle');
     }
 
-    tbody.innerHTML = deployments.map((d) => renderDeploymentRow(d)).join('');
+    paginateAndRender(deployments, 'deployments', 'deployments-pagination', (slice) => {
+      tbody.innerHTML = slice.map((d) => renderDeploymentRow(d)).join('');
+    });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -1240,30 +1321,34 @@ async function loadReleasesView() {
     const releases = await api(`/api/projects/${p.id}/releases`);
     if (!releases.length) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 24px;">No releases created yet.</td></tr>';
+      const bar = document.getElementById('releases-pagination');
+      if (bar) bar.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = releases.map((r) => {
-      const isLive = r.live;
-      return `
-        <tr>
-          <td><strong>Release #${r.id}</strong></td>
-          <td><span class="sha-pill">${r.short_sha || r.sha.slice(0, 7)}</span></td>
-          <td style="max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.message || '')}</td>
-          <td>${escapeHtml(r.author || 'Unknown')}</td>
-          <td>${formatDate(r.deployed_at || r.created_at)}</td>
-          <td><span class="badge ${r.build_status === 'success' ? 'badge-success' : 'badge-neutral'}">${r.build_status}</span></td>
-          <td><span class="badge ${r.health_status === 'ok' ? 'badge-success' : 'badge-neutral'}">${r.health_status}</span></td>
-          <td>${isLive ? '<span class="badge badge-success">LIVE</span>' : '<span class="badge badge-neutral">Retained</span>'}</td>
-          <td>
-            <div style="display: flex; gap: 6px;">
-              ${!isLive && r.status === 'succeeded' ? `<button class="btn btn-primary btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Rollback</button>` : ''}
-              ${r.deployment_id ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${r.deployment_id})">Logs</button>` : ''}
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join('');
+    paginateAndRender(releases, 'releases', 'releases-pagination', (slice) => {
+      tbody.innerHTML = slice.map((r) => {
+        const isLive = r.live;
+        return `
+          <tr>
+            <td><strong>Release #${r.id}</strong></td>
+            <td><span class="sha-pill">${r.short_sha || r.sha.slice(0, 7)}</span></td>
+            <td style="max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.message || '')}</td>
+            <td>${escapeHtml(r.author || 'Unknown')}</td>
+            <td>${formatDate(r.deployed_at || r.created_at)}</td>
+            <td><span class="badge ${r.build_status === 'success' ? 'badge-success' : 'badge-neutral'}">${r.build_status}</span></td>
+            <td><span class="badge ${r.health_status === 'ok' ? 'badge-success' : 'badge-neutral'}">${r.health_status}</span></td>
+            <td>${isLive ? '<span class="badge badge-success">LIVE</span>' : '<span class="badge badge-neutral">Retained</span>'}</td>
+            <td>
+              <div style="display: flex; gap: 6px;">
+                ${!isLive && r.status === 'succeeded' ? `<button class="btn btn-primary btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Rollback</button>` : ''}
+                ${r.deployment_id ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${r.deployment_id})">Logs</button>` : ''}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -1293,22 +1378,26 @@ async function loadRollbacksView() {
 
     if (!eligible.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px;">No earlier successful releases available for rollback yet. Releases are retained automatically.</td></tr>';
+      const bar = document.getElementById('rollbacks-pagination');
+      if (bar) bar.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = eligible.map((r) => `
-      <tr>
-        <td><strong>Release #${r.id}</strong></td>
-        <td><span class="sha-pill">${r.sha.slice(0, 7)}</span></td>
-        <td style="max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.message || '')}</td>
-        <td>${escapeHtml(r.author || 'Unknown')}</td>
-        <td>${formatDate(r.deployed_at || r.created_at)}</td>
-        <td><span class="badge badge-success">Files Verified</span></td>
-        <td>
-          <button class="btn btn-danger btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Instant Rollback</button>
-        </td>
-      </tr>
-    `).join('');
+    paginateAndRender(eligible, 'rollbacks', 'rollbacks-pagination', (slice) => {
+      tbody.innerHTML = slice.map((r) => `
+        <tr>
+          <td><strong>Release #${r.id}</strong></td>
+          <td><span class="sha-pill">${r.sha.slice(0, 7)}</span></td>
+          <td style="max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.message || '')}</td>
+          <td>${escapeHtml(r.author || 'Unknown')}</td>
+          <td>${formatDate(r.deployed_at || r.created_at)}</td>
+          <td><span class="badge badge-success">Files Verified</span></td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Instant Rollback</button>
+          </td>
+        </tr>
+      `).join('');
+    });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -1537,31 +1626,35 @@ async function loadEnvView() {
     const vars = await api(`/api/projects/${p.id}/env`);
     if (!vars.length) {
       tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">No environment variables configured. Click "Add Variable" or "Bulk / .env File" above to add.</td></tr>';
+      const bar = document.getElementById('env-vars-pagination');
+      if (bar) bar.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = vars.map((v) => {
-      const isSecret = Boolean(v.is_secret ?? v.secret);
-      return `
-      <tr>
-        <td><code>${escapeHtml(v.key)}</code></td>
-        <td id="env-val-${v.key}">
-          ${isSecret
-            ? '<span style="font-family: var(--font-mono); color: var(--text-dim);">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>'
-            : `<code style="color: var(--text-main);">${escapeHtml(v.value)}</code>`
-          }
-        </td>
-        <td>${isSecret ? '<span class="badge badge-warning">Secret</span>' : '<span class="badge badge-neutral">Public</span>'}</td>
-        <td><span class="badge badge-success">Saved in SQLite</span></td>
-        <td>
-          <div style="display: flex; gap: 6px;">
-            <button class="btn btn-secondary btn-sm" onclick="promptRevealEnv('${escapeHtml(v.key)}')">Reveal</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteEnvVar('${escapeHtml(v.key)}')">Delete</button>
-          </div>
-        </td>
-      </tr>
-    `;
-    }).join('');
+    paginateAndRender(vars, 'envVars', 'env-vars-pagination', (slice) => {
+      tbody.innerHTML = slice.map((v) => {
+        const isSecret = Boolean(v.is_secret ?? v.secret);
+        return `
+        <tr>
+          <td><code>${escapeHtml(v.key)}</code></td>
+          <td id="env-val-${v.key}">
+            ${isSecret
+              ? '<span style="font-family: var(--font-mono); color: var(--text-dim);">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>'
+              : `<code style="color: var(--text-main);">${escapeHtml(v.value)}</code>`
+            }
+          </td>
+          <td>${isSecret ? '<span class="badge badge-warning">Secret</span>' : '<span class="badge badge-neutral">Public</span>'}</td>
+          <td><span class="badge badge-success">Saved in SQLite</span></td>
+          <td>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" onclick="promptRevealEnv('${escapeHtml(v.key)}')">Reveal</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteEnvVar('${escapeHtml(v.key)}')">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+      }).join('');
+    });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -1814,31 +1907,35 @@ async function loadBackupsView() {
     const backups = await api(`/api/projects/${p.id}/backups`);
     if (!backups.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No backups taken yet. Click "Create Backup" above to snapshot your website & .env.</td></tr>';
+      const bar = document.getElementById('backups-pagination');
+      if (bar) bar.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = backups.map((b) => {
-      const sizeStr = b.size >= 1048576
-        ? `${(b.size / 1048576).toFixed(2)} MB`
-        : `${Math.max(1, Math.round((b.size || 4096) / 1024))} KB`;
-      return `
-        <tr>
-          <td><strong>#${b.id}</strong></td>
-          <td>${formatDate(b.ts)}</td>
-          <td><span class="badge badge-info">${escapeHtml(b.kind || 'full-snapshot')}</span></td>
-          <td>${sizeStr}</td>
-          <td>${escapeHtml(b.note || 'Snapshot')}</td>
-          <td>
-            <div style="display:flex; gap:6px;">
-              <button class="btn btn-primary btn-sm" onclick="restoreBackup(${p.id}, ${b.id})">Restore</button>
-              ${b.kind !== 'release-snapshot' ? `
-                <button class="btn btn-danger btn-sm" onclick="deleteBackup(${p.id}, ${b.id})">Delete</button>
-              ` : ''}
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join('');
+    paginateAndRender(backups, 'backups', 'backups-pagination', (slice) => {
+      tbody.innerHTML = slice.map((b) => {
+        const sizeStr = b.size >= 1048576
+          ? `${(b.size / 1048576).toFixed(2)} MB`
+          : `${Math.max(1, Math.round((b.size || 4096) / 1024))} KB`;
+        return `
+          <tr>
+            <td><strong>#${b.id}</strong></td>
+            <td>${formatDate(b.ts)}</td>
+            <td><span class="badge badge-info">${escapeHtml(b.kind || 'full-snapshot')}</span></td>
+            <td>${sizeStr}</td>
+            <td>${escapeHtml(b.note || 'Snapshot')}</td>
+            <td>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-primary btn-sm" onclick="restoreBackup(${p.id}, ${b.id})">Restore</button>
+                ${b.kind !== 'release-snapshot' ? `
+                  <button class="btn btn-danger btn-sm" onclick="deleteBackup(${p.id}, ${b.id})">Delete</button>
+                ` : ''}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -2011,51 +2108,53 @@ async function loadSettingsView() {
         settings_manage: 'Settings/Users',
       };
 
-      tbody.innerHTML = users.map((u) => {
-        const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
-        const projHtml = (isMain || u.allProjects)
-          ? '<span class="badge badge-info">All Websites (*)</span>'
-          : (u.allowedProjects && u.allowedProjects.length
-              ? u.allowedProjects.map((pid) => {
-                  const proj = state.projects.find((p) => p.id === pid);
-                  return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
-                }).join(' ')
-              : '<span class="badge badge-warning">No Websites Assigned</span>');
+      paginateAndRender(users, 'users', 'users-pagination', (slice) => {
+        tbody.innerHTML = slice.map((u) => {
+          const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
+          const projHtml = (isMain || u.allProjects)
+            ? '<span class="badge badge-info">All Websites (*)</span>'
+            : (u.allowedProjects && u.allowedProjects.length
+                ? u.allowedProjects.map((pid) => {
+                    const proj = state.projects.find((p) => p.id === pid);
+                    return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
+                  }).join(' ')
+                : '<span class="badge badge-warning">No Websites Assigned</span>');
 
-        const perms = isMain || (u.permissions && u.permissions.includes('*'))
-          ? ['*']
-          : (u.permissions || []);
-        const permsHtml = perms.length
-          ? perms.map((p) => `<span class="badge badge-neutral" style="margin:2px; font-size:10px;">${escapeHtml(powerLabels[p] || p)}</span>`).join(' ')
-          : '<span style="color:var(--text-dim); font-size:12px;">Read-Only</span>';
+          const perms = isMain || (u.permissions && u.permissions.includes('*'))
+            ? ['*']
+            : (u.permissions || []);
+          const permsHtml = perms.length
+            ? perms.map((p) => `<span class="badge badge-neutral" style="margin:2px; font-size:10px;">${escapeHtml(powerLabels[p] || p)}</span>`).join(' ')
+            : '<span style="color:var(--text-dim); font-size:12px;">Read-Only</span>';
 
-        return `
-          <tr>
-            <td>
-              <strong>${escapeHtml(u.username)}</strong>
-              ${isMain ? '<span class="badge badge-info" style="margin-left:6px; font-size:10px;">MAIN ADMIN</span>' : ''}
-              ${u.id === state.user.id ? '<span style="color:var(--text-dim); font-size:11px; margin-left:4px;">(You)</span>' : ''}
-            </td>
-            <td><span class="badge badge-neutral">${escapeHtml((u.role || 'operator').toUpperCase())}</span></td>
-            <td>${projHtml}</td>
-            <td style="max-width: 280px;">${permsHtml}</td>
-            <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
-            <td>
-              <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                ${!isMain ? `
-                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${u.id})">Edit Access</button>
-                  <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
-                    ${u.disabled ? 'Enable' : 'Disable'}
-                  </button>
-                  ${u.id !== state.user.id ? `
-                    <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
-                  ` : ''}
-                ` : '<span style="color:var(--text-dim); font-size:12px;">Full Root Access</span>'}
-              </div>
-            </td>
-          </tr>
-        `;
-      }).join('');
+          return `
+            <tr>
+              <td>
+                <strong>${escapeHtml(u.username)}</strong>
+                ${isMain ? '<span class="badge badge-info" style="margin-left:6px; font-size:10px;">MAIN ADMIN</span>' : ''}
+                ${u.id === state.user.id ? '<span style="color:var(--text-dim); font-size:11px; margin-left:4px;">(You)</span>' : ''}
+              </td>
+              <td><span class="badge badge-neutral">${escapeHtml((u.role || 'operator').toUpperCase())}</span></td>
+              <td>${projHtml}</td>
+              <td style="max-width: 280px;">${permsHtml}</td>
+              <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
+              <td>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  ${!isMain ? `
+                    <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${u.id})">Edit Access</button>
+                    <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
+                      ${u.disabled ? 'Enable' : 'Disable'}
+                    </button>
+                    ${u.id !== state.user.id ? `
+                      <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
+                    ` : ''}
+                  ` : '<span style="color:var(--text-dim); font-size:12px;">Full Root Access</span>'}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      });
     }
   } catch (err) {
     toast(`Failed to load settings: ${err.message}`, 'error');
@@ -2257,52 +2356,137 @@ async function deleteUser(userId, username) {
 window.deleteUser = deleteUser;
 
 // ============================================================================
-// View 12: Activity & Audit Logs
+// View 12: Activity & Audit Logs (Per-Website & Global)
 // ============================================================================
+const AUDIT_ACTION_META = {
+  'deploy.trigger': { label: 'Deploy Triggered', cls: 'badge-info' },
+  'deploy.auto_initial': { label: 'Initial Deploy', cls: 'badge-info' },
+  'deploy.success': { label: 'Deploy Succeeded', cls: 'badge-success' },
+  'deploy.failed': { label: 'Deploy Failed', cls: 'badge-danger' },
+  'rollback.trigger': { label: 'Rollback Started', cls: 'badge-warning' },
+  'rollback.success': { label: 'Rollback Succeeded', cls: 'badge-success' },
+  'rollback.failed': { label: 'Rollback Failed', cls: 'badge-danger' },
+  'container.start': { label: 'Container Started', cls: 'badge-success' },
+  'container.stop': { label: 'Container Stopped', cls: 'badge-danger' },
+  'container.restart': { label: 'Container Restarted', cls: 'badge-warning' },
+  'env.set': { label: 'Env Variable Saved', cls: 'badge-info' },
+  'env.bulk_import': { label: 'Bulk .env Imported', cls: 'badge-info' },
+  'env.reveal': { label: 'Secret Revealed', cls: 'badge-warning' },
+  'env.delete': { label: 'Env Variable Deleted', cls: 'badge-danger' },
+  'backup.create': { label: 'Snapshot Created', cls: 'badge-info' },
+  'backup.restore': { label: 'Backup Restored', cls: 'badge-warning' },
+  'backup.delete': { label: 'Backup Deleted', cls: 'badge-danger' },
+  'website.create': { label: 'Website Created', cls: 'badge-success' },
+  'website.update': { label: 'Website Updated', cls: 'badge-info' },
+  'website.delete': { label: 'Website Deleted', cls: 'badge-danger' },
+  'git.fetch': { label: 'Git Fetched', cls: 'badge-neutral' },
+  'git.deploy_key': { label: 'SSH Key Generated', cls: 'badge-info' },
+  'git.webhook_rotate': { label: 'Webhook Secret Rotated', cls: 'badge-warning' },
+  'git.webhook_push': { label: 'GitHub Push Webhook', cls: 'badge-info' },
+  'domains.caddy_apply': { label: 'Caddy Applied', cls: 'badge-success' },
+  'domains.ssl_certbot': { label: 'SSL Provisioned', cls: 'badge-success' },
+  'settings.update': { label: 'Settings Updated', cls: 'badge-info' },
+  'user.create': { label: 'User Created', cls: 'badge-success' },
+  'user.update': { label: 'User Access Updated', cls: 'badge-warning' },
+  'user.delete': { label: 'User Removed', cls: 'badge-danger' },
+  'auth.login': { label: 'User Signed In', cls: 'badge-neutral' },
+};
+
 async function loadAuditView() {
   const tbody = document.getElementById('audit-table-body');
+  const titleEl = document.getElementById('audit-view-title');
+  const subEl = document.getElementById('audit-view-subtitle');
+  const isPerWebsite = WEBSITE_WORKSPACE_TABS.has(state.currentView);
+  const activeProject = isPerWebsite ? getSelectedProject() : null;
+
+  if (titleEl && subEl) {
+    if (activeProject) {
+      titleEl.textContent = `${activeProject.name} — Activity & Audit Log`;
+      subEl.textContent = `Complete record of who deployed, started/stopped, edited .env, or took backups on ${activeProject.name}`;
+    } else {
+      titleEl.textContent = 'Platform Audit Trail (All Websites)';
+      subEl.textContent = 'Tamper-evident record of who performed every action across all hosted websites and platform settings';
+    }
+  }
+
   try {
-    const logs = await api('/api/audit?limit=150');
-    if (!logs.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No audit records found.</td></tr>';
-      return;
-    }
-
-    const activeProject = WEBSITE_WORKSPACE_TABS.has(state.currentView) ? getSelectedProject() : null;
-    const q = (document.getElementById('audit-search-input')?.value || '').toLowerCase();
-    const filtered = logs.filter((l) => {
-      if (activeProject) {
-        const tgt = `${l.target || ''} ${l.detail || ''}`.toLowerCase();
-        const matchSite = tgt.includes((activeProject.slug || '').toLowerCase()) ||
-          tgt.includes((activeProject.name || '').toLowerCase()) ||
-          tgt.includes(`#${activeProject.id}`);
-        if (!matchSite) return false;
-      }
-      return !q || (l.action && l.action.toLowerCase().includes(q)) ||
-        (l.actor && l.actor.toLowerCase().includes(q)) ||
-        (l.target && l.target.toLowerCase().includes(q));
-    });
-
-    if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px; color: var(--text-dim);">No activity records for this website yet.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = filtered.map((l) => `
-      <tr>
-        <td>${formatDate(l.ts)}</td>
-        <td><strong>${escapeHtml(l.actor)}</strong></td>
-        <td><code>${escapeHtml(l.action)}</code></td>
-        <td>${escapeHtml(l.target || '--')}</td>
-        <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(l.detail || '')}</td>
-        <td><span style="font-size:11px; color:var(--text-dim);">${escapeHtml(l.ip || '--')}</span></td>
-      </tr>
-    `).join('');
+    const query = activeProject ? `?projectId=${activeProject.id}&limit=500` : '?limit=500';
+    const logs = await api(`/api/audit${query}`);
+    state.auditLogs = Array.isArray(logs) ? logs : [];
+    renderFilteredAuditLogs();
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
-document.getElementById('audit-search-input')?.addEventListener('input', loadAuditView);
+window.loadAuditView = loadAuditView;
+
+function renderFilteredAuditLogs() {
+  const tbody = document.getElementById('audit-table-body');
+  if (!tbody) return;
+  const logs = state.auditLogs || [];
+  const cat = (document.getElementById('audit-category-filter')?.value || '').toLowerCase();
+  const q = (document.getElementById('audit-search-input')?.value || '').toLowerCase();
+
+  const filtered = logs.filter((l) => {
+    const action = (l.action || '').toLowerCase();
+    if (cat && !action.startsWith(cat)) return false;
+    if (!q) return true;
+    const hay = `${l.actor || ''} ${l.action || ''} ${l.target || ''} ${l.detail || ''} ${l.ip || ''}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 28px; color: var(--text-dim);">No activity records match the current filter.</td></tr>';
+    const bar = document.getElementById('audit-pagination');
+    if (bar) bar.innerHTML = '';
+    return;
+  }
+
+  paginateAndRender(filtered, 'audit', 'audit-pagination', (slice) => {
+    tbody.innerHTML = slice.map((l) => {
+      const actor = l.actor || 'system';
+      const initials = actor.slice(0, 2).toUpperCase();
+      const meta = AUDIT_ACTION_META[l.action] || { label: l.action, cls: 'badge-neutral' };
+      const proj = l.projectId ? state.projects.find((p) => p.id === l.projectId) : null;
+      const targetHtml = proj
+        ? `<a href="javascript:void(0)" class="domain-badge" onclick="openWebsiteWorkspace(${proj.id}, 'audit')">${escapeHtml(proj.name)}</a>`
+        : `<span style="color:var(--text-main); font-weight:500;">${escapeHtml(l.target || '--')}</span>`;
+
+      return `
+        <tr>
+          <td style="white-space: nowrap;">
+            <div style="font-size: 12.5px; color: var(--text-main); font-weight: 500;">${formatRelativeTime(l.ts)}</div>
+            <div style="font-size: 11px; color: var(--text-dim);">${formatDate(l.ts)}</div>
+          </td>
+          <td>
+            <span class="audit-actor-pill">
+              <span class="audit-actor-dot">${escapeHtml(initials)}</span>
+              <span>${escapeHtml(actor)}</span>
+            </span>
+          </td>
+          <td>
+            <span class="badge ${meta.cls}">${escapeHtml(meta.label)}</span>
+            <div style="font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px;">${escapeHtml(l.action)}</div>
+          </td>
+          <td>${targetHtml}</td>
+          <td style="max-width: 340px; white-space: normal; line-height: 1.45; color: var(--text-muted); font-size: 12.5px;">
+            ${escapeHtml(l.detail || '--')}
+          </td>
+          <td><code style="font-size:11px; color:var(--text-dim);">${escapeHtml(l.ip || 'local')}</code></td>
+        </tr>
+      `;
+    }).join('');
+  });
+}
+
+document.getElementById('audit-search-input')?.addEventListener('input', () => {
+  state.pages.audit = 1;
+  renderFilteredAuditLogs();
+});
+document.getElementById('audit-category-filter')?.addEventListener('change', () => {
+  state.pages.audit = 1;
+  renderFilteredAuditLogs();
+});
 
 // ============================================================================
 // Caddy & Reverse Proxy Modal

@@ -230,6 +230,24 @@ impl Deployer {
             "UPDATE deployments SET status=?, stage=?, error=?, finished_at=? WHERE id=?",
             params![status, status, error, ts, dep_id],
         ).ok();
+
+        if let Ok((proj_id, kind, actor, sha, proj_name)) = conn.query_row(
+            "SELECT d.project_id, d.kind, d.actor, COALESCE(d.sha, ''), COALESCE(p.name, '')
+             FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?",
+            params![dep_id],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?)),
+        ) {
+            let short = if sha.len() >= 7 { &sha[..7] } else { &sha };
+            let action = format!("{}.{}", kind, status);
+            let detail = match error {
+                Some(err) => format!("Deployment #{} failed: {}", dep_id, err),
+                None => format!("Deployment #{} completed ({})", dep_id, if short.is_empty() { "live" } else { short }),
+            };
+            conn.execute(
+                "INSERT INTO audit(project_id, ts, actor, action, target, detail, ip) VALUES(?, ?, ?, ?, ?, ?, '127.0.0.1')",
+                params![proj_id, ts, actor, action, proj_name, detail],
+            ).ok();
+        }
     }
 
     pub async fn run_deploy(self: Arc<Self>, project_id: i64, dep_id: i64) {

@@ -388,6 +388,26 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
+    // Dynamically ensure audit table has project_id for per-website audit trails
+    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(audit)") {
+        let a_cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        if !a_cols.contains(&"project_id".to_string()) {
+            conn.execute_batch("ALTER TABLE audit ADD COLUMN project_id INTEGER;").ok();
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_audit_proj ON audit(project_id, id DESC);
+             UPDATE audit SET project_id = (
+                 SELECT p.id FROM projects p
+                 WHERE LOWER(p.name) = LOWER(audit.target) OR LOWER(p.slug) = LOWER(audit.target)
+                 LIMIT 1
+             ) WHERE project_id IS NULL AND target IS NOT NULL;",
+        )
+        .ok();
+    }
+
     // Auto-seed github_token into SQLite settings if not yet configured
     let existing_token: String = conn
         .query_row(

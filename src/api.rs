@@ -167,10 +167,21 @@ fn verify_power(
 }
 
 fn log_audit(state: &AppState, actor: &str, action: &str, target: Option<&str>, detail: Option<&str>) {
+    log_audit_project(state, None, actor, action, target, detail);
+}
+
+fn log_audit_project(
+    state: &AppState,
+    project_id: Option<i64>,
+    actor: &str,
+    action: &str,
+    target: Option<&str>,
+    detail: Option<&str>,
+) {
     let conn = state.db.lock().unwrap();
     conn.execute(
-        "INSERT INTO audit(ts, actor, action, target, detail, ip) VALUES(?, ?, ?, ?, ?, '127.0.0.1')",
-        rusqlite::params![now(), actor, action, target, detail],
+        "INSERT INTO audit(project_id, ts, actor, action, target, detail, ip) VALUES(?, ?, ?, ?, ?, ?, '127.0.0.1')",
+        rusqlite::params![project_id, now(), actor, action, target, detail],
     )
     .ok();
 }
@@ -383,7 +394,14 @@ async fn create_project_handler(
         .create(&p)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    log_audit(&state, &actor.username, "project.create", Some(&p.name), Some(&p.repo_url));
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "website.create",
+        Some(&p.name),
+        Some(&format!("Created website '{}' (Port {}, Repo: {})", p.name, p.port.unwrap_or(3000), p.repo_url)),
+    );
 
     let created = state
         .projects
@@ -406,7 +424,14 @@ async fn update_project_handler(
         .update(id, &p)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    log_audit(&state, &actor.username, "project.update", Some(&p.name), None);
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "website.update",
+        Some(&p.name),
+        Some(&format!("Updated website settings (Port {}, Branch '{}')", p.port.unwrap_or(3000), p.branch)),
+    );
 
     let updated = state
         .projects
@@ -424,7 +449,14 @@ async fn delete_project_handler(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
     if let Ok(Some(p)) = state.projects.get(id) {
-        log_audit(&state, &actor.username, "project.delete", Some(&p.name), None);
+        log_audit_project(
+            &state,
+            Some(id),
+            &actor.username,
+            "website.delete",
+            Some(&p.name),
+            Some(&format!("Deleted website '{}' ({})", p.name, p.slug)),
+        );
         let _ = state.runtime.stop_project(&p).await;
     }
     state
@@ -458,11 +490,20 @@ async fn set_env_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<SetEnvPayload>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let _actor = verify_power(&state, &headers, "env", Some(id))?;
+    let actor = verify_power(&state, &headers, "env", Some(id))?;
+    let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
     state
         .projects
         .set_env_var(id, &payload.key, &payload.value, payload.is_secret.unwrap_or(false))
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "env.set",
+        Some(&p_name),
+        Some(&format!("Saved environment variable '{}'", payload.key)),
+    );
     Ok(StatusCode::OK)
 }
 
@@ -484,7 +525,8 @@ async fn bulk_set_env_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<BulkEnvPayload>,
 ) -> Result<Json<BulkEnvResponse>, (StatusCode, String)> {
-    let _actor = verify_power(&state, &headers, "env", Some(id))?;
+    let actor = verify_power(&state, &headers, "env", Some(id))?;
+    let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
     let count = state
         .projects
         .set_bulk_env(
@@ -494,6 +536,14 @@ async fn bulk_set_env_handler(
             payload.replace_all.unwrap_or(false),
         )
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "env.bulk_import",
+        Some(&p_name),
+        Some(&format!("Bulk imported {} environment variables", count)),
+    );
     Ok(Json(BulkEnvResponse { count }))
 }
 
@@ -532,8 +582,17 @@ async fn reveal_env_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<RevealEnvPayload>,
 ) -> Result<Json<RevealEnvResponse>, StatusCode> {
-    let _actor = verify_power(&state, &headers, "env", Some(id)).map_err(|(c, _)| c)?;
+    let actor = verify_power(&state, &headers, "env", Some(id)).map_err(|(c, _)| c)?;
+    let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
     let val = state.projects.reveal_env_var(id, &payload.key).ok_or(StatusCode::NOT_FOUND)?;
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "env.reveal",
+        Some(&p_name),
+        Some(&format!("Revealed secret variable '{}'", payload.key)),
+    );
     Ok(Json(RevealEnvResponse {
         key: payload.key,
         value: val,
@@ -545,8 +604,17 @@ async fn delete_env_handler(
     headers: HeaderMap,
     AxPath((id, key)): AxPath<(i64, String)>,
 ) -> Result<StatusCode, StatusCode> {
-    let _actor = verify_power(&state, &headers, "env", Some(id)).map_err(|(c, _)| c)?;
+    let actor = verify_power(&state, &headers, "env", Some(id)).map_err(|(c, _)| c)?;
+    let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
     state.projects.delete_env_var(id, &key).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "env.delete",
+        Some(&p_name),
+        Some(&format!("Deleted environment variable '{}'", key)),
+    );
     Ok(StatusCode::OK)
 }
 
@@ -572,6 +640,14 @@ async fn deploy_project_handler(
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
     let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "manual");
+    log_audit_project(
+        &state,
+        Some(p.id),
+        &actor.username,
+        "deploy.trigger",
+        Some(&p.name),
+        Some(&format!("Triggered deployment #{} on branch '{}'", dep_id, p.branch)),
+    );
     let deployer = state.deployer.clone();
 
     // Async task executes deployment in background
@@ -605,6 +681,14 @@ async fn rollback_project_handler(
     let dep_id = state.deployer.create_deployment(&p, "rollback", &actor.username, "manual");
     let deployer = state.deployer.clone();
     let target_rel = payload.release_id;
+    log_audit_project(
+        &state,
+        Some(p.id),
+        &actor.username,
+        "rollback.trigger",
+        Some(&p.name),
+        Some(&format!("Triggered rollback #{} to Release #{}", dep_id, target_rel)),
+    );
 
     tokio::spawn(async move {
         deployer.run_rollback(p.id, dep_id, target_rel).await;
@@ -627,10 +711,20 @@ async fn start_project_handler(
 
     let env = state.projects.get_env_map(id);
     match state.runtime.start_project(&p, env, None).await {
-        Ok(pid) => Ok(Json(serde_json::json!({
-            "started": true,
-            "pid": pid
-        }))),
+        Ok(pid) => {
+            log_audit_project(
+                &state,
+                Some(p.id),
+                &actor.username,
+                "container.start",
+                Some(&p.name),
+                Some(&format!("Started website container (PID {}, Port {})", pid, p.port.unwrap_or(3000))),
+            );
+            Ok(Json(serde_json::json!({
+                "started": true,
+                "pid": pid
+            })))
+        }
         Err(e) if e == "NOT_DEPLOYED_YET" => {
             // Website has never been deployed yet — automatically trigger initial deployment!
             state.logs.add(
@@ -641,6 +735,14 @@ async fn start_project_handler(
                 &format!("Website '{}' has no release built yet — triggering initial deployment automatically", p.name),
             );
             let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "auto-initial-start");
+            log_audit_project(
+                &state,
+                Some(p.id),
+                &actor.username,
+                "deploy.auto_initial",
+                Some(&p.name),
+                Some(&format!("Started initial deployment #{}", dep_id)),
+            );
             let deployer = state.deployer.clone();
             tokio::spawn(async move {
                 deployer.run_deploy(p.id, dep_id).await;
@@ -660,7 +762,7 @@ async fn stop_project_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let _actor = verify_power(&state, &headers, "process", Some(id))?;
+    let actor = verify_power(&state, &headers, "process", Some(id))?;
     let p = state
         .projects
         .get(id)
@@ -672,6 +774,15 @@ async fn stop_project_handler(
         .stop_project(&p)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    log_audit_project(
+        &state,
+        Some(p.id),
+        &actor.username,
+        "container.stop",
+        Some(&p.name),
+        Some(&format!("Stopped website container and freed port {}", p.port.unwrap_or(3000))),
+    );
 
     Ok(Json(serde_json::json!({ "stopped": true })))
 }
@@ -691,7 +802,17 @@ async fn restart_project_handler(
     let _ = state.runtime.stop_project(&p).await;
     let env = state.projects.get_env_map(id);
     match state.runtime.start_project(&p, env, None).await {
-        Ok(pid) => Ok(Json(serde_json::json!({ "started": true, "pid": pid }))),
+        Ok(pid) => {
+            log_audit_project(
+                &state,
+                Some(p.id),
+                &actor.username,
+                "container.restart",
+                Some(&p.name),
+                Some(&format!("Restarted website container (PID {}, Port {})", pid, p.port.unwrap_or(3000))),
+            );
+            Ok(Json(serde_json::json!({ "started": true, "pid": pid })))
+        }
         Err(e) if e == "NOT_DEPLOYED_YET" => {
             let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "auto-initial-restart");
             let deployer = state.deployer.clone();
@@ -733,8 +854,10 @@ async fn get_caddy_handler(
 
 async fn apply_caddy_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "domains", Some(id))?;
     let p = state
         .projects
         .get(id)
@@ -749,6 +872,14 @@ async fn apply_caddy_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let _ = state.caddy.reload();
+    log_audit_project(
+        &state,
+        Some(p.id),
+        &actor.username,
+        "domains.caddy_apply",
+        Some(&p.name),
+        Some("Applied Caddy reverse proxy & SSL configuration"),
+    );
 
     Ok(StatusCode::OK)
 }
@@ -796,7 +927,7 @@ async fn list_deployments_handler(
     State(state): State<AppState>,
     Query(q): Query<DeploymentQuery>,
 ) -> Result<Json<Vec<crate::deployer::Deployment>>, StatusCode> {
-    let list = state.deployer.list_deployments(q.project, q.limit.unwrap_or(50));
+    let list = state.deployer.list_deployments(q.project, q.limit.unwrap_or(200));
     Ok(Json(list))
 }
 
@@ -1137,6 +1268,8 @@ async fn monitor_handler(
 #[derive(Serialize)]
 struct AuditItem {
     id: i64,
+    #[serde(rename = "projectId")]
+    project_id: Option<i64>,
     ts: i64,
     actor: String,
     action: String,
@@ -1145,30 +1278,92 @@ struct AuditItem {
     ip: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct AuditQuery {
+    #[serde(rename = "projectId")]
+    project_id: Option<i64>,
+    limit: Option<usize>,
+}
+
 async fn audit_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AuditQuery>,
 ) -> Result<Json<Vec<AuditItem>>, StatusCode> {
+    let u = current_user(&state, &headers);
+    let max_limit = q.limit.unwrap_or(500).min(1000);
     let conn = state.db.lock().unwrap();
-    let mut stmt = conn
-        .prepare("SELECT id, ts, actor, action, target, detail, ip FROM audit ORDER BY id DESC LIMIT 100")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let rows = stmt.query_map([], |r| {
-        Ok(AuditItem {
-            id: r.get(0)?,
-            ts: r.get(1)?,
-            actor: r.get(2)?,
-            action: r.get(3)?,
-            target: r.get(4)?,
-            detail: r.get(5)?,
-            ip: r.get(6)?,
-        })
-    }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut list = Vec::new();
-    for r in rows {
-        if let Ok(item) = r {
-            list.push(item);
+    if let Some(pid) = q.project_id {
+        if let Some(ref user) = u {
+            if !user.can_access_project(pid) {
+                return Err(StatusCode::FORBIDDEN);
+            }
+        }
+        let p_info: Option<(String, String)> = conn
+            .query_row("SELECT name, slug FROM projects WHERE id = ?", rusqlite::params![pid], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .ok();
+        let (p_name, p_slug) = p_info.unwrap_or_default();
+
+        let sql = format!(
+            "SELECT id, project_id, ts, actor, action, target, detail, ip
+             FROM audit
+             WHERE project_id = ?1
+                OR LOWER(COALESCE(target, '')) = LOWER(?2)
+                OR LOWER(COALESCE(target, '')) = LOWER(?3)
+             ORDER BY id DESC LIMIT {}",
+            max_limit
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = stmt
+            .query_map(rusqlite::params![pid, p_name, p_slug], |r| {
+                Ok(AuditItem {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    ts: r.get(2)?,
+                    actor: r.get(3)?,
+                    action: r.get(4)?,
+                    target: r.get(5)?,
+                    detail: r.get(6)?,
+                    ip: r.get(7)?,
+                })
+            })
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        for r in rows.flatten() {
+            list.push(r);
+        }
+    } else {
+        let sql = format!(
+            "SELECT id, project_id, ts, actor, action, target, detail, ip FROM audit ORDER BY id DESC LIMIT {}",
+            max_limit
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(AuditItem {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    ts: r.get(2)?,
+                    actor: r.get(3)?,
+                    action: r.get(4)?,
+                    target: r.get(5)?,
+                    detail: r.get(6)?,
+                ip: r.get(7)?,
+                })
+            })
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        for r in rows.flatten() {
+            if let Some(ref user) = u {
+                if let Some(pid) = r.project_id {
+                    if !user.can_access_project(pid) {
+                        continue;
+                    }
+                }
+            }
+            list.push(r);
         }
     }
     Ok(Json(list))
@@ -1489,7 +1684,7 @@ async fn project_commits_handler(
         if !repo_dir_clone.exists() {
             let _ = crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch);
         }
-        crate::git::Git::list_commits(&repo_dir_clone, &branch, 30)
+        crate::git::Git::list_commits(&repo_dir_clone, &branch, 200)
     })
     .await
     .unwrap_or_default();
@@ -1555,8 +1750,12 @@ struct FetchGitResponse {
 
 async fn project_fetch_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<FetchGitResponse>, (StatusCode, String)> {
+    let actor = current_user(&state, &headers)
+        .map(|u| u.username)
+        .unwrap_or_else(|| "system".to_string());
     let p = state
         .projects
         .get(id)
@@ -1584,6 +1783,15 @@ async fn project_fetch_handler(
         )
         .ok();
     }
+
+    log_audit_project(
+        &state,
+        Some(p.id),
+        &actor,
+        "git.fetch",
+        Some(&p.name),
+        Some(&format!("Fetched latest commits on branch '{}' -> {}", p.branch, &sha[..7.min(sha.len())])),
+    );
 
     state.logs.add(
         Some(p.id),
@@ -1997,7 +2205,7 @@ async fn create_backup_handler(
         conn.last_insert_rowid()
     };
 
-    log_audit(&state, &actor.username, "backup.create", Some(&p.name), Some(&note));
+    log_audit_project(&state, Some(id), &actor.username, "backup.create", Some(&p.name), Some(&note));
     state.logs.add(
         Some(id),
         None,
@@ -2068,7 +2276,7 @@ async fn restore_backup_handler(
             let env = state.projects.get_env_map(id);
             let _ = state.runtime.start_project(&p, env, None).await;
         }
-        log_audit(&state, &actor.username, "backup.restore", Some(&p.name), Some(&note));
+        log_audit_project(&state, Some(id), &actor.username, "backup.restore", Some(&p.name), Some(&note));
         state.logs.add(
             Some(id),
             None,
@@ -2120,7 +2328,15 @@ async fn delete_backup_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
-    log_audit(&state, &actor.username, "backup.delete", Some(&format!("backup #{}", backup_id)), None);
+    let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "backup.delete",
+        Some(&p_name),
+        Some(&format!("Deleted backup #{}", backup_id)),
+    );
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
