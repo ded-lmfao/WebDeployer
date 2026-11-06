@@ -169,9 +169,70 @@ const PRESETS = {
 };
 
 // ============================================================================
-// API Client
+// High-Speed Multi-Tier Client Cache (RAM + sessionStorage + Stale-While-Revalidate)
 // ============================================================================
-async function api(path, options = {}) {
+const clientCache = new Map();
+const inflightGets = new Map();
+const SESSION_CACHE_KEY = 'webdep_fast_cache_v1';
+
+// Hydrate warm cache from sessionStorage on startup
+try {
+  const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    if (Array.isArray(parsed)) {
+      for (const [k, v] of parsed) {
+        if (v && typeof v.ts === 'number' && now - v.ts < 60000) {
+          clientCache.set(k, v);
+        }
+      }
+    }
+  }
+} catch (_) {}
+
+function persistCacheToSession() {
+  try {
+    const entries = Array.from(clientCache.entries()).slice(-60);
+    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(entries));
+  } catch (_) {}
+}
+
+function getCacheTtlMs(path) {
+  if (path.startsWith('/api/logs')) return 0; // Live logs use SSE stream
+  if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 2500;
+  if (path.startsWith('/api/deployments')) return 4000;
+  if (path.startsWith('/api/audit')) return 8000;
+  if (path.includes('/commits')) return 45000;
+  if (path.includes('/releases') || path.includes('/backups') || path.includes('/env')) return 20000;
+  if (path.includes('/caddy') || path.includes('/nginx')) return 60000;
+  if (path.startsWith('/api/projects') || path.startsWith('/api/settings') || path.startsWith('/api/users')) return 12000;
+  if (path.startsWith('/api/auth/me')) return 15000;
+  return 8000;
+}
+
+function hasCachedApi(path) {
+  return clientCache.has(path);
+}
+window.hasCachedApi = hasCachedApi;
+
+function invalidateClientCache(prefix = '') {
+  if (!prefix) {
+    clientCache.clear();
+  } else {
+    for (const k of clientCache.keys()) {
+      if (k.startsWith(prefix) || k.includes(prefix)) {
+        clientCache.delete(k);
+      }
+    }
+  }
+  try {
+    sessionStorage.removeItem(SESSION_CACHE_KEY);
+  } catch (_) {}
+}
+window.invalidateClientCache = invalidateClientCache;
+
+async function networkFetch(path, options = {}) {
   const headers = {
     'Accept': 'application/json',
     ...(options.headers || {}),
@@ -179,27 +240,29 @@ async function api(path, options = {}) {
   if (state.csrf && options.method && options.method !== 'GET') {
     headers['X-CSRF-Token'] = state.csrf;
   }
-  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+  const fetchOpts = { ...options };
+  if (fetchOpts.body && typeof fetchOpts.body === 'object' && !(fetchOpts.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(options.body);
+    fetchOpts.body = JSON.stringify(fetchOpts.body);
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 15000);
+  const timeoutId = setTimeout(() => controller.abort(), fetchOpts.timeoutMs || 15000);
 
   let res;
   try {
     res = await fetch(path, {
       credentials: 'same-origin',
       signal: controller.signal,
-      ...options,
+      ...fetchOpts,
       headers,
     });
   } finally {
     clearTimeout(timeoutId);
   }
-  
-  if (res.status === 401 && !path.startsWith('/api/auth/login')) {
+
+  if (res.status === 401 && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/2fa/verify-login')) {
+    invalidateClientCache();
     showLogin();
     throw new Error('Session expired. Please log in again.');
   }
@@ -219,6 +282,87 @@ async function api(path, options = {}) {
 
   return data;
 }
+
+async function api(path, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+
+  // Any mutation immediately invalidates client cache so subsequent reads are 100% fresh
+  if (method !== 'GET') {
+    const result = await networkFetch(path, options);
+    invalidateClientCache();
+    return result;
+  }
+
+  const ttl = options.noCache ? 0 : getCacheTtlMs(path);
+  const now = Date.now();
+
+  if (ttl > 0 && clientCache.has(path)) {
+    const entry = clientCache.get(path);
+    const age = now - entry.ts;
+    if (age <= ttl) {
+      // Fresh cache hit -> 0ms instant return
+      return entry.data;
+    }
+    if (age <= ttl * 6) {
+      // Stale-While-Revalidate -> return cached data in 0ms and refresh silently in background
+      if (!inflightGets.has(path)) {
+        const bgPromise = networkFetch(path, options)
+          .then((fresh) => {
+            clientCache.set(path, { data: fresh, ts: Date.now(), ttl });
+            persistCacheToSession();
+            return fresh;
+          })
+          .catch(() => {})
+          .finally(() => inflightGets.delete(path));
+        inflightGets.set(path, bgPromise);
+      }
+      return entry.data;
+    }
+  }
+
+  // Deduplicate concurrent identical GET requests
+  if (inflightGets.has(path)) {
+    return inflightGets.get(path);
+  }
+
+  const reqPromise = networkFetch(path, options)
+    .then((data) => {
+      if (ttl > 0) {
+        clientCache.set(path, { data, ts: Date.now(), ttl });
+        persistCacheToSession();
+      }
+      return data;
+    })
+    .finally(() => {
+      inflightGets.delete(path);
+    });
+
+  inflightGets.set(path, reqPromise);
+  return reqPromise;
+}
+
+function prefetchWebsiteWorkspace(projectId) {
+  const pid = Number(projectId);
+  if (!pid) return;
+  const endpoints = [
+    `/api/deployments?project=${pid}&limit=200`,
+    `/api/projects/${pid}/commits`,
+    `/api/projects/${pid}/releases`,
+    `/api/audit?projectId=${pid}&limit=500`,
+  ];
+  if (hasPower('env')) endpoints.push(`/api/projects/${pid}/env`);
+  if (hasPower('backups')) endpoints.push(`/api/projects/${pid}/backups`);
+
+  // Run non-blocking background warm-up
+  setTimeout(() => {
+    for (const url of endpoints) {
+      if (!clientCache.has(url)) {
+        api(url).catch(() => {});
+      }
+    }
+  }, 10);
+}
+window.prefetchWebsiteWorkspace = prefetchWebsiteWorkspace;
 
 // ============================================================================
 // Toasts
@@ -246,6 +390,7 @@ async function initAuth() {
     const me = await api('/api/auth/me');
     state.user = me.user;
     state.csrf = me.csrf;
+    state.activeSessions = me.activeSessions || 1;
     onAuthenticated();
   } catch {
     showLogin();
@@ -253,8 +398,13 @@ async function initAuth() {
 }
 
 function showLogin() {
+  state.pendingMfaToken = null;
   document.getElementById('login-view').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
+  const lf = document.getElementById('login-form');
+  const mf = document.getElementById('login-2fa-form');
+  if (lf) lf.style.display = 'block';
+  if (mf) mf.style.display = 'none';
 }
 
 function hasPower(power) {
@@ -281,7 +431,6 @@ function onAuthenticated() {
     env: 'env',
     domains: 'domains',
     backups: 'backups',
-    settings: 'settings_manage',
   };
   Object.entries(navPowerMap).forEach(([view, pwr]) => {
     const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
@@ -312,6 +461,7 @@ const WEBSITE_WORKSPACE_TABS = new Set([
 
 function openWebsiteWorkspace(projectId, tab = 'deployments') {
   state.selectedProjectId = Number(projectId);
+  prefetchWebsiteWorkspace(state.selectedProjectId);
   navigateTo(tab, state.selectedProjectId);
 }
 window.openWebsiteWorkspace = openWebsiteWorkspace;
@@ -1038,9 +1188,12 @@ async function loadGithubView() {
 
   // Load Commits
   const tbody = document.getElementById('github-commits-table');
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">Loading commits from mirror...</td></tr>';
+  const commitsPath = `/api/projects/${p.id}/commits`;
+  if (!hasCachedApi(commitsPath)) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">Loading commits from mirror...</td></tr>';
+  }
   try {
-    const commits = await api(`/api/projects/${p.id}/commits`);
+    const commits = await api(commitsPath);
     if (!commits.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No commits found. Click "Fetch Updates" above to sync with GitHub.</td></tr>';
       const bar = document.getElementById('github-commits-pagination');
@@ -2059,9 +2212,46 @@ async function loadMonitorView() {
 }
 
 // ============================================================================
-// View 11: Settings
+// View 11: Settings & Security
 // ============================================================================
+function renderSecurityStatusSummary() {
+  if (!state.user) return;
+  const is2fa = Boolean(state.user.totpEnabled);
+  const badge = document.getElementById('settings-2fa-status-badge');
+  if (badge) {
+    badge.className = `badge ${is2fa ? 'badge-success' : 'badge-warning'}`;
+    badge.textContent = is2fa ? '2FA ENABLED' : '2FA NOT ENABLED';
+  }
+  const unameEl = document.getElementById('settings-sec-username');
+  if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main Admin' : state.user.role})`;
+
+  const tfaText = document.getElementById('settings-sec-2fa-text');
+  if (tfaText) {
+    tfaText.textContent = is2fa ? 'Protected (TOTP Active)' : 'Not Enabled';
+    tfaText.style.color = is2fa ? 'var(--success-light)' : 'var(--warning-light)';
+  }
+
+  const sessText = document.getElementById('settings-sec-sessions');
+  const count = state.activeSessions || 1;
+  if (sessText) sessText.textContent = `${count} active session${count === 1 ? '' : 's'}`;
+
+  const modalSess = document.getElementById('sec-modal-sessions-summary');
+  if (modalSess) modalSess.textContent = `Your account currently has ${count} active authenticated session${count === 1 ? '' : 's'}.`;
+
+  const open2faBtn = document.getElementById('settings-open-2fa-btn');
+  if (open2faBtn) open2faBtn.textContent = is2fa ? 'Manage 2FA' : 'Enable 2FA';
+}
+
 async function loadSettingsView() {
+  renderSecurityStatusSummary();
+
+  const canManagePlatform = hasPower('settings_manage');
+  const globalCard = document.getElementById('settings-global-config-card');
+  const usersCard = document.getElementById('settings-users-card');
+  if (globalCard) globalCard.style.display = canManagePlatform ? '' : 'none';
+  if (usersCard) usersCard.style.display = canManagePlatform ? '' : 'none';
+  if (!canManagePlatform) return;
+
   try {
     const s = await api('/api/settings');
     document.getElementById('setting-min-free-mb').value = s.min_free_mb || 500;
@@ -2086,8 +2276,7 @@ async function loadSettingsView() {
     }
 
     // Users list
-    let cachedUsers = [];
-    if (state.user.role === 'admin' || state.user.isMainAdmin || (state.user.permissions && state.user.permissions.includes('settings_manage'))) {
+    if (canManagePlatform) {
       const users = await api('/api/users');
       state.usersList = users;
       const tbody = document.getElementById('users-table-body');
@@ -2122,6 +2311,10 @@ async function loadSettingsView() {
             ? perms.map((p) => `<span class="badge badge-neutral" style="margin:2px; font-size:10px;">${escapeHtml(powerLabels[p] || p)}</span>`).join(' ')
             : '<span style="color:var(--text-dim); font-size:12px;">Read-Only</span>';
 
+          const tfaBadge = u.totpEnabled
+            ? '<span class="badge badge-success">2FA ON</span>'
+            : '<span class="badge badge-neutral">OFF</span>';
+
           return `
             <tr>
               <td>
@@ -2130,8 +2323,9 @@ async function loadSettingsView() {
                 ${u.id === state.user.id ? '<span style="color:var(--text-dim); font-size:11px; margin-left:4px;">(You)</span>' : ''}
               </td>
               <td><span class="badge badge-neutral">${escapeHtml((u.role || 'operator').toUpperCase())}</span></td>
+              <td>${tfaBadge}</td>
               <td>${projHtml}</td>
-              <td style="max-width: 280px;">${permsHtml}</td>
+              <td style="max-width: 260px;">${permsHtml}</td>
               <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
               <td>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -2140,6 +2334,9 @@ async function loadSettingsView() {
                     <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
                       ${u.disabled ? 'Enable' : 'Disable'}
                     </button>
+                    ${u.totpEnabled && state.user.isMainAdmin ? `
+                      <button class="btn btn-secondary btn-sm" onclick="adminResetUser2fa(${u.id}, '${escapeHtml(u.username)}')">Reset 2FA</button>
+                    ` : ''}
                     ${u.id !== state.user.id ? `
                       <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
                     ` : ''}
@@ -2666,7 +2863,7 @@ document.getElementById('overview-refresh-btn')?.addEventListener('click', loadO
 document.getElementById('global-add-website-btn')?.addEventListener('click', openAddWebsiteModal);
 document.getElementById('add-website-btn')?.addEventListener('click', openAddWebsiteModal);
 
-// Login Form
+// Login Form & Two-Factor Challenge
 document.getElementById('login-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const username = document.getElementById('login-username').value.trim();
@@ -2678,8 +2875,24 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
 
   try {
     const res = await api('/api/auth/login', { method: 'POST', body: { username, password } });
+    if (res.requires2fa && res.mfaToken) {
+      state.pendingMfaToken = res.mfaToken;
+      document.getElementById('login-form').style.display = 'none';
+      document.getElementById('login-2fa-form').style.display = 'block';
+      const unameLabel = document.getElementById('login-2fa-username');
+      if (unameLabel) unameLabel.textContent = res.username || username;
+      const codeInput = document.getElementById('login-2fa-code');
+      if (codeInput) {
+        codeInput.value = '';
+        setTimeout(() => codeInput.focus(), 50);
+      }
+      toast('Enter your 6-digit authenticator code to complete sign-in.', 'info');
+      return;
+    }
+
     state.user = res.user;
     state.csrf = res.csrf;
+    state.activeSessions = res.activeSessions || 1;
     onAuthenticated();
   } catch (err) {
     toast(err.message, 'error');
@@ -2687,6 +2900,40 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     btn.disabled = false;
     btn.textContent = 'Sign In';
   }
+});
+
+document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = (document.getElementById('login-2fa-code')?.value || '').trim();
+  const btn = document.getElementById('login-2fa-btn');
+  if (!state.pendingMfaToken || !code) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Verifying 2FA...';
+
+  try {
+    const res = await api('/api/auth/2fa/verify-login', {
+      method: 'POST',
+      body: { mfaToken: state.pendingMfaToken, code },
+    });
+    state.pendingMfaToken = null;
+    state.user = res.user;
+    state.csrf = res.csrf;
+    state.activeSessions = res.activeSessions || 1;
+    onAuthenticated();
+    toast('Two-Factor Authentication verified!', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Verify & Sign In';
+  }
+});
+
+document.getElementById('login-2fa-back-btn')?.addEventListener('click', () => {
+  state.pendingMfaToken = null;
+  document.getElementById('login-2fa-form').style.display = 'none';
+  document.getElementById('login-form').style.display = 'block';
 });
 
 // Logout
@@ -2897,10 +3144,100 @@ function formatDuration(sec) {
   return `${m}m ${s % 60}s`;
 }
 
-// Change Password modal bindings
-document.getElementById('user-profile-snippet')?.addEventListener('click', () => {
+// ============================================================================
+// Account Security Modal (Password, TOTP 2FA & Active Sessions)
+// ============================================================================
+function openSecurityModal(tab = 'password') {
   document.getElementById('change-password-form')?.reset();
+  const pwdBar = document.getElementById('pwd-strength-bar');
+  const pwdLbl = document.getElementById('pwd-strength-label');
+  if (pwdBar) pwdBar.style.width = '0%';
+  if (pwdLbl) pwdLbl.textContent = '';
+
+  const is2fa = Boolean(state.user?.totpEnabled);
+  const pwd2faGrp = document.getElementById('pwd-2fa-group');
+  if (pwd2faGrp) pwd2faGrp.style.display = is2fa ? 'block' : 'none';
+
+  const disBox = document.getElementById('sec-2fa-disabled-box');
+  const enBox = document.getElementById('sec-2fa-enabled-box');
+  if (disBox) disBox.style.display = is2fa ? 'none' : 'block';
+  if (enBox) enBox.style.display = is2fa ? 'block' : 'none';
+
+  document.getElementById('sec-2fa-step1-password')?.style && (document.getElementById('sec-2fa-step1-password').style.display = 'block');
+  document.getElementById('sec-2fa-step2-verify')?.style && (document.getElementById('sec-2fa-step2-verify').style.display = 'none');
+  document.getElementById('sec-2fa-step3-recovery')?.style && (document.getElementById('sec-2fa-step3-recovery').style.display = 'none');
+  const setupPwd = document.getElementById('tfa-setup-password');
+  if (setupPwd) setupPwd.value = '';
+  const disPwd = document.getElementById('tfa-disable-password');
+  if (disPwd) disPwd.value = '';
+  const disCode = document.getElementById('tfa-disable-code');
+  if (disCode) disCode.value = '';
+
+  renderSecurityStatusSummary();
+  switchSecurityTab(tab);
   openModal('modal-change-password');
+}
+window.openSecurityModal = openSecurityModal;
+
+function switchSecurityTab(tab) {
+  ['password', '2fa', 'sessions'].forEach((t) => {
+    const btn = document.getElementById(`sec-tab-btn-${t}`);
+    const pane = document.getElementById(`sec-pane-${t}`);
+    if (btn) btn.classList.toggle('active', t === tab);
+    if (pane) pane.style.display = t === tab ? 'block' : 'none';
+  });
+}
+window.switchSecurityTab = switchSecurityTab;
+
+function togglePasswordField(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (!el || !btn) return;
+  if (el.type === 'password') {
+    el.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    el.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+window.togglePasswordField = togglePasswordField;
+
+document.getElementById('pwd-next')?.addEventListener('input', (e) => {
+  const val = e.target.value || '';
+  const bar = document.getElementById('pwd-strength-bar');
+  const lbl = document.getElementById('pwd-strength-label');
+  if (!bar || !lbl) return;
+
+  let score = 0;
+  if (val.length >= 8) score += 25;
+  if (val.length >= 12) score += 25;
+  if (/[A-Z]/.test(val) && /[a-z]/.test(val)) score += 25;
+  if (/[0-9]/.test(val) || /[^A-Za-z0-9]/.test(val)) score += 25;
+
+  bar.style.width = `${score}%`;
+  if (!val.length) {
+    lbl.textContent = '';
+  } else if (score <= 25) {
+    bar.className = 'progress-fill rose';
+    lbl.textContent = 'Weak';
+    lbl.style.color = 'var(--danger-light)';
+  } else if (score <= 50) {
+    bar.className = 'progress-fill amber';
+    lbl.textContent = 'Fair';
+    lbl.style.color = 'var(--warning-light)';
+  } else if (score <= 75) {
+    bar.className = 'progress-fill green';
+    lbl.textContent = 'Good';
+    lbl.style.color = 'var(--success-light)';
+  } else {
+    bar.className = 'progress-fill green';
+    lbl.textContent = 'Strong';
+    lbl.style.color = 'var(--success-light)';
+  }
+});
+
+document.getElementById('user-profile-snippet')?.addEventListener('click', () => {
+  openSecurityModal('password');
 });
 
 document.getElementById('save-change-password-btn')?.addEventListener('click', async (e) => {
@@ -2908,24 +3245,419 @@ document.getElementById('save-change-password-btn')?.addEventListener('click', a
   const current = document.getElementById('pwd-current').value;
   const next = document.getElementById('pwd-next').value;
   const confirm = document.getElementById('pwd-confirm').value;
+  const totpCode = document.getElementById('pwd-2fa-code')?.value || '';
+  const revokeOtherSessions = Boolean(document.getElementById('pwd-revoke-others')?.checked ?? true);
 
+  if (!current) {
+    toast('Please enter your current password.', 'warning');
+    return;
+  }
   if (next !== confirm) {
     toast('New passwords do not match.', 'warning');
     return;
   }
-  if (next.length < 10) {
-    toast('New password must be at least 10 characters.', 'warning');
+  if (next.length < 8) {
+    toast('New password must be at least 8 characters long.', 'warning');
     return;
   }
 
   try {
-    await api('/api/auth/password', { method: 'POST', body: { current, next } });
-    toast('Password changed successfully.', 'success');
+    const res = await api('/api/auth/password', {
+      method: 'POST',
+      body: { current, next, totpCode, revokeOtherSessions },
+    });
+    if (revokeOtherSessions) state.activeSessions = 1;
+    renderSecurityStatusSummary();
+    toast(
+      res.revokedSessions
+        ? `Password updated and ${res.revokedSessions} other session(s) signed out!`
+        : 'Password updated in SQLite!',
+      'success'
+    );
     closeModal('modal-change-password');
   } catch (err) {
     toast(`Failed to change password: ${err.message}`, 'error');
   }
 });
+
+async function start2faSetup() {
+  const password = document.getElementById('tfa-setup-password')?.value || '';
+  if (!password) {
+    toast('Please enter your current password to begin 2FA setup.', 'warning');
+    return;
+  }
+  try {
+    const res = await api('/api/auth/2fa/setup', { method: 'POST', body: { password } });
+    state.pending2faSecret = res.secret;
+    const formattedSecret = (res.secret || '').replace(/(.{4})/g, '$1 ').trim();
+    const secretEl = document.getElementById('tfa-secret-display');
+    if (secretEl) secretEl.value = formattedSecret;
+
+    const qrBox = document.getElementById('tfa-qr-container');
+    if (qrBox) {
+      qrBox.innerHTML = renderTotpQrSvg(res.otpauthUrl || res.secret);
+    }
+
+    document.getElementById('sec-2fa-step1-password').style.display = 'none';
+    document.getElementById('sec-2fa-step2-verify').style.display = 'block';
+    const verifyInput = document.getElementById('tfa-verify-code');
+    if (verifyInput) {
+      verifyInput.value = '';
+      setTimeout(() => verifyInput.focus(), 50);
+    }
+    toast('Scan the QR code or copy the setup key into your authenticator app.', 'info');
+  } catch (err) {
+    toast(`2FA setup failed: ${err.message}`, 'error');
+  }
+}
+window.start2faSetup = start2faSetup;
+
+function copy2faSecret() {
+  const raw = state.pending2faSecret || document.getElementById('tfa-secret-display')?.value || '';
+  navigator.clipboard.writeText(raw.replace(/\s+/g, '')).then(() => {
+    toast('2FA Base32 secret copied to clipboard!', 'success');
+  });
+}
+window.copy2faSecret = copy2faSecret;
+
+async function confirmEnable2fa() {
+  const code = (document.getElementById('tfa-verify-code')?.value || '').trim();
+  if (code.length < 6) {
+    toast('Please enter the 6-digit code from your authenticator app.', 'warning');
+    return;
+  }
+  try {
+    const res = await api('/api/auth/2fa/enable', { method: 'POST', body: { code } });
+    state.user.totpEnabled = true;
+    state.lastRecoveryCodes = res.backupCodes || [];
+    renderSecurityStatusSummary();
+
+    const grid = document.getElementById('tfa-recovery-codes-grid');
+    if (grid) {
+      grid.innerHTML = (res.backupCodes || []).map((c) => `<div style="padding:4px; background:rgba(255,255,255,0.04); border-radius:4px;">${escapeHtml(c)}</div>`).join('');
+    }
+    document.getElementById('sec-2fa-step2-verify').style.display = 'none';
+    document.getElementById('sec-2fa-step3-recovery').style.display = 'block';
+    toast('Two-Factor Authentication enabled!', 'success');
+  } catch (err) {
+    toast(`Verification failed: ${err.message}`, 'error');
+  }
+}
+window.confirmEnable2fa = confirmEnable2fa;
+
+function copyRecoveryCodes() {
+  const codes = (state.lastRecoveryCodes || []).join('\n');
+  if (!codes) return;
+  navigator.clipboard.writeText(codes).then(() => {
+    toast('Recovery codes copied to clipboard!', 'success');
+  });
+}
+window.copyRecoveryCodes = copyRecoveryCodes;
+
+async function disable2fa() {
+  const password = document.getElementById('tfa-disable-password')?.value || '';
+  const code = (document.getElementById('tfa-disable-code')?.value || '').trim();
+  if (!password || !code) {
+    toast('Please enter both your current password and a 6-digit 2FA or recovery code.', 'warning');
+    return;
+  }
+  try {
+    await api('/api/auth/2fa/disable', { method: 'POST', body: { password, code } });
+    state.user.totpEnabled = false;
+    renderSecurityStatusSummary();
+    toast('Two-Factor Authentication has been disabled.', 'info');
+    closeModal('modal-change-password');
+  } catch (err) {
+    toast(`Disable 2FA failed: ${err.message}`, 'error');
+  }
+}
+window.disable2fa = disable2fa;
+
+async function revokeOtherSessions() {
+  try {
+    const res = await api('/api/auth/sessions/revoke-others', { method: 'POST' });
+    state.activeSessions = 1;
+    renderSecurityStatusSummary();
+    toast(`Signed out ${res.revoked || 0} other active session(s)!`, 'success');
+  } catch (err) {
+    toast(`Failed to revoke sessions: ${err.message}`, 'error');
+  }
+}
+window.revokeOtherSessions = revokeOtherSessions;
+
+async function adminResetUser2fa(userId, username) {
+  const ok = await showConfirmDialog({
+    title: 'Reset User 2FA',
+    message: `Are you sure you want to disable and reset Two-Factor Authentication for "${username}"?`,
+    confirmText: 'Reset 2FA',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/users/${userId}/reset-2fa`, { method: 'POST' });
+    toast(`Reset 2FA for "${username}".`, 'success');
+    loadSettingsView();
+  } catch (err) {
+    toast(`Reset 2FA failed: ${err.message}`, 'error');
+  }
+}
+window.adminResetUser2fa = adminResetUser2fa;
+
+// ============================================================================
+// Pure-JS ISO/IEC 18004 QR Code SVG Generator (Offline, Zero External Calls)
+// ============================================================================
+function renderTotpQrSvg(text) {
+  try {
+    const matrix = generateQrMatrix(text);
+    const n = matrix.length;
+    const quiet = 2;
+    const total = n + quiet * 2;
+    let paths = '';
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (matrix[r][c]) {
+          paths += `M${c + quiet},${r + quiet}h1v1h-1z`;
+        }
+      }
+    }
+    return `<svg viewBox="0 0 ${total} ${total}" width="140" height="140" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="${total}" height="${total}" fill="#ffffff"/><path d="${paths}" fill="#0f172a"/></svg>`;
+  } catch {
+    return `<div style="font-size:11px; color:#0f172a; text-align:center; padding:8px;">Use Setup Key</div>`;
+  }
+}
+
+function generateQrMatrix(text) {
+  const dataBytes = new TextEncoder().encode(text);
+  // Version table for ECC Level L (versions 1..10): [totalCodewords, ecCodewordsPerBlock, numBlocks]
+  const V_TABLE = [
+    null,
+    [26, 7, 1],
+    [44, 10, 1],
+    [70, 15, 1],
+    [100, 20, 1],
+    [134, 26, 1],
+    [172, 18, 2],
+    [196, 20, 2],
+    [242, 24, 2],
+    [292, 30, 2],
+    [346, 18, 4],
+  ];
+  let ver = 1;
+  while (ver <= 10) {
+    const [totalCw, ecCw, blocks] = V_TABLE[ver];
+    const dataCw = totalCw - ecCw * blocks;
+    const headerBytes = ver < 10 ? 2 : 3;
+    if (dataBytes.length + headerBytes <= dataCw) break;
+    ver++;
+  }
+  if (ver > 10) ver = 10;
+  const [totalCw, ecCw, numBlocks] = V_TABLE[ver];
+  const totalDataCw = totalCw - ecCw * numBlocks;
+
+  // Build bit stream: Byte mode (0100), length (8 or 16 bits), payload, terminator
+  const bits = [];
+  const pushBits = (val, len) => {
+    for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1);
+  };
+  pushBits(0b0100, 4);
+  pushBits(dataBytes.length, ver < 10 ? 8 : 16);
+  for (const b of dataBytes) pushBits(b, 8);
+  const maxBits = totalDataCw * 8;
+  for (let i = 0; i < 4 && bits.length < maxBits; i++) bits.push(0);
+  while (bits.length % 8 !== 0) bits.push(0);
+
+  const dataCw = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let b = 0;
+    for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+    dataCw.push(b);
+  }
+  let padToggle = true;
+  while (dataCw.length < totalDataCw) {
+    dataCw.push(padToggle ? 0xec : 0x11);
+    padToggle = !padToggle;
+  }
+
+  // GF(256) Reed-Solomon
+  const gfExp = new Uint8Array(512);
+  const gfLog = new Uint8Array(256);
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    gfExp[i] = x;
+    gfLog[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+  }
+  for (let i = 255; i < 512; i++) gfExp[i] = gfExp[i - 255];
+  const gfMul = (a, b) => (a === 0 || b === 0 ? 0 : gfExp[gfLog[a] + gfLog[b]]);
+
+  let gen = [1];
+  for (let i = 0; i < ecCw; i++) {
+    const next = new Array(gen.length + 1).fill(0);
+    for (let j = 0; j < gen.length; j++) {
+      next[j] ^= gen[j];
+      next[j + 1] ^= gfMul(gen[j], gfExp[i]);
+    }
+    gen = next;
+  }
+
+  const rsEncode = (msg) => {
+    const rem = new Uint8Array(ecCw);
+    for (const b of msg) {
+      const factor = b ^ rem[0];
+      rem.copyWithin(0, 1);
+      rem[ecCw - 1] = 0;
+      for (let i = 0; i < ecCw; i++) rem[i] ^= gfMul(gen[i + 1], factor);
+    }
+    return Array.from(rem);
+  };
+
+  const dataBlocks = [];
+  const ecBlocks = [];
+  const baseBlockLen = Math.floor(totalDataCw / numBlocks);
+  const extraBlocks = totalDataCw % numBlocks;
+  let offset = 0;
+  for (let b = 0; b < numBlocks; b++) {
+    const len = baseBlockLen + (b >= numBlocks - extraBlocks ? 1 : 0);
+    const blk = dataCw.slice(offset, offset + len);
+    offset += len;
+    dataBlocks.push(blk);
+    ecBlocks.push(rsEncode(blk));
+  }
+
+  const finalCw = [];
+  const maxDataLen = baseBlockLen + (extraBlocks > 0 ? 1 : 0);
+  for (let i = 0; i < maxDataLen; i++) {
+    for (let b = 0; b < numBlocks; b++) {
+      if (i < dataBlocks[b].length) finalCw.push(dataBlocks[b][i]);
+    }
+  }
+  for (let i = 0; i < ecCw; i++) {
+    for (let b = 0; b < numBlocks; b++) finalCw.push(ecBlocks[b][i]);
+  }
+
+  const size = ver * 4 + 17;
+  const grid = Array.from({ length: size }, () => new Uint8Array(size));
+  const reserved = Array.from({ length: size }, () => new Uint8Array(size));
+
+  const setFinder = (r0, c0) => {
+    for (let r = -1; r <= 7; r++) {
+      for (let c = -1; c <= 7; c++) {
+        const rr = r0 + r;
+        const cc = c0 + c;
+        if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+        const on =
+          (r >= 0 && r <= 6 && (c === 0 || c === 6)) ||
+          (c >= 0 && c <= 6 && (r === 0 || r === 6)) ||
+          (r >= 2 && r <= 4 && c >= 2 && c <= 4);
+        grid[rr][cc] = on ? 1 : 0;
+        reserved[rr][cc] = 1;
+      }
+    }
+  };
+  setFinder(0, 0);
+  setFinder(0, size - 7);
+  setFinder(size - 7, 0);
+
+  for (let i = 8; i < size - 8; i++) {
+    grid[6][i] = i % 2 === 0 ? 1 : 0;
+    reserved[6][i] = 1;
+    grid[i][6] = i % 2 === 0 ? 1 : 0;
+    reserved[i][6] = 1;
+  }
+
+  const ALIGN_POS = [
+    [],
+    [],
+    [6, 18],
+    [6, 22],
+    [6, 26],
+    [6, 30],
+    [6, 34],
+    [6, 22, 38],
+    [6, 24, 42],
+    [6, 26, 46],
+    [6, 28, 50],
+  ];
+  const apos = ALIGN_POS[ver];
+  for (const ar of apos) {
+    for (const ac of apos) {
+      if (reserved[ar][ac]) continue;
+      for (let r = -2; r <= 2; r++) {
+        for (let c = -2; c <= 2; c++) {
+          const on = Math.max(Math.abs(r), Math.abs(c)) !== 1;
+          grid[ar + r][ac + c] = on ? 1 : 0;
+          reserved[ar + r][ac + c] = 1;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < 9; i++) {
+    if (i < size) {
+      reserved[8][i] = 1;
+      reserved[i][8] = 1;
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    reserved[8][size - 1 - i] = 1;
+    reserved[size - 1 - i][8] = 1;
+  }
+  grid[size - 8][8] = 1;
+
+  if (ver >= 7) {
+    let vinfo = ver;
+    for (let i = 0; i < 12; i++) vinfo = (vinfo << 1) ^ ((vinfo >>> 11) * 0x1f25);
+    const vbits = (ver << 12) | vinfo;
+    for (let i = 0; i < 18; i++) {
+      const bit = (vbits >>> i) & 1;
+      const r = Math.floor(i / 3);
+      const c = size - 11 + (i % 3);
+      grid[r][c] = bit;
+      reserved[r][c] = 1;
+      grid[c][r] = bit;
+      reserved[c][r] = 1;
+    }
+  }
+
+  let bitIdx = 0;
+  const totalBits = finalCw.length * 8;
+  let upward = true;
+  for (let col = size - 1; col >= 1; col -= 2) {
+    if (col === 6) col = 5;
+    for (let step = 0; step < size; step++) {
+      const r = upward ? size - 1 - step : step;
+      for (let dc = 0; dc < 2; dc++) {
+        const c = col - dc;
+        if (reserved[r][c]) continue;
+        let bit = 0;
+        if (bitIdx < totalBits) {
+          bit = (finalCw[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1;
+          bitIdx++;
+        }
+        if ((r + c) % 2 === 0) bit ^= 1; // Mask 0
+        grid[r][c] = bit;
+      }
+    }
+    upward = !upward;
+  }
+
+  // Format info for ECC Level L (01) + Mask 0 (000) -> 0x77c4
+  const fmtBits = 0x77c4;
+  const fPos1 = [
+    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
+    [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8],
+  ];
+  for (let i = 0; i < 15; i++) {
+    const bit = (fmtBits >>> i) & 1;
+    const [r1, c1] = fPos1[i];
+    grid[r1][c1] = bit;
+    if (i < 7) grid[size - 1 - i][8] = bit;
+    else grid[8][size - 15 + i] = bit;
+  }
+
+  return grid;
+}
 
 // Start application
 initAuth();

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -44,40 +44,30 @@ pub struct SystemMetrics {
 
 pub struct Monitor {
     sys: Mutex<System>,
-    last_sample_time: Mutex<Instant>,
-    last_sample: Mutex<Option<SystemMetrics>>,
+    disks: Mutex<Disks>,
+    snapshot: RwLock<SystemMetrics>,
 }
 
 impl Monitor {
     pub fn new() -> Self {
-        let sys = System::new_with_specifics(
+        let mut sys = System::new_with_specifics(
             RefreshKind::new()
                 .with_cpu(CpuRefreshKind::everything())
                 .with_memory(MemoryRefreshKind::everything()),
         );
+        sys.refresh_cpu_all();
+        sys.refresh_memory();
+        let disks = Disks::new_with_refreshed_list();
+        let initial = Self::compute_snapshot(&mut sys, &disks);
+
         Self {
             sys: Mutex::new(sys),
-            last_sample_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
-            last_sample: Mutex::new(None),
+            disks: Mutex::new(disks),
+            snapshot: RwLock::new(initial),
         }
     }
 
-    pub fn sample(&self) -> SystemMetrics {
-        let mut last_time = self.last_sample_time.lock().unwrap();
-        let mut cached = self.last_sample.lock().unwrap();
-
-        // 1.5s memoization window to avoid high-frequency hardware polling
-        if let Some(metrics) = cached.as_ref() {
-            if last_time.elapsed() < Duration::from_millis(1500) {
-                return metrics.clone();
-            }
-        }
-
-        let mut sys = self.sys.lock().unwrap();
-        sys.refresh_cpu_all();
-        sys.refresh_memory();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-
+    fn compute_snapshot(sys: &mut System, disks: &Disks) -> SystemMetrics {
         let cpus = sys.cpus();
         let cpu_pct = if !cpus.is_empty() {
             let sum: f32 = cpus.iter().map(|c| c.cpu_usage()).sum();
@@ -95,8 +85,6 @@ impl Monitor {
             0
         };
 
-        // Disks
-        let disks = Disks::new_with_refreshed_list();
         let disk_metrics = disks.first().map(|d| {
             let total = d.total_space();
             let free = d.available_space();
@@ -114,7 +102,6 @@ impl Monitor {
             }
         });
 
-        // Top processes
         let mut procs: Vec<ProcessMetrics> = sys
             .processes()
             .iter()
@@ -128,10 +115,10 @@ impl Monitor {
         procs.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal));
         procs.truncate(8);
 
-        let metrics = SystemMetrics {
+        SystemMetrics {
             cpu: CpuMetrics {
                 pct: cpu_pct,
-                cores: cpus.len(),
+                cores: cpus.len().max(1),
             },
             memory: MemoryMetrics {
                 total: total_mem,
@@ -142,12 +129,47 @@ impl Monitor {
             disk: disk_metrics,
             uptime_s: System::uptime(),
             processes: procs,
-        };
+        }
+    }
 
-        *last_time = Instant::now();
-        *cached = Some(metrics.clone());
+    pub fn refresh_now(&self, include_processes: bool) {
+        let mut sys = self.sys.lock().unwrap();
+        sys.refresh_cpu_all();
+        sys.refresh_memory();
+        if include_processes {
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        }
+        let mut disks = self.disks.lock().unwrap();
+        disks.refresh();
+        let next = Self::compute_snapshot(&mut sys, &disks);
+        drop(disks);
+        drop(sys);
+        if let Ok(mut snap) = self.snapshot.write() {
+            *snap = next;
+        }
+    }
 
-        metrics
+    pub fn start_background_sampler(self: &Arc<Self>) {
+        let mon = self.clone();
+        tokio::spawn(async move {
+            let mut tick_count: u64 = 0;
+            let mut interval = tokio::time::interval(Duration::from_secs(3));
+            loop {
+                interval.tick().await;
+                let m = mon.clone();
+                let include_procs = tick_count % 3 == 0;
+                tick_count = tick_count.wrapping_add(1);
+                let _ = tokio::task::spawn_blocking(move || {
+                    m.refresh_now(include_procs);
+                })
+                .await;
+            }
+        });
+    }
+
+    /// Instantaneous (< 1 microsecond) lock-free/read-lock read of the cached telemetry snapshot.
+    pub fn sample(&self) -> SystemMetrics {
+        self.snapshot.read().unwrap().clone()
     }
 }
 

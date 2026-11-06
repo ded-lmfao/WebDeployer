@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
+use crate::cache::AppCache;
 use crate::db::{now, DbPool};
 use crate::git::{CommitInfo, Git};
 use crate::logs::Logs;
@@ -56,6 +57,7 @@ pub struct Deployer {
     logs: Logs,
     projects: Arc<Projects>,
     runtime: Arc<Runtime>,
+    cache: Arc<AppCache>,
     data_dir: PathBuf,
 }
 
@@ -65,6 +67,7 @@ impl Deployer {
         logs: Logs,
         projects: Arc<Projects>,
         runtime: Arc<Runtime>,
+        cache: Arc<AppCache>,
         data_dir: PathBuf,
     ) -> Self {
         Self {
@@ -72,6 +75,7 @@ impl Deployer {
             logs,
             projects,
             runtime,
+            cache,
             data_dir,
         }
     }
@@ -207,12 +211,16 @@ impl Deployer {
 
     pub fn create_deployment(&self, p: &Project, kind: &str, actor: &str, trigger: &str) -> i64 {
         let ts = now();
-        let conn = self.db.lock().unwrap();
-        conn.execute(
-            "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) VALUES(?, ?, 'pending', 'pending', ?, ?, ?)",
-            params![p.id, kind, trigger, actor, ts],
-        ).ok();
-        conn.last_insert_rowid()
+        let id = {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) VALUES(?, ?, 'pending', 'pending', ?, ?, ?)",
+                params![p.id, kind, trigger, actor, ts],
+            ).ok();
+            conn.last_insert_rowid()
+        };
+        self.cache.invalidate_project(p.id);
+        id
     }
 
     pub fn update_stage(&self, dep_id: i64, stage: &str) {
@@ -221,6 +229,9 @@ impl Deployer {
             "UPDATE deployments SET stage=?, status='running' WHERE id=?",
             params![stage, dep_id],
         ).ok();
+        drop(conn);
+        self.cache.invalidate_prefix("overview:");
+        self.cache.invalidate_prefix("deployments:");
     }
 
     pub fn finish_deployment(&self, dep_id: i64, status: &str, error: Option<&str>) {
@@ -231,12 +242,14 @@ impl Deployer {
             params![status, status, error, ts, dep_id],
         ).ok();
 
+        let mut pid_opt = None;
         if let Ok((proj_id, kind, actor, sha, proj_name)) = conn.query_row(
             "SELECT d.project_id, d.kind, d.actor, COALESCE(d.sha, ''), COALESCE(p.name, '')
              FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?",
             params![dep_id],
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?)),
         ) {
+            pid_opt = Some(proj_id);
             let short = if sha.len() >= 7 { &sha[..7] } else { &sha };
             let action = format!("{}.{}", kind, status);
             let detail = match error {
@@ -247,6 +260,12 @@ impl Deployer {
                 "INSERT INTO audit(project_id, ts, actor, action, target, detail, ip) VALUES(?, ?, ?, ?, ?, ?, '127.0.0.1')",
                 params![proj_id, ts, actor, action, proj_name, detail],
             ).ok();
+        }
+        drop(conn);
+        if let Some(pid) = pid_opt {
+            self.cache.invalidate_project(pid);
+        } else {
+            self.cache.invalidate_all();
         }
     }
 

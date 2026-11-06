@@ -1,7 +1,8 @@
 use axum::{
     body::Body,
-    extract::{Path as AxPath, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    extract::{Path as AxPath, Query, Request, State},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -17,7 +18,11 @@ use std::sync::Arc;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-use crate::auth::{hash_password, verify_password, Auth, User};
+use crate::auth::{
+    constant_time_eq, generate_backup_codes, generate_totp_secret, hash_password,
+    verify_password, verify_totp_code, Auth, User,
+};
+use crate::cache::AppCache;
 use crate::caddy::Caddy;
 use crate::db::{now, DbPool};
 use crate::deployer::Deployer;
@@ -37,12 +42,18 @@ pub struct AppState {
     pub caddy: Arc<Caddy>,
     pub runtime: Arc<Runtime>,
     pub deployer: Arc<Deployer>,
+    pub cache: Arc<AppCache>,
 }
 
 pub fn create_router(state: AppState) -> Router {
     Router::new()
-        // Auth endpoints
+        // Auth & 2FA endpoints
         .route("/api/auth/login", post(login_handler))
+        .route("/api/auth/2fa/verify-login", post(verify_2fa_login_handler))
+        .route("/api/auth/2fa/setup", post(setup_2fa_handler))
+        .route("/api/auth/2fa/enable", post(enable_2fa_handler))
+        .route("/api/auth/2fa/disable", post(disable_2fa_handler))
+        .route("/api/auth/sessions/revoke-others", post(revoke_other_sessions_handler))
         .route("/api/auth/logout", post(logout_handler))
         .route("/api/auth/me", get(me_handler))
         .route("/api/auth/password", post(change_password_handler))
@@ -98,21 +109,113 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/logs/download", get(logs_download_handler))
         // GitHub Webhooks
         .route("/api/webhooks/github/:slug", post(github_webhook_handler))
-        // Overview & Telemetry
+        // Overview, Telemetry & Cache Layer
         .route("/api/overview", get(overview_handler))
         .route("/api/monitor", get(monitor_handler))
         .route("/api/audit", get(audit_handler))
+        .route("/api/cache/stats", get(cache_stats_handler))
+        .route("/api/cache/clear", post(cache_clear_handler))
         .route("/api/settings", get(get_settings_handler).put(update_settings_handler).patch(update_settings_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
         .route("/api/users/:id", put(update_user_handler).patch(update_user_handler).delete(delete_user_handler))
+        .route("/api/users/:id/reset-2fa", post(admin_reset_user_2fa_handler))
         .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
         // Static assets fallback
         .fallback(axum_static_fallback)
+        .layer(middleware::from_fn_with_state(state.clone(), security_middleware))
         .with_state(state)
 }
 
-async fn axum_static_fallback(uri: axum::http::Uri) -> Response {
-    static_handler(uri.path()).await
+async fn security_middleware(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let path = req.uri().path().to_string();
+    let method = req.method().clone();
+    let is_api = path.starts_with("/api/");
+    let is_mutating = matches!(
+        method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+
+    if is_api {
+        let is_public_auth = path == "/api/auth/login"
+            || path == "/api/auth/2fa/verify-login"
+            || path.starts_with("/api/webhooks/github/");
+
+        if !is_public_auth {
+            let sid_opt = extract_session_id(req.headers());
+            let session_pair = sid_opt.as_deref().and_then(|sid| state.auth.get_session(sid));
+
+            let Some((session, _user)) = session_pair else {
+                let mut res = (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({ "error": "Unauthorized. Please sign in." })),
+                )
+                    .into_response();
+                attach_security_headers(&mut res, true);
+                return res;
+            };
+
+            if is_mutating && path != "/api/auth/logout" {
+                let csrf_hdr = req
+                    .headers()
+                    .get("x-csrf-token")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                if !constant_time_eq(csrf_hdr, &session.csrf_token) {
+                    let mut res = (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({ "error": "Invalid or missing CSRF security token. Please refresh the page." })),
+                    )
+                        .into_response();
+                    attach_security_headers(&mut res, true);
+                    return res;
+                }
+            }
+        }
+    }
+
+    let mut res = next.run(req).await;
+    if is_api && is_mutating {
+        state.cache.invalidate_all();
+        if path.starts_with("/api/users") || path.starts_with("/api/auth/") {
+            state.auth.invalidate_sessions();
+        }
+    }
+    attach_security_headers(&mut res, is_api);
+    res
+}
+
+fn attach_security_headers(res: &mut Response, is_api: bool) {
+    let headers = res.headers_mut();
+    headers.insert(
+        header::HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("referrer-policy"),
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
+    if is_api {
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+        );
+    }
+}
+
+async fn axum_static_fallback(headers: HeaderMap, uri: axum::http::Uri) -> Response {
+    static_handler(uri.path(), &headers, uri.query()).await
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +290,7 @@ fn log_audit_project(
 }
 
 // ---------------------------------------------------------------------------
-// Auth Handlers
+// Auth & 2FA Handlers
 // ---------------------------------------------------------------------------
 #[derive(Deserialize)]
 struct LoginPayload {
@@ -199,23 +302,55 @@ struct LoginPayload {
 struct LoginResponse {
     user: User,
     csrf: String,
+    #[serde(rename = "activeSessions")]
+    active_sessions: usize,
 }
 
 async fn login_handler(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
-) -> Result<Response, (StatusCode, &'static str)> {
-    let (user, hash) = state
-        .auth
-        .get_user_by_username(&payload.username)
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid username or password"))?;
+) -> Result<Response, (StatusCode, String)> {
+    // Sync Main Admin login ID & password from .env (supports live editing .env without server restart)
+    state.auth.ensure_admin();
+
+    let uname_key = format!("login:{}", payload.username.trim().to_lowercase());
+    if let Some(rem) = state.auth.check_lockout(&uname_key) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Too many failed sign-in attempts. Account temporarily locked for {} seconds.", rem),
+        ));
+    }
+
+    let Some((user, hash)) = state.auth.get_user_by_username(payload.username.trim()) else {
+        state.auth.record_failure(&uname_key);
+        return Err((StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()));
+    };
 
     if user.disabled {
-        return Err((StatusCode::FORBIDDEN, "Account is disabled by administrator"));
+        return Err((StatusCode::FORBIDDEN, "Account is disabled by administrator".to_string()));
     }
 
     if !verify_password(&payload.password, &hash) {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid username or password"));
+        if let Some(lock_s) = state.auth.record_failure(&uname_key) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("Too many failed sign-in attempts. Account locked for {} seconds.", lock_s),
+            ));
+        }
+        return Err((StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()));
+    }
+
+    state.auth.clear_failures(&uname_key);
+
+    // If 2FA is enabled on this account, require 2FA challenge verification before creating a session
+    if user.totp_enabled {
+        let mfa_token = state.auth.create_mfa_challenge(user.id);
+        return Ok(Json(serde_json::json!({
+            "requires2fa": true,
+            "mfaToken": mfa_token,
+            "username": user.username,
+        }))
+        .into_response());
     }
 
     log_audit(&state, &user.username, "auth.login", Some(&user.username), Some("User signed in"));
@@ -223,16 +358,98 @@ async fn login_handler(
     let session = state
         .auth
         .create_session(user.id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session"))?;
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
 
+    let active_sessions = state.auth.count_active_sessions(user.id);
     let cookie_val = format!(
-        "nd_session={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
+        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
         session.id, state.auth.session_ttl_s
     );
 
     let body = Json(LoginResponse {
         user,
         csrf: session.csrf_token,
+        active_sessions,
+    });
+
+    let mut res = body.into_response();
+    res.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie_val).unwrap(),
+    );
+    Ok(res)
+}
+
+#[derive(Deserialize)]
+struct Verify2faLoginPayload {
+    #[serde(rename = "mfaToken")]
+    mfa_token: String,
+    code: String,
+}
+
+async fn verify_2fa_login_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<Verify2faLoginPayload>,
+) -> Result<Response, (StatusCode, String)> {
+    let lock_key = format!("2fa:{}", payload.mfa_token);
+    if let Some(rem) = state.auth.check_lockout(&lock_key) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Too many invalid 2FA attempts. Locked for {} seconds.", rem),
+        ));
+    }
+
+    let user_id = state
+        .auth
+        .peek_mfa_challenge(&payload.mfa_token)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "2FA session expired. Please sign in again.".to_string()))?;
+
+    let user = state
+        .auth
+        .get_user_by_id(user_id)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
+
+    if user.disabled {
+        return Err((StatusCode::FORBIDDEN, "Account is disabled".to_string()));
+    }
+
+    if !state.auth.verify_user_2fa(user.id, &payload.code) {
+        if let Some(lock_s) = state.auth.record_failure(&lock_key) {
+            state.auth.consume_mfa_challenge(&payload.mfa_token);
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("Too many failed 2FA attempts. Locked for {} seconds.", lock_s),
+            ));
+        }
+        return Err((StatusCode::UNAUTHORIZED, "Invalid 6-digit authenticator code or recovery code".to_string()));
+    }
+
+    state.auth.clear_failures(&lock_key);
+    state.auth.consume_mfa_challenge(&payload.mfa_token);
+
+    log_audit(
+        &state,
+        &user.username,
+        "auth.login",
+        Some(&user.username),
+        Some("User signed in with 2FA verification"),
+    );
+
+    let session = state
+        .auth
+        .create_session(user.id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
+
+    let active_sessions = state.auth.count_active_sessions(user.id);
+    let cookie_val = format!(
+        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+        session.id, state.auth.session_ttl_s
+    );
+
+    let body = Json(LoginResponse {
+        user,
+        csrf: session.csrf_token,
+        active_sessions,
     });
 
     let mut res = body.into_response();
@@ -253,7 +470,7 @@ async fn logout_handler(
     let mut res = (StatusCode::OK, "Logged out").into_response();
     res.headers_mut().insert(
         header::SET_COOKIE,
-        HeaderValue::from_static("nd_session=; Path=/; HttpOnly; Max-Age=0"),
+        HeaderValue::from_static("nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
     );
     Ok(res)
 }
@@ -268,9 +485,11 @@ async fn me_handler(
         .get_session(&session_id)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
+    let active_sessions = state.auth.count_active_sessions(user.id);
     Ok(Json(LoginResponse {
         user,
         csrf: session.csrf_token,
+        active_sessions,
     }))
 }
 
@@ -278,43 +497,314 @@ async fn me_handler(
 struct PasswordChangePayload {
     current: String,
     next: String,
+    #[serde(rename = "totpCode")]
+    totp_code: Option<String>,
+    #[serde(rename = "revokeOtherSessions")]
+    revoke_other_sessions: Option<bool>,
 }
 
 async fn change_password_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<PasswordChangePayload>,
-) -> Result<StatusCode, (StatusCode, &'static str)> {
-    let session_id = extract_session_id(&headers).ok_or((StatusCode::UNAUTHORIZED, "Unauthorized"))?;
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let session_id = extract_session_id(&headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized session".to_string()))?;
     let (_, user) = state
         .auth
         .get_session(&session_id)
-        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized"))?;
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized session".to_string()))?;
 
     let (_, current_hash) = state
         .auth
         .get_user_by_username(&user.username)
-        .ok_or((StatusCode::UNAUTHORIZED, "User not found"))?;
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
 
     if !verify_password(&payload.current, &current_hash) {
-        return Err((StatusCode::BAD_REQUEST, "Current password incorrect"));
+        return Err((StatusCode::BAD_REQUEST, "Current password is incorrect".to_string()));
+    }
+
+    if user.totp_enabled {
+        let code = payload.totp_code.as_deref().unwrap_or("").trim();
+        if code.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Two-Factor Authentication is enabled: please enter your 6-digit authenticator code".to_string(),
+            ));
+        }
+        if !state.auth.verify_user_2fa(user.id, code) {
+            return Err((StatusCode::BAD_REQUEST, "Invalid 2FA authenticator code".to_string()));
+        }
     }
 
     if payload.next.len() < 8 {
-        return Err((StatusCode::BAD_REQUEST, "Password must be at least 8 characters"));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "New password must be at least 8 characters long".to_string(),
+        ));
+    }
+
+    if payload.next == payload.current {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "New password must be different from your current password".to_string(),
+        ));
     }
 
     let next_hash = hash_password(&payload.next)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password"))?;
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password".to_string()))?;
 
-    let conn = state.db.lock().unwrap();
-    conn.execute(
-        "UPDATE users SET password_hash=? WHERE id=?",
-        rusqlite::params![next_hash, user.id],
-    )
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?;
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?",
+            rusqlite::params![next_hash, now(), user.id],
+        )
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
+    }
 
-    Ok(StatusCode::OK)
+    if user.is_main_admin {
+        crate::config::Config::sync_dotenv_admin(Some(&user.username), Some(&payload.next));
+    }
+
+    let revoked = if payload.revoke_other_sessions.unwrap_or(true) {
+        state.auth.revoke_other_sessions(user.id, &session_id)
+    } else {
+        0
+    };
+
+    log_audit(
+        &state,
+        &user.username,
+        "user.update",
+        Some(&user.username),
+        Some(&format!("Changed account password (revoked {} other sessions)", revoked)),
+    );
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "revokedSessions": revoked
+    })))
+}
+
+#[derive(Deserialize)]
+struct Setup2faPayload {
+    password: String,
+}
+
+async fn setup_2fa_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Setup2faPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+
+    let (_, current_hash) = state
+        .auth
+        .get_user_by_username(&user.username)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
+
+    if !verify_password(&payload.password, &current_hash) {
+        return Err((StatusCode::BAD_REQUEST, "Incorrect password".to_string()));
+    }
+
+    let secret = generate_totp_secret();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET totp_pending_secret = ? WHERE id = ?",
+            rusqlite::params![&secret, user.id],
+        )
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save pending 2FA secret".to_string()))?;
+    }
+
+    let otpauth_url = format!(
+        "otpauth://totp/WebDep:{}?secret={}&issuer=WebDep&algorithm=SHA1&digits=6&period=30",
+        user.username, secret
+    );
+
+    Ok(Json(serde_json::json!({
+        "secret": secret,
+        "otpauthUrl": otpauth_url,
+        "account": user.username,
+        "issuer": "WebDep"
+    })))
+}
+
+#[derive(Deserialize)]
+struct Enable2faPayload {
+    code: String,
+}
+
+async fn enable_2fa_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Enable2faPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+
+    let pending_secret: Option<String> = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT totp_pending_secret FROM users WHERE id = ?",
+            rusqlite::params![user.id],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten()
+    };
+
+    let Some(secret) = pending_secret else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No pending 2FA setup found. Click 'Setup 2FA' first.".to_string(),
+        ));
+    };
+
+    if !verify_totp_code(&secret, &payload.code) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid 6-digit code. Make sure you scanned the QR code or entered the secret key in your authenticator app.".to_string(),
+        ));
+    }
+
+    let backup_codes = generate_backup_codes();
+    let backup_json = serde_json::to_string(&backup_codes).unwrap_or_else(|_| "[]".to_string());
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET totp_secret = ?, totp_pending_secret = NULL, totp_enabled = 1, totp_backup_codes = ? WHERE id = ?",
+            rusqlite::params![&secret, &backup_json, user.id],
+        )
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to enable 2FA".to_string()))?;
+    }
+
+    log_audit(
+        &state,
+        &user.username,
+        "user.update",
+        Some(&user.username),
+        Some("Enabled Two-Factor Authentication (2FA)"),
+    );
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "backupCodes": backup_codes
+    })))
+}
+
+#[derive(Deserialize)]
+struct Disable2faPayload {
+    password: String,
+    code: String,
+}
+
+async fn disable_2fa_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Disable2faPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+
+    let (_, current_hash) = state
+        .auth
+        .get_user_by_username(&user.username)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
+
+    if !verify_password(&payload.password, &current_hash) {
+        return Err((StatusCode::BAD_REQUEST, "Incorrect password".to_string()));
+    }
+
+    if !state.auth.verify_user_2fa(user.id, &payload.code) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid 6-digit authenticator code or recovery code".to_string(),
+        ));
+    }
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled = 0, totp_backup_codes = '[]' WHERE id = ?",
+            rusqlite::params![user.id],
+        )
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to disable 2FA".to_string()))?;
+    }
+
+    log_audit(
+        &state,
+        &user.username,
+        "user.update",
+        Some(&user.username),
+        Some("Disabled Two-Factor Authentication (2FA)"),
+    );
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn revoke_other_sessions_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let session_id = extract_session_id(&headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let (_, user) = state
+        .auth
+        .get_session(&session_id)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+
+    let revoked = state.auth.revoke_other_sessions(user.id, &session_id);
+    log_audit(
+        &state,
+        &user.username,
+        "user.update",
+        Some(&user.username),
+        Some(&format!("Revoked {} other active session(s)", revoked)),
+    );
+
+    Ok(Json(serde_json::json!({ "ok": true, "revoked": revoked })))
+}
+
+async fn admin_reset_user_2fa_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    if !actor.is_main_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Only the Main Admin can reset another user's 2FA.".to_string(),
+        ));
+    }
+
+    let target = state
+        .auth
+        .get_user_by_id(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled = 0, totp_backup_codes = '[]' WHERE id = ?",
+            rusqlite::params![id],
+        )
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
+    }
+
+    log_audit(
+        &state,
+        &actor.username,
+        "user.update",
+        Some(&target.username),
+        Some("Main Admin reset Two-Factor Authentication for user"),
+    );
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,9 +1607,20 @@ struct OverviewResponse {
 async fn overview_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<OverviewResponse>, StatusCode> {
+) -> Result<Response, StatusCode> {
+    let user_opt = current_user(&state, &headers);
+    let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
+    let cache_key = format!("overview:u{}", uid);
+
+    if let Some(cached_val) = state.cache.get(&cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return Ok(res);
+    }
+
     let mut projs = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if let Some(u) = current_user(&state, &headers) {
+    if let Some(ref u) = user_opt {
         projs.retain(|p| u.can_access_project(p.id));
     }
     let mut items = Vec::new();
@@ -1194,20 +1695,41 @@ async fn overview_handler(
     let recent = state.deployer.list_deployments(None, 10);
     let monitor = state.monitor.sample();
 
-    Ok(Json(OverviewResponse {
+    let payload = OverviewResponse {
         projects: items,
         recent,
         monitor,
-    }))
+    };
+    if let Ok(json_val) = serde_json::to_value(&payload) {
+        state
+            .cache
+            .set(cache_key, json_val, std::time::Duration::from_secs(2));
+    }
+
+    let mut res = Json(payload).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
 }
 
 async fn monitor_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Response, StatusCode> {
+    let user_opt = current_user(&state, &headers);
+    let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
+    let cache_key = format!("monitor:u{}", uid);
+
+    if let Some(cached_val) = state.cache.get(&cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return Ok(res);
+    }
+
     let sample = state.monitor.sample();
     let mut projs = state.projects.list().unwrap_or_default();
-    if let Some(u) = current_user(&state, &headers) {
+    if let Some(ref u) = user_opt {
         projs.retain(|p| u.can_access_project(p.id));
     }
     let now_ms = now();
@@ -1245,12 +1767,13 @@ async fn monitor_handler(
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_else(|_| "webdep-server".to_string());
 
-    Ok(Json(serde_json::json!({
+    let val = serde_json::json!({
         "cpu": sample.cpu,
         "memory": sample.memory,
         "disk": sample.disk,
         "uptime_s": sample.uptime_s,
         "processes": sample.processes,
+        "cache": state.cache.stats(),
         "system": {
             "hostname": hostname,
             "platform": format!("{} ({})", std::env::consts::OS, std::env::consts::ARCH),
@@ -1262,6 +1785,39 @@ async fn monitor_handler(
             }
         },
         "projects": proj_metrics
+    });
+
+    state
+        .cache
+        .set(cache_key, val.clone(), std::time::Duration::from_secs(2));
+
+    let mut res = Json(val).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
+}
+
+async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
+    Json(state.cache.stats())
+}
+
+async fn cache_clear_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    state.cache.invalidate_all();
+    log_audit(
+        &state,
+        &actor.username,
+        "cache.clear",
+        Some("platform"),
+        Some("Flushed server in-memory response cache"),
+    );
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "stats": state.cache.stats()
     })))
 }
 
@@ -1289,9 +1845,23 @@ async fn audit_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<AuditQuery>,
-) -> Result<Json<Vec<AuditItem>>, StatusCode> {
+) -> Result<Response, StatusCode> {
     let u = current_user(&state, &headers);
+    let uid = u.as_ref().map(|user| user.id).unwrap_or(0);
     let max_limit = q.limit.unwrap_or(500).min(1000);
+    let cache_key = format!(
+        "audit:p{}:u{}:l{}",
+        q.project_id.unwrap_or(0),
+        uid,
+        max_limit
+    );
+    if let Some(cached_val) = state.cache.get(&cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return Ok(res);
+    }
+
     let conn = state.db.lock().unwrap();
 
     let mut list = Vec::new();
@@ -1486,16 +2056,32 @@ async fn audit_handler(
             list.push(r);
         }
     }
-    Ok(Json(list))
+    drop(conn);
+
+    if let Ok(json_val) = serde_json::to_value(&list) {
+        state
+            .cache
+            .set(cache_key, json_val, std::time::Duration::from_secs(5));
+    }
+
+    let mut res = Json(list).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
 }
 
 async fn get_settings_handler(
     State(state): State<AppState>,
-) -> Result<Json<HashMap<String, String>>, StatusCode> {
+    headers: HeaderMap,
+) -> Result<Json<HashMap<String, String>>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "settings_manage", None)?;
     let conn = state.db.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT key, value FROM settings").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM settings")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
 
     let mut map = HashMap::new();
     for r in rows.flatten() {
@@ -1533,8 +2119,10 @@ async fn get_settings_handler(
 
 async fn update_settings_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<HashMap<String, serde_json::Value>>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
         let val_str = match v {
@@ -1551,16 +2139,20 @@ async fn update_settings_handler(
             rusqlite::params![k, val_str],
         ).ok();
     }
+    drop(conn);
+    log_audit(&state, &actor.username, "settings.update", Some("platform"), Some("Updated global deployment & GitHub settings"));
     Ok(StatusCode::OK)
 }
 
 async fn list_users_handler(
     State(state): State<AppState>,
-) -> Result<Json<Vec<User>>, StatusCode> {
+    headers: HeaderMap,
+) -> Result<Json<Vec<User>>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "settings_manage", None)?;
     let conn = state.db.lock().unwrap();
     let mut stmt = conn
-        .prepare("SELECT id, username, role, disabled, permissions, allowed_projects, created_at FROM users ORDER BY id ASC")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .prepare("SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users ORDER BY id ASC")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
 
     let rows = stmt
         .query_map([], |r| {
@@ -1571,10 +2163,11 @@ async fn list_users_handler(
                 r.get::<_, Option<i64>>(3)?.unwrap_or(0),
                 r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
                 r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
-                r.get(6)?,
+                r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                r.get(7)?,
             ))
         })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
 
     let mut list = Vec::new();
     for r in rows.flatten() {
@@ -1649,6 +2242,7 @@ async fn create_user_handler(
         0,
         perms_json,
         allowed_json,
+        0,
         ts,
     )))
 }
@@ -1690,6 +2284,9 @@ async fn update_user_handler(
         }
         let hashed = hash_password(pwd).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", rusqlite::params![hashed, id]).ok();
+        if existing.is_main_admin {
+            crate::config::Config::sync_dotenv_admin(Some(&existing.username), Some(pwd));
+        }
     }
 
     if !existing.is_main_admin {
@@ -1788,12 +2385,25 @@ struct CommitView {
 async fn project_commits_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<Vec<CommitView>>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let p = state
         .projects
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let cache_key = format!(
+        "commits:p{}:{}:{}",
+        id,
+        p.deployed_sha.as_deref().unwrap_or("none"),
+        p.last_poll_at.unwrap_or(0)
+    );
+    if let Some(cached_val) = state.cache.get(&cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return Ok(res);
+    }
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     let repo_url = p.repo_url.clone();
@@ -1811,7 +2421,7 @@ async fn project_commits_handler(
 
     let releases = state.deployer.list_releases(id);
 
-    let views = raw_commits
+    let views: Vec<CommitView> = raw_commits
         .into_iter()
         .map(|c| {
             let is_live = p.deployed_sha.as_deref() == Some(&c.sha);
@@ -1828,7 +2438,16 @@ async fn project_commits_handler(
         })
         .collect();
 
-    Ok(Json(views))
+    if let Ok(json_val) = serde_json::to_value(&views) {
+        state
+            .cache
+            .set(cache_key, json_val, std::time::Duration::from_secs(30));
+    }
+
+    let mut res = Json(views).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
 }
 
 #[derive(Serialize)]
@@ -2206,7 +2825,15 @@ fn copy_backup_files(src: &std::path::Path, dst: &std::path::Path) -> u64 {
 async fn list_backups_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<Vec<BackupItem>>, StatusCode> {
+) -> Result<Response, StatusCode> {
+    let cache_key = format!("backups:p{}:list", id);
+    if let Some(cached_val) = state.cache.get(&cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return Ok(res);
+    }
+
     let mut backups: Vec<BackupItem> = {
         let conn = state.db.lock().unwrap();
         let res = if let Ok(mut stmt) = conn.prepare(
@@ -2248,7 +2875,16 @@ async fn list_backups_handler(
             .collect();
     }
 
-    Ok(Json(backups))
+    if let Ok(json_val) = serde_json::to_value(&backups) {
+        state
+            .cache
+            .set(cache_key, json_val, std::time::Duration::from_secs(15));
+    }
+
+    let mut res = Json(backups).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
 }
 
 #[derive(Deserialize)]
@@ -2468,16 +3104,35 @@ struct CaddyStatusResponse {
     version: String,
 }
 
-async fn caddy_status_handler() -> Json<CaddyStatusResponse> {
+async fn caddy_status_handler(State(state): State<AppState>) -> Response {
+    let cache_key = "caddy:status";
+    if let Some(cached_val) = state.cache.get(cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return res;
+    }
+
     let out = std::process::Command::new("caddy").arg("version").output();
     let (installed, version) = match out {
         Ok(o) if o.status.success() => (true, String::from_utf8_lossy(&o.stdout).trim().to_string()),
         _ => (true, "Caddy 2 (Auto-SSL Managed)".to_string()),
     };
-    Json(CaddyStatusResponse {
+    let payload = CaddyStatusResponse {
         installed,
         active: true,
         running: true,
         version,
-    })
+    };
+    if let Ok(json_val) = serde_json::to_value(&payload) {
+        state.cache.set(
+            cache_key.to_string(),
+            json_val,
+            std::time::Duration::from_secs(60),
+        );
+    }
+    let mut res = Json(payload).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    res
 }

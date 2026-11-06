@@ -2,6 +2,7 @@
 
 mod api;
 mod auth;
+mod cache;
 mod caddy;
 mod config;
 mod db;
@@ -21,6 +22,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::api::{create_router, AppState};
 use crate::auth::Auth;
+use crate::cache::AppCache;
 use crate::caddy::Caddy;
 use crate::config::Config;
 use crate::db::open_db;
@@ -60,6 +62,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "WebDep engine initialized (SQLite database connected and live log stream active)",
     );
     let monitor = Arc::new(Monitor::new());
+    monitor.start_background_sampler();
+    let cache = Arc::new(AppCache::new());
     let caddy = Arc::new(Caddy::new(&config.data_dir));
     let runtime = Arc::new(Runtime::new(db.clone(), (*logs).clone()));
     let deployer = Arc::new(Deployer::new(
@@ -67,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         (*logs).clone(),
         projects.clone(),
         runtime.clone(),
+        cache.clone(),
         config.data_dir.clone(),
     ));
 
@@ -119,6 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         caddy,
         runtime,
         deployer: deployer.clone(),
+        cache,
     };
 
     let app = create_router(state);

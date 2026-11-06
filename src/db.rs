@@ -84,6 +84,21 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         if !cols.contains(&"allowed_projects".to_string()) {
             conn.execute_batch("ALTER TABLE users ADD COLUMN allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]';")?;
         }
+        if !cols.contains(&"totp_secret".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_secret TEXT;")?;
+        }
+        if !cols.contains(&"totp_pending_secret".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_pending_secret TEXT;")?;
+        }
+        if !cols.contains(&"totp_enabled".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        if !cols.contains(&"totp_backup_codes".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_backup_codes TEXT NOT NULL DEFAULT '[]';")?;
+        }
+        if !cols.contains(&"password_changed_at".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN password_changed_at INTEGER;")?;
+        }
     }
 
     let has_sessions: bool = conn
@@ -274,6 +289,11 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 disabled INTEGER NOT NULL DEFAULT 0,
                 permissions TEXT NOT NULL DEFAULT '[\"*\"]',
                 allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]',
+                totp_secret TEXT,
+                totp_pending_secret TEXT,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                totp_backup_codes TEXT NOT NULL DEFAULT '[]',
+                password_changed_at INTEGER,
                 created_at INTEGER NOT NULL
             );
 
