@@ -174,7 +174,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!("WebDep listening on http://{}", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    // After a self-restart the previous instance may still hold the port for a moment: retry binding.
+    let restarting = std::env::var("WEBDEP_RESTARTED").is_ok();
+    let max_attempts = if restarting { 60 } else { 1 };
+    let mut attempt = 0;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => break l,
+            Err(e) => {
+                attempt += 1;
+                if attempt >= max_attempts {
+                    return Err(e.into());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
+    };
     axum::serve(listener, app).await?;
 
     Ok(())

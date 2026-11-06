@@ -3662,3 +3662,48 @@ function generateQrMatrix(text) {
 // Start application
 initAuth();
 
+
+// ============================================================================
+// Panel Control (Restart Panel / Clear Server Cache)
+// ============================================================================
+document.getElementById('restart-panel-btn')?.addEventListener('click', async () => {
+  const ok = await showConfirmDialog({
+    title: 'Restart WebDep Panel',
+    message: 'Restart the panel now? The dashboard will be unavailable for a few seconds. Websites marked running will be resumed automatically.',
+    confirmText: 'Restart Panel',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await api('/api/system/restart', { method: 'POST' });
+  } catch (err) {
+    toast(`Restart failed: ${err.message}`, 'error');
+    return;
+  }
+
+  toast('Panel is restarting... reconnecting', 'info', 8000);
+  // Wait for the old instance to go down, then poll until the new one answers
+  await new Promise((r) => setTimeout(r, 1500));
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch('/healthz', { cache: 'no-store' });
+      if (res.ok) {
+        window.location.reload();
+        return;
+      }
+    } catch (_) { /* still down */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  toast('Panel did not come back within 60s. Start it manually.', 'error', 10000);
+});
+
+document.getElementById('clear-cache-btn')?.addEventListener('click', async () => {
+  try {
+    await api('/api/cache/clear', { method: 'POST' });
+    invalidateClientCache();
+    toast('Server and browser caches cleared.', 'success');
+  } catch (err) {
+    toast(`Failed to clear cache: ${err.message}`, 'error');
+  }
+});

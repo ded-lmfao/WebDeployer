@@ -115,6 +115,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/audit", get(audit_handler))
         .route("/api/cache/stats", get(cache_stats_handler))
         .route("/api/cache/clear", post(cache_clear_handler))
+        .route("/api/system/restart", post(restart_panel_handler))
         .route("/api/settings", get(get_settings_handler).put(update_settings_handler).patch(update_settings_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
         .route("/api/users/:id", put(update_user_handler).patch(update_user_handler).delete(delete_user_handler))
@@ -1795,6 +1796,43 @@ async fn monitor_handler(
     res.headers_mut()
         .insert("x-cache", HeaderValue::from_static("MISS"));
     Ok(res)
+}
+
+async fn restart_panel_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    log_audit(
+        &state,
+        &actor.username,
+        "system.restart",
+        Some("platform"),
+        Some("Restarted the WebDep panel"),
+    );
+    state.logs.add(None, None, "system", "warn", &format!("Panel restart requested by {}", actor.username));
+
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        if let Ok(exe) = std::env::current_exe() {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.env("WEBDEP_RESTARTED", "1")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so the new panel outlives this one
+                cmd.creation_flags(0x00000008 | 0x00000200);
+            }
+            let _ = cmd.spawn();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        std::process::exit(0);
+    });
+
+    Ok(Json(serde_json::json!({ "ok": true, "message": "Panel is restarting" })))
 }
 
 async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
