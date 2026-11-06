@@ -70,7 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         config.data_dir.clone(),
     ));
 
-    // Auto-resume any websites marked 'running' in SQLite on platform startup
+    // Auto-resume any websites marked 'running' in SQLite on platform startup,
+    // and ensure any websites marked 'stopped' have no orphan processes left on their ports
     {
         let resume_projects = projects.clone();
         let resume_runtime = runtime.clone();
@@ -78,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tokio::spawn(async move {
             if let Ok(list) = resume_projects.list() {
                 for p in list {
+                    let _ = resume_runtime.ensure_container(&p);
                     if p.app_status == "running" {
                         let env = resume_projects.get_env_map(p.id);
                         match resume_runtime.start_project(&p, env, None).await {
@@ -87,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     None,
                                     "system",
                                     "info",
-                                    &format!("Auto-resumed website '{}' (PID: {}) from SQLite state", p.name, pid),
+                                    &format!("Auto-resumed website '{}' in isolated container (PID: {})", p.name, pid),
                                 );
                             }
                             Err(e) => {
@@ -100,6 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 );
                             }
                         }
+                    } else {
+                        let _ = resume_runtime.stop_project(&p).await;
                     }
                 }
             }

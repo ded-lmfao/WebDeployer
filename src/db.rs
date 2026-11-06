@@ -75,6 +75,15 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         if !cols.contains(&"salt".to_string()) {
             conn.execute_batch("ALTER TABLE users ADD COLUMN salt TEXT NOT NULL DEFAULT '';")?;
         }
+        if !cols.contains(&"disabled".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        if !cols.contains(&"permissions".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL DEFAULT '[\"*\"]';")?;
+        }
+        if !cols.contains(&"allowed_projects".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]';")?;
+        }
     }
 
     let has_sessions: bool = conn
@@ -262,6 +271,9 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 password_hash TEXT NOT NULL,
                 salt TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'admin',
+                disabled INTEGER NOT NULL DEFAULT 0,
+                permissions TEXT NOT NULL DEFAULT '[\"*\"]',
+                allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]',
                 created_at INTEGER NOT NULL
             );
 
@@ -322,10 +334,12 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE TABLE IF NOT EXISTS backups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            path TEXT NOT NULL,
-            size_bytes INTEGER NOT NULL,
-            note TEXT,
-            created_at INTEGER NOT NULL
+            release_id INTEGER,
+            kind TEXT NOT NULL DEFAULT 'full-snapshot',
+            path TEXT NOT NULL DEFAULT '',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            note TEXT DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS project_keys (
@@ -334,8 +348,71 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             private_key TEXT NOT NULL,
             created_at INTEGER NOT NULL
         );
+
+        INSERT OR IGNORE INTO settings(key, value) VALUES ('min_free_mb', '500');
+        INSERT OR IGNORE INTO settings(key, value) VALUES ('default_retention', '10');
+        INSERT OR IGNORE INTO settings(key, value) VALUES ('step_timeout_s', '900');
+        INSERT OR IGNORE INTO settings(key, value) VALUES ('deploy_timeout_s', '1800');
         ",
     )?;
+
+    // Dynamically align existing backups table columns (migrating from legacy schema if needed)
+    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(backups)") {
+        let b_cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        if !b_cols.contains(&"release_id".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN release_id INTEGER;").ok();
+        }
+        if !b_cols.contains(&"kind".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN kind TEXT NOT NULL DEFAULT 'full-snapshot';").ok();
+        }
+        if !b_cols.contains(&"path".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN path TEXT NOT NULL DEFAULT '';").ok();
+        }
+        if !b_cols.contains(&"size_bytes".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;").ok();
+            if b_cols.contains(&"size".to_string()) {
+                conn.execute_batch("UPDATE backups SET size_bytes = COALESCE(size, 0);").ok();
+            }
+        }
+        if !b_cols.contains(&"note".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN note TEXT DEFAULT '';").ok();
+        }
+        if !b_cols.contains(&"created_at".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;").ok();
+            if b_cols.contains(&"ts".to_string()) {
+                conn.execute_batch("UPDATE backups SET created_at = COALESCE(ts, 0);").ok();
+            }
+        }
+    }
+
+    // Auto-seed github_token into SQLite settings if not yet configured
+    let existing_token: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'github_token'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    if existing_token.trim().is_empty() {
+        let mut detected_tok = std::env::var("GITHUB_TOKEN").unwrap_or_default();
+        if detected_tok.trim().is_empty() {
+            if let Ok(out) = std::process::Command::new("gh").args(["auth", "token"]).output() {
+                if out.status.success() {
+                    detected_tok = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                }
+            }
+        }
+        if !detected_tok.trim().is_empty() {
+            conn.execute(
+                "INSERT INTO settings(key, value) VALUES('github_token', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![detected_tok.trim()],
+            )
+            .ok();
+        }
+    }
 
     // Generic multi-website migration: normalize relative deploy_dir paths and upgrade full-stack Node+Vite start_cmd
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));

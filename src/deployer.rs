@@ -241,7 +241,22 @@ impl Deployer {
             }
         };
 
-        self.logs.add(Some(p.id), Some(dep_id), "deployment", "info", &format!("Starting deployment #{} for {}", dep_id, p.name));
+        let start_stop_seq = self.runtime.get_stop_seq(p.id);
+        let container = self.runtime.ensure_container(&p);
+        self.logs.add(
+            Some(p.id),
+            Some(dep_id),
+            "deployment",
+            "info",
+            &format!(
+                "Starting deployment #{} for {} in isolated container '{}' (Port: {}, DB: {})",
+                dep_id,
+                p.name,
+                container.container_id,
+                container.port,
+                container.db_dir.display()
+            ),
+        );
 
         // Stage 1: Fetching
         self.update_stage(dep_id, "fetching");
@@ -293,21 +308,38 @@ impl Deployer {
             conn.execute("UPDATE deployments SET release_id=?, sha=? WHERE id=?", params![release_id, head, dep_id]).ok();
         }
 
-        // Write .env file before install/build so Vite/Next.js build steps have access to env vars
-        if let Ok(raw_env) = self.projects.export_raw_env(p.id) {
-            if !raw_env.is_empty() {
-                let _ = fs::write(release_dir.join(".env"), raw_env);
-            }
-        }
+        // Link release `data/` folder to isolated container DB and write container-isolated .env
+        self.runtime.link_work_dir_to_container(&release_dir, &container);
+        let env_map = self.projects.get_env_map(p.id);
+        let (_isolated_env, dotenv_body) = self.runtime.build_container_env(&p, &env_map, &container);
+        let _ = fs::write(release_dir.join(".env"), dotenv_body);
 
         // Stage 3: Installing dependencies
-        if !p.install_cmd.trim().is_empty() {
+        let has_pkg_json = release_dir.join("package.json").exists();
+        let effective_install_cmd = if !p.install_cmd.trim().is_empty() {
+            p.install_cmd.clone()
+        } else if has_pkg_json {
+            "npm install".to_string()
+        } else {
+            String::new()
+        };
+
+        if !effective_install_cmd.trim().is_empty() {
             self.update_stage(dep_id, "installing");
-            self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running install: {}", p.install_cmd));
-            if let Err(e) = run_shell_cmd(&p.install_cmd, &release_dir, &self.logs, p.id, dep_id).await {
-                self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e));
-                self.finish_deployment(dep_id, "failed", Some(&e));
-                return;
+            self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running install: {}", effective_install_cmd));
+            if let Err(e) = run_shell_cmd(&effective_install_cmd, &release_dir, &self.logs, p.id, dep_id).await {
+                if effective_install_cmd.contains("npm ci") && has_pkg_json {
+                    self.logs.add(Some(p.id), Some(dep_id), "build", "warn", "npm ci failed, falling back to npm install...");
+                    if let Err(e2) = run_shell_cmd("npm install", &release_dir, &self.logs, p.id, dep_id).await {
+                        self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e2));
+                        self.finish_deployment(dep_id, "failed", Some(&e2));
+                        return;
+                    }
+                } else {
+                    self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e));
+                    self.finish_deployment(dep_id, "failed", Some(&e));
+                    return;
+                }
             }
         }
 
@@ -347,6 +379,24 @@ impl Deployer {
         switch_current(&current_symlink, &release_dir);
 
         // Stage 6: Health Checking
+        if self.runtime.get_stop_seq(p.id) != start_stop_seq {
+            self.logs.add(
+                Some(p.id),
+                Some(dep_id),
+                "deployment",
+                "warn",
+                "Website was stopped by user during deployment — release built and linked without starting process.",
+            );
+            let ts = now();
+            {
+                let conn = self.db.lock().unwrap();
+                conn.execute("UPDATE releases SET status='succeeded', deployed_at=? WHERE id=?", params![ts, release_id]).ok();
+                conn.execute("UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?", params![release_id, head, ts, p.id]).ok();
+            }
+            self.finish_deployment(dep_id, "success", None);
+            return;
+        }
+
         self.update_stage(dep_id, "health_checking");
         let env_map = self.projects.get_env_map(p.id);
         if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {

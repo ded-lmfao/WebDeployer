@@ -14,7 +14,83 @@ pub struct User {
     pub id: i64,
     pub username: String,
     pub role: String,
+    pub disabled: bool,
+    pub permissions: Vec<String>,
+    #[serde(rename = "allowedProjects")]
+    pub allowed_projects: Vec<i64>,
+    #[serde(rename = "allProjects")]
+    pub all_projects: bool,
+    #[serde(rename = "isMainAdmin")]
+    pub is_main_admin: bool,
     pub created_at: i64,
+}
+
+impl User {
+    pub fn from_db(
+        id: i64,
+        username: String,
+        role: String,
+        disabled_int: i64,
+        perms_json: String,
+        proj_json: String,
+        created_at: i64,
+    ) -> Self {
+        let is_main_admin = id == 1 || username.eq_ignore_ascii_case("admin");
+        let disabled = !is_main_admin && disabled_int != 0;
+
+        let mut permissions: Vec<String> = serde_json::from_str(&perms_json).unwrap_or_default();
+        if is_main_admin {
+            permissions = vec!["*".to_string()];
+        } else if permissions.is_empty() && role == "admin" {
+            permissions = vec!["*".to_string()];
+        }
+
+        let mut all_projects = is_main_admin;
+        let mut allowed_projects = Vec::new();
+        if !is_main_admin {
+            if let Ok(vals) = serde_json::from_str::<Vec<serde_json::Value>>(&proj_json) {
+                for v in vals {
+                    if v.as_str() == Some("*") {
+                        all_projects = true;
+                    } else if let Some(pid) = v.as_i64() {
+                        allowed_projects.push(pid);
+                    } else if let Some(s) = v.as_str() {
+                        if let Ok(pid) = s.parse::<i64>() {
+                            allowed_projects.push(pid);
+                        }
+                    }
+                }
+            } else {
+                all_projects = true;
+            }
+        }
+
+        Self {
+            id,
+            username,
+            role: if is_main_admin { "admin".to_string() } else { role },
+            disabled,
+            permissions,
+            allowed_projects,
+            all_projects,
+            is_main_admin,
+            created_at,
+        }
+    }
+
+    pub fn has_power(&self, power: &str) -> bool {
+        if self.is_main_admin || self.role == "admin" {
+            return true;
+        }
+        self.permissions.iter().any(|p| p == "*" || p == power)
+    }
+
+    pub fn can_access_project(&self, project_id: i64) -> bool {
+        if self.is_main_admin || self.all_projects {
+            return true;
+        }
+        self.allowed_projects.contains(&project_id)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -100,15 +176,18 @@ impl Auth {
     pub fn get_user_by_id(&self, id: i64) -> Option<User> {
         let conn = self.db.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at FROM users WHERE id = ?",
+            "SELECT id, username, role, disabled, permissions, allowed_projects, created_at FROM users WHERE id = ?",
             params![id],
             |r| {
-                Ok(User {
-                    id: r.get(0)?,
-                    username: r.get(1)?,
-                    role: r.get(2)?,
-                    created_at: r.get(3)?,
-                })
+                Ok(User::from_db(
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                    r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
+                    r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
+                    r.get(6)?,
+                ))
             },
         )
         .ok()
@@ -117,17 +196,20 @@ impl Auth {
     pub fn get_user_by_username(&self, username: &str) -> Option<(User, String)> {
         let conn = self.db.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, password_hash FROM users WHERE username = ?",
+            "SELECT id, username, role, disabled, permissions, allowed_projects, created_at, password_hash FROM users WHERE username = ?",
             params![username],
             |r| {
                 Ok((
-                    User {
-                        id: r.get(0)?,
-                        username: r.get(1)?,
-                        role: r.get(2)?,
-                        created_at: r.get(3)?,
-                    },
-                    r.get(4)?,
+                    User::from_db(
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                        r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
+                        r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
+                        r.get(6)?,
+                    ),
+                    r.get(7)?,
                 ))
             },
         )
@@ -165,7 +247,7 @@ impl Auth {
 
         let conn = self.db.lock().unwrap();
         let res = conn.query_row(
-            "SELECT s.id, s.user_id, s.expires_at, s.csrf_token, u.username, u.role, u.created_at
+            "SELECT s.id, s.user_id, s.expires_at, s.csrf_token, u.username, u.role, u.disabled, u.permissions, u.allowed_projects, u.created_at
              FROM sessions s
              JOIN users u ON u.id = s.user_id
              WHERE s.id = ? AND s.expires_at > ?",
@@ -177,17 +259,20 @@ impl Auth {
                     expires_at: r.get(2)?,
                     csrf_token: r.get(3)?,
                 };
-                let user = User {
-                    id: r.get(1)?,
-                    username: r.get(4)?,
-                    role: r.get(5)?,
-                    created_at: r.get(6)?,
-                };
+                let user = User::from_db(
+                    r.get(1)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                    r.get::<_, Option<String>>(7)?.unwrap_or_else(|| "[\"*\"]".into()),
+                    r.get::<_, Option<String>>(8)?.unwrap_or_else(|| "[\"*\"]".into()),
+                    r.get(9)?,
+                );
                 Ok((session, user))
             },
         );
 
-        res.ok()
+        res.ok().filter(|(_, u)| !u.disabled)
     }
 
     pub fn delete_session(&self, session_id: &str) {

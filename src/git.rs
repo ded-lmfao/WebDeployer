@@ -38,6 +38,35 @@ fn copy_dir_all(src: &Path, dst: &Path, skip_git: bool) -> Result<(), String> {
 }
 
 impl Git {
+    fn get_sqlite_github_token() -> Option<String> {
+        let db_path = std::env::var("WEBDEP_DB")
+            .or_else(|_| std::env::var("NEXUS_DB"))
+            .unwrap_or_else(|_| "./data/webdep.sqlite".into());
+        let conn = rusqlite::Connection::open(db_path).ok()?;
+        let tok: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'github_token'",
+                [],
+                |r| r.get(0),
+            )
+            .ok()?;
+        let trimmed = tok.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }
+
+    fn inject_token_url(repo_url: &str) -> String {
+        if let Some(tok) = Self::get_sqlite_github_token() {
+            if let Some(rest) = repo_url.strip_prefix("https://github.com/") {
+                return format!("https://x-access-token:{}@github.com/{}", tok, rest);
+            }
+        }
+        repo_url.to_string()
+    }
+
     pub fn resolve_head(repo_dir: &Path) -> Result<String, String> {
         let out = Command::new("git")
             .current_dir(repo_dir)
@@ -67,12 +96,17 @@ impl Git {
     }
 
     pub fn clone_or_fetch(repo_url: &str, target_dir: &Path, branch: &str) -> Result<(), String> {
+        let auth_url = Self::inject_token_url(repo_url);
         if target_dir.join(".git").exists() {
+            let _ = Command::new("git")
+                .current_dir(target_dir)
+                .args(["remote", "set-url", "origin", &auth_url])
+                .output();
             Self::fetch(target_dir, branch)?;
         } else {
             std::fs::create_dir_all(target_dir).ok();
             let out = Command::new("git")
-                .args(["clone", "--branch", branch, repo_url, target_dir.to_str().unwrap_or(".")])
+                .args(["clone", "--branch", branch, &auth_url, target_dir.to_str().unwrap_or(".")])
                 .output()
                 .map_err(|e| format!("Failed to run git clone: {}", e))?;
 

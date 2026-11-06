@@ -21,8 +21,9 @@ if (-not (Test-Path $binaryPath)) {
 $port = if ($env:PORT) { $env:PORT } else { "4600" }
 $url = "http://127.0.0.1:$port"
 
-Stop-Process -Name "webdep" -Force -ErrorAction SilentlyContinue
-Stop-Process -Name "nexus-deploy" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "webdep*" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "nexus-deploy*" -Force -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 4600 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
 Write-Host "[*] Starting WebDep server on $url" -ForegroundColor Green
 Write-Host "[*] SQLite Database: data\webdep.sqlite" -ForegroundColor Cyan

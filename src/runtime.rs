@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -9,10 +11,27 @@ use crate::db::{now, DbPool};
 use crate::logs::Logs;
 use crate::projects::Project;
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct WebsiteContainer {
+    pub container_id: String,
+    pub project_id: i64,
+    pub slug: String,
+    pub port: u16,
+    pub root_dir: PathBuf,
+    pub db_dir: PathBuf,
+    pub storage_dir: PathBuf,
+    pub tmp_dir: PathBuf,
+    pub home_dir: PathBuf,
+    pub cache_dir: PathBuf,
+    pub run_dir: PathBuf,
+}
+
 pub struct Runtime {
     db: DbPool,
     logs: Logs,
     processes: Arc<Mutex<HashMap<i64, Child>>>,
+    project_locks: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
+    stop_seq: Arc<Mutex<HashMap<i64, u64>>>,
 }
 
 impl Runtime {
@@ -21,35 +40,426 @@ impl Runtime {
             db,
             logs,
             processes: Arc::new(Mutex::new(HashMap::new())),
+            project_locks: Arc::new(Mutex::new(HashMap::new())),
+            stop_seq: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn kill_pid_background(&self, pid: u32) {
-        if pid == 0 || pid == std::process::id() {
-            return;
+    fn get_project_lock(&self, project_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+        let mut map = self.project_locks.lock().unwrap();
+        map.entry(project_id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
+    pub fn get_stop_seq(&self, project_id: i64) -> u64 {
+        let map = self.stop_seq.lock().unwrap();
+        *map.get(&project_id).unwrap_or(&0)
+    }
+
+    pub fn bump_stop_seq(&self, project_id: i64) -> u64 {
+        let mut map = self.stop_seq.lock().unwrap();
+        let entry = map.entry(project_id).or_insert(0);
+        *entry += 1;
+        *entry
+    }
+
+    /// Provision an isolated container directory structure for a website (`data/containers/<slug>/`)
+    /// so its database, uploads, temp files, caches, and environment never clash with any other website.
+    pub fn ensure_container(&self, p: &Project) -> WebsiteContainer {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let safe_slug = if p.slug.trim().is_empty() {
+            format!("site-{}", p.id)
+        } else {
+            p.slug.trim().to_string()
+        };
+
+        let root_dir = cwd.join("data").join("containers").join(&safe_slug);
+        let db_dir = root_dir.join("db");
+        let storage_dir = root_dir.join("storage");
+        let tmp_dir = root_dir.join("tmp");
+        let home_dir = root_dir.join("home");
+        let cache_dir = root_dir.join("cache");
+        let run_dir = root_dir.join("run");
+
+        let _ = std::fs::create_dir_all(&db_dir);
+        let _ = std::fs::create_dir_all(&storage_dir);
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let _ = std::fs::create_dir_all(&home_dir);
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let _ = std::fs::create_dir_all(&run_dir);
+
+        // Seamless migration from legacy `data/app-data/<slug>` into `data/containers/<slug>/db`
+        let legacy_app_data = cwd.join("data").join("app-data").join(&safe_slug);
+        if legacy_app_data.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&legacy_app_data) {
+                for entry in entries.flatten() {
+                    let src = entry.path();
+                    if src.is_file() {
+                        let dst = db_dir.join(entry.file_name());
+                        if !dst.exists() {
+                            let _ = std::fs::copy(&src, &dst);
+                        }
+                    }
+                }
+            }
         }
-        tokio::spawn(async move {
+
+        let container = WebsiteContainer {
+            container_id: format!("webdep-ctr-{}-{}", p.id, safe_slug),
+            project_id: p.id,
+            slug: safe_slug,
+            port: p.port.unwrap_or(3000),
+            root_dir: root_dir.clone(),
+            db_dir,
+            storage_dir,
+            tmp_dir,
+            home_dir,
+            cache_dir,
+            run_dir,
+        };
+
+        let manifest_path = root_dir.join("container.json");
+        if let Ok(json_str) = serde_json::to_string_pretty(&container) {
+            let _ = std::fs::write(manifest_path, json_str);
+        }
+
+        container
+    }
+
+    /// Link `<work_dir>/data` to the website's isolated container `db/` folder so relative `./data` paths
+    /// inside any Node/Python app stay isolated per container and persist across releases.
+    pub fn link_work_dir_to_container(&self, work_dir: &Path, container: &WebsiteContainer) {
+        let data_subdir = work_dir.join("data");
+        let target_db_dir = &container.db_dir;
+
+        // If `work_dir/data` is a real directory (not a symlink/junction), migrate any files inside it first
+        if let Ok(meta) = std::fs::symlink_metadata(&data_subdir) {
+            if meta.is_dir() && !meta.file_type().is_symlink() {
+                if let Ok(entries) = std::fs::read_dir(&data_subdir) {
+                    for entry in entries.flatten() {
+                        let src = entry.path();
+                        if src.is_file() {
+                            let dst = target_db_dir.join(entry.file_name());
+                            if !dst.exists() {
+                                let _ = std::fs::copy(&src, &dst);
+                            }
+                        }
+                    }
+                }
+                #[cfg(windows)]
+                {
+                    let link_str = data_subdir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", "rmdir", &link_str])
+                        .output();
+                }
+                let _ = std::fs::remove_dir_all(&data_subdir);
+            }
+        }
+
+        if !data_subdir.exists() && std::fs::symlink_metadata(&data_subdir).is_err() {
             #[cfg(windows)]
             {
-                let fut = tokio::process::Command::new("taskkill")
-                    .args(["/F", "/T", "/PID", &pid.to_string()])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-                let _ = tokio::time::timeout(Duration::from_secs(2), fut).await;
+                let link_str = data_subdir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                let target_str = target_db_dir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J", &link_str, &target_str])
+                    .output();
             }
             #[cfg(unix)]
             {
-                let fut = tokio::process::Command::new("kill")
-                    .args(["-9", &pid.to_string()])
+                let _ = std::os::unix::fs::symlink(target_db_dir, &data_subdir);
+            }
+        }
+    }
+
+    /// Build isolated environment variables and `.env` file content for a website container.
+    /// Ensures `PORT`, `CERT_DATA_DIR`, `APP_DATA_DIR`, `DATA_DIR`, `STORAGE_DIR`, and `APP_URL`
+    /// never clash with another website even if the user copied `.env` from another project.
+    pub fn build_container_env(
+        &self,
+        p: &Project,
+        user_env: &HashMap<String, String>,
+        container: &WebsiteContainer,
+    ) -> (HashMap<String, String>, String) {
+        let mut final_env = user_env.clone();
+        let port = p.port.unwrap_or(3000);
+        let port_str = port.to_string();
+
+        let db_dir_str = container
+            .db_dir
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let storage_dir_str = container
+            .storage_dir
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let tmp_dir_str = container
+            .tmp_dir
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let cache_dir_str = container
+            .cache_dir
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+
+        // Force container port & container identity
+        final_env.insert("PORT".to_string(), port_str.clone());
+        final_env.insert("WEBDEP_CONTAINER_ID".to_string(), container.container_id.clone());
+        final_env.insert("WEBDEP_SITE_SLUG".to_string(), container.slug.clone());
+
+        // Force isolated database and storage directories so two websites NEVER share SQLite files
+        final_env.insert("CERT_DATA_DIR".to_string(), db_dir_str.clone());
+        final_env.insert("APP_DATA_DIR".to_string(), db_dir_str.clone());
+        final_env.insert("DATA_DIR".to_string(), db_dir_str.clone());
+        final_env.insert("DB_DIR".to_string(), db_dir_str.clone());
+        final_env.insert("SQLITE_DIR".to_string(), db_dir_str.clone());
+        final_env.insert("STORAGE_DIR".to_string(), storage_dir_str.clone());
+        final_env.insert("UPLOAD_DIR".to_string(), storage_dir_str.clone());
+        final_env.insert("TEMP".to_string(), tmp_dir_str.clone());
+        final_env.insert("TMP".to_string(), tmp_dir_str.clone());
+        final_env.insert("TMPDIR".to_string(), tmp_dir_str);
+        final_env.insert("NPM_CONFIG_CACHE".to_string(), cache_dir_str);
+
+        // Ensure APP_URL on localhost/127.0.0.1 uses THIS container's assigned port so OAuth/CSRF never redirect to another website
+        if let Some(app_url) = final_env.get("APP_URL").cloned() {
+            let trimmed = app_url.trim();
+            if trimmed.starts_with("http://localhost:") || trimmed.starts_with("http://127.0.0.1:") {
+                let host_prefix = if trimmed.starts_with("http://localhost:") {
+                    "http://localhost"
+                } else {
+                    "http://127.0.0.1"
+                };
+                final_env.insert("APP_URL".to_string(), format!("{}:{}", host_prefix, port));
+            } else if trimmed.is_empty() {
+                final_env.insert("APP_URL".to_string(), format!("http://127.0.0.1:{}", port));
+            }
+        }
+
+        // Ensure each container has a valid, isolated AUTH_ENCRYPTION_KEY if blank or missing
+        let needs_auth_key = match final_env.get("AUTH_ENCRYPTION_KEY") {
+            Some(v) => v.trim().len() != 64 || !v.trim().chars().all(|c| c.is_ascii_hexdigit()),
+            None => true,
+        };
+        if needs_auth_key {
+            let mut hasher = Sha256::new();
+            hasher.update(format!("webdep-container-auth-key-{}-{}-{}", p.id, p.slug, port).as_bytes());
+            let hex_key = format!("{:x}", hasher.finalize());
+            final_env.insert("AUTH_ENCRYPTION_KEY".to_string(), hex_key);
+        }
+
+        // Build .env file content with user variables first and container isolation overrides at the bottom
+        let mut dotenv_body = format!(
+            "# Auto-generated by WebDep Container Engine ({})\n# Isolated DB: {}\n",
+            container.container_id, db_dir_str
+        );
+
+        let mut keys: Vec<&String> = final_env.keys().collect();
+        keys.sort();
+        for k in keys {
+            if let Some(v) = final_env.get(k) {
+                if v.contains(' ') || v.contains('\n') || v.contains('"') || v.contains('#') {
+                    dotenv_body.push_str(&format!("{}=\"{}\"\n", k, v.replace('"', "\\\"")));
+                } else {
+                    dotenv_body.push_str(&format!("{}={}\n", k, v));
+                }
+            }
+        }
+
+        (final_env, dotenv_body)
+    }
+
+    fn record_container_pid(&self, container: &WebsiteContainer, pid: u32) {
+        if pid == 0 {
+            return;
+        }
+        let pid_file = container.run_dir.join("pids.txt");
+        let mut existing = std::fs::read_to_string(&pid_file).unwrap_or_default();
+        existing.push_str(&format!("{}\n", pid));
+        let _ = std::fs::write(&pid_file, existing);
+    }
+
+    fn read_container_pids(&self, container: &WebsiteContainer) -> Vec<u32> {
+        let pid_file = container.run_dir.join("pids.txt");
+        let content = std::fs::read_to_string(&pid_file).unwrap_or_default();
+        content
+            .lines()
+            .filter_map(|l| l.trim().parse::<u32>().ok())
+            .filter(|&pid| pid > 0 && pid != std::process::id())
+            .collect()
+    }
+
+    fn clear_container_pids(&self, container: &WebsiteContainer) {
+        let pid_file = container.run_dir.join("pids.txt");
+        let _ = std::fs::remove_file(pid_file);
+    }
+
+    /// Find all OS process IDs currently listening on `port`.
+    pub fn find_pids_on_port(port: u16) -> Vec<u32> {
+        let mut pids = HashSet::new();
+        let self_pid = std::process::id();
+
+        #[cfg(windows)]
+        {
+            if let Ok(out) = std::process::Command::new("netstat")
+                .args(["-ano", "-p", "TCP"])
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+            {
+                let text = String::from_utf8_lossy(&out.stdout);
+                let port_suffix = format!(":{}", port);
+                for line in text.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    // Proto LocalAddress ForeignAddress State PID
+                    if parts.len() >= 5 && parts[3].eq_ignore_ascii_case("LISTENING") {
+                        let local_addr = parts[1];
+                        if local_addr.ends_with(&port_suffix) {
+                            if let Ok(pid) = parts[4].parse::<u32>() {
+                                if pid > 0 && pid != self_pid {
+                                    pids.insert(pid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            if let Ok(out) = std::process::Command::new("lsof")
+                .args(["-ti", &format!("tcp:{}", port)])
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+            {
+                let text = String::from_utf8_lossy(&out.stdout);
+                for line in text.lines() {
+                    if let Ok(pid) = line.trim().parse::<u32>() {
+                        if pid > 0 && pid != self_pid {
+                            pids.insert(pid);
+                        }
+                    }
+                }
+            }
+        }
+
+        pids.into_iter().collect()
+    }
+
+    pub async fn kill_pid_tree(pid: u32) {
+        if pid == 0 || pid == std::process::id() {
+            return;
+        }
+        #[cfg(windows)]
+        {
+            let fut = tokio::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = tokio::time::timeout(Duration::from_secs(3), fut).await;
+        }
+        #[cfg(unix)]
+        {
+            let fut = tokio::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = tokio::time::timeout(Duration::from_secs(3), fut).await;
+        }
+    }
+
+    pub async fn is_port_accepting(port: u16) -> bool {
+        tokio::time::timeout(
+            Duration::from_millis(150),
+            tokio::net::TcpStream::connect(("127.0.0.1", port)),
+        )
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false)
+    }
+
+    /// Comprehensively shut down all processes, child trees, port listeners, and containers for a website.
+    async fn kill_project_everything(&self, p: &Project) {
+        let container = self.ensure_container(p);
+        let mut pids_to_kill: HashSet<u32> = HashSet::new();
+
+        // 1. In-memory Child handle
+        let old_child = {
+            let mut map = self.processes.lock().unwrap();
+            map.remove(&p.id)
+        };
+        if let Some(mut child) = old_child {
+            if let Some(pid) = child.id() {
+                pids_to_kill.insert(pid);
+            }
+            let _ = child.start_kill();
+        }
+
+        // 2. SQLite recorded PID
+        if let Some(old_pid) = p.app_pid {
+            if old_pid > 0 {
+                pids_to_kill.insert(old_pid);
+            }
+        }
+
+        // 3. Container pidfile PIDs
+        for cpid in self.read_container_pids(&container) {
+            pids_to_kill.insert(cpid);
+        }
+
+        // 4. All processes listening on the website's port
+        if let Some(port) = p.port {
+            for port_pid in Self::find_pids_on_port(port) {
+                pids_to_kill.insert(port_pid);
+            }
+        }
+
+        // Kill all collected PIDs and their child trees
+        for pid in pids_to_kill {
+            Self::kill_pid_tree(pid).await;
+        }
+
+        // 5. If Docker / Docker Compose is used, stop container as well
+        if p.deploy_method == "docker" || p.deploy_method == "compose" {
+            let docker_name = format!("webdep-{}", container.slug);
+            let _ = tokio::time::timeout(
+                Duration::from_secs(3),
+                tokio::process::Command::new("docker")
+                    .args(["rm", "-f", &docker_name])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .status();
-                let _ = tokio::time::timeout(Duration::from_secs(2), fut).await;
+                    .status(),
+            )
+            .await;
+        }
+
+        // 6. Verify the website's port is completely freed (retry up to 1.5s if child processes re-bound)
+        if let Some(port) = p.port {
+            for _ in 0..12 {
+                let remaining_pids = Self::find_pids_on_port(port);
+                if remaining_pids.is_empty() && !Self::is_port_accepting(port).await {
+                    break;
+                }
+                for pid in remaining_pids {
+                    Self::kill_pid_tree(pid).await;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-        });
+        }
+
+        self.clear_container_pids(&container);
     }
 
     pub async fn start_project(
@@ -58,26 +468,18 @@ impl Runtime {
         env_vars: HashMap<String, String>,
         release_dir: Option<&Path>,
     ) -> Result<u32, String> {
-        // Kill existing if already running (non-blocking)
-        let old = {
-            let mut map = self.processes.lock().unwrap();
-            map.remove(&p.id)
-        };
-        if let Some(mut old_child) = old {
-            if let Some(pid) = old_child.id() {
-                self.kill_pid_background(pid);
-            }
-            let _ = old_child.start_kill();
-        }
-        if let Some(old_pid) = p.app_pid {
-            self.kill_pid_background(old_pid as u32);
-        }
+        let proj_lock = self.get_project_lock(p.id);
+        let _guard = proj_lock.lock().await;
+
+        // First shut down any existing process or port listener for this website
+        self.kill_project_everything(p).await;
 
         if p.start_cmd.trim().is_empty() {
             return Err("No start command configured for this project".to_string());
         }
 
-        let port_str = p.port.unwrap_or(3000).to_string();
+        let container = self.ensure_container(p);
+        let port_str = container.port.to_string();
         let resolved_cmd = p.start_cmd.replace("{{PORT}}", &port_str);
 
         // Normalize base deploy directory to an absolute OS path
@@ -141,6 +543,13 @@ impl Runtime {
             None => return Err("NOT_DEPLOYED_YET".to_string()),
         };
 
+        // Link `<work_dir>/data` into the isolated container's `db/` directory
+        self.link_work_dir_to_container(&work_dir, &container);
+
+        // Build isolated container environment and write `.env` into working directory
+        let (isolated_env, dotenv_body) = self.build_container_env(p, &env_vars, &container);
+        let _ = std::fs::write(work_dir.join(".env"), dotenv_body);
+
         // Shell execution: supports npx, npm, node, yarn, python, uvicorn on any OS
         let mut final_cmd = resolved_cmd;
         if final_cmd.contains("vite preview") && work_dir.join("server.js").exists() {
@@ -163,43 +572,23 @@ impl Runtime {
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
 
-        // Provide a guaranteed writable data directory for full-stack apps
-        let app_data_dir = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("data")
-            .join("app-data")
-            .join(&p.slug);
-        let _ = std::fs::create_dir_all(&app_data_dir);
-        let app_data_str = app_data_dir.to_string_lossy().to_string();
-        cmd.env("CERT_DATA_DIR", &app_data_str);
-        cmd.env("APP_DATA_DIR", &app_data_str);
-
-        // Write .env file into working directory so frameworks reading .env from disk work out of the box
-        if !env_vars.is_empty() {
-            let mut dotenv_body = String::from("# Auto-generated from WebDep SQLite Vault\n");
-            for (k, v) in &env_vars {
-                if v.contains(' ') || v.contains('\n') || v.contains('"') {
-                    dotenv_body.push_str(&format!("{}=\"{}\"\n", k, v.replace('"', "\\\"")));
-                } else {
-                    dotenv_body.push_str(&format!("{}={}\n", k, v));
-                }
-            }
-            let _ = std::fs::write(work_dir.join(".env"), dotenv_body);
-        }
-
-        // Inject environment variables (user env vars override defaults if specified)
-        for (k, v) in env_vars {
+        for (k, v) in &isolated_env {
             cmd.env(k, v);
         }
-        cmd.env("PORT", &port_str);
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("Failed to spawn process '{}' in '{}': {}", final_cmd, work_dir.display(), e))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Failed to spawn process '{}' in '{}': {}",
+                final_cmd,
+                work_dir.display(),
+                e
+            )
+        })?;
 
         let pid = child.id().unwrap_or(0);
+        self.record_container_pid(&container, pid);
 
-        // Asynchronously drain stdout and stderr to prevent OS pipe buffers from filling and blocking the child process!
+        // Asynchronously drain stdout and stderr to prevent OS pipe buffers from filling and blocking the child process
         if let Some(stdout) = child.stdout.take() {
             let logs_clone = self.logs.clone();
             let proj_id = p.id;
@@ -224,6 +613,12 @@ impl Runtime {
             });
         }
 
+        // Wait briefly (250ms) and also record any listening port PID into container pids.txt
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        for port_pid in Self::find_pids_on_port(container.port) {
+            self.record_container_pid(&container, port_pid);
+        }
+
         // Update database status
         let ts = now();
         {
@@ -240,7 +635,14 @@ impl Runtime {
             None,
             "app",
             "info",
-            &format!("Started process '{}' (PID: {}) in {}", final_cmd, pid, work_dir.display()),
+            &format!(
+                "Started container '{}' process '{}' (PID: {}, Port: {}, DB: {})",
+                container.container_id,
+                final_cmd,
+                pid,
+                container.port,
+                container.db_dir.display()
+            ),
         );
 
         {
@@ -251,7 +653,10 @@ impl Runtime {
     }
 
     pub async fn stop_project(&self, p: &Project) -> Result<(), String> {
-        // Immediately update SQLite first so UI state updates in < 1ms
+        // Bump stop_seq first so any in-progress deployment knows Stop was requested
+        self.bump_stop_seq(p.id);
+
+        // Immediately update SQLite status to stopped
         {
             let conn = self.db.lock().unwrap();
             conn.execute(
@@ -261,18 +666,19 @@ impl Runtime {
             .ok();
         }
 
-        let old = {
-            let mut map = self.processes.lock().unwrap();
-            map.remove(&p.id)
-        };
-        if let Some(mut child) = old {
-            if let Some(pid) = child.id() {
-                self.kill_pid_background(pid);
-            }
-            let _ = child.start_kill();
-        }
-        if let Some(old_pid) = p.app_pid {
-            self.kill_pid_background(old_pid as u32);
+        // Acquire per-project lock and synchronously terminate all processes + port listeners for this website
+        let proj_lock = self.get_project_lock(p.id);
+        let _guard = proj_lock.lock().await;
+        self.kill_project_everything(p).await;
+
+        // Re-ensure SQLite status is stopped in case a concurrent start finished just before the lock
+        {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "UPDATE projects SET app_status='stopped', app_pid=NULL, app_started_at=NULL WHERE id=?",
+                rusqlite::params![p.id],
+            )
+            .ok();
         }
 
         self.logs.add(
@@ -280,7 +686,11 @@ impl Runtime {
             None,
             "app",
             "info",
-            &format!("Stopped application '{}'", p.name),
+            &format!(
+                "Stopped website container '{}' (Port {} released and all processes terminated)",
+                p.name,
+                p.port.unwrap_or(3000)
+            ),
         );
 
         Ok(())
@@ -313,7 +723,10 @@ impl Runtime {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
-        Err(format!("Health check timed out after {}s (endpoint: {}): {}", timeout_s, url, last_err))
+        Err(format!(
+            "Health check timed out after {}s (endpoint: {}): {}",
+            timeout_s, url, last_err
+        ))
     }
 }
 
@@ -347,7 +760,12 @@ async fn reqwest_or_hyper(url_str: &str, timeout: Duration) -> Result<bool, Stri
     let n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
     if n >= 12 {
         let res_line = String::from_utf8_lossy(&buf);
-        if res_line.contains("200") || res_line.contains("204") || res_line.contains("301") || res_line.contains("302") || res_line.contains("304") {
+        if res_line.contains("200")
+            || res_line.contains("204")
+            || res_line.contains("301")
+            || res_line.contains("302")
+            || res_line.contains("304")
+        {
             return Ok(true);
         }
     }

@@ -190,13 +190,36 @@ function showLogin() {
   document.getElementById('app').style.display = 'none';
 }
 
+function hasPower(power) {
+  if (!state.user) return false;
+  if (state.user.isMainAdmin || state.user.role === 'admin') return true;
+  const perms = state.user.permissions || [];
+  return perms.includes('*') || perms.includes(power);
+}
+window.hasPower = hasPower;
+
 function onAuthenticated() {
   document.getElementById('login-view').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
 
   document.getElementById('current-user-name').textContent = state.user.username;
-  document.getElementById('current-user-role').textContent = state.user.role;
+  document.getElementById('current-user-role').textContent = state.user.isMainAdmin ? 'MAIN ADMIN' : (state.user.role || 'operator').toUpperCase();
   document.getElementById('current-user-avatar').textContent = (state.user.username || 'AD').slice(0, 2).toUpperCase();
+
+  // Adapt UI controls to user's granted powers
+  const addSiteBtn = document.getElementById('global-add-website-btn');
+  if (addSiteBtn) addSiteBtn.style.display = hasPower('projects_manage') ? '' : 'none';
+
+  const navPowerMap = {
+    env: 'env',
+    domains: 'domains',
+    backups: 'backups',
+    settings: 'settings_manage',
+  };
+  Object.entries(navPowerMap).forEach(([view, pwr]) => {
+    const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
+    if (navEl) navEl.style.display = hasPower(pwr) ? '' : 'none';
+  });
 
   // Load projects & overview
   loadProjects().then(() => {
@@ -206,14 +229,40 @@ function onAuthenticated() {
 }
 
 // ============================================================================
-// Router & Navigation
+// Router, Website Card Workspace & Navigation
 // ============================================================================
+const WEBSITE_WORKSPACE_TABS = new Set([
+  'deployments',
+  'github',
+  'logs',
+  'env',
+  'releases',
+  'rollbacks',
+  'backups',
+  'monitor',
+  'audit',
+]);
+
+function openWebsiteWorkspace(projectId, tab = 'deployments') {
+  state.selectedProjectId = Number(projectId);
+  navigateTo(tab, state.selectedProjectId);
+}
+window.openWebsiteWorkspace = openWebsiteWorkspace;
+
+function switchWebsiteTab(tab) {
+  const p = getSelectedProject();
+  if (!p) {
+    navigateTo('projects');
+    return;
+  }
+  navigateTo(tab, p.id);
+}
+window.switchWebsiteTab = switchWebsiteTab;
+
 function navigateTo(viewName, projectId = null) {
   state.currentView = viewName;
   if (projectId !== null) {
-    state.selectedProjectId = projectId;
-    const sel = document.getElementById('global-project-select');
-    if (sel) sel.value = String(projectId);
+    state.selectedProjectId = Number(projectId);
   }
 
   window.location.hash = projectId ? `#/${viewName}/${projectId}` : `#/${viewName}`;
@@ -235,42 +284,131 @@ function handleHashRoute() {
 window.addEventListener('hashchange', handleHashRoute);
 
 function updateBreadcrumbs() {
-  const sectionName = state.currentView.charAt(0).toUpperCase() + state.currentView.slice(1);
   const secEl = document.getElementById('breadcrumb-section');
-  const sepEl = document.getElementById('breadcrumb-sep');
-  const projEl = document.getElementById('breadcrumb-project');
-  
-  if (secEl) secEl.textContent = sectionName;
-  
+  if (!secEl) return;
+
+  const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
   const p = getSelectedProject();
-  if (p && sepEl && projEl) {
-    sepEl.style.display = 'inline';
-    projEl.style.display = 'inline';
-    projEl.textContent = p.name;
-  } else if (sepEl && projEl) {
-    sepEl.style.display = 'none';
-    projEl.style.display = 'none';
+  const tabLabels = {
+    deployments: 'Deployments',
+    github: 'GitHub & Commits',
+    logs: 'Live Logs',
+    env: 'Environment (.env)',
+    releases: 'Releases',
+    rollbacks: 'Rollbacks',
+    backups: 'Backups',
+    monitor: 'Monitoring',
+    audit: 'Activity & Audit',
+  };
+
+  if (isInsideCard && p) {
+    secEl.innerHTML = `<span style="cursor:pointer; color:var(--text-muted);" onclick="navigateTo('projects')">Websites</span> &rsaquo; <strong style="color:var(--text-main);">${escapeHtml(p.name)}</strong> &rsaquo; <span style="color:var(--accent-light);">${escapeHtml(tabLabels[state.currentView] || state.currentView)}</span>`;
+  } else {
+    const globalLabels = {
+      overview: 'System Overview',
+      projects: 'Hosted Websites',
+      settings: 'Platform Settings',
+    };
+    secEl.textContent = globalLabels[state.currentView] || state.currentView;
   }
 }
 
-function syncProjectSelectors() {
-  const optionsHtml = (state.projects || []).map((p) => `
-    <option value="${p.id}" ${state.selectedProjectId === p.id ? 'selected' : ''}>
-      ${escapeHtml(p.name)} (${p.slug})
-    </option>
-  `).join('');
+function renderWebsiteWorkspaceHeader() {
+  const banner = document.getElementById('website-workspace-banner');
+  if (!banner) return;
 
-  document.querySelectorAll('.view-project-selector, #env-project-selector').forEach((sel) => {
-    sel.innerHTML = optionsHtml;
-    if (state.selectedProjectId) {
-      sel.value = String(state.selectedProjectId);
+  const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
+  const p = getSelectedProject();
+  if (!isInsideCard || !p) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'block';
+  const isOnline = p.app_status === 'running';
+
+  const dot = document.getElementById('ws-status-dot');
+  if (dot) dot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
+
+  const title = document.getElementById('ws-project-title');
+  if (title) title.textContent = p.name;
+
+  const badge = document.getElementById('ws-status-badge');
+  if (badge) {
+    badge.className = `badge ${isOnline ? 'badge-success' : 'badge-neutral'}`;
+    badge.textContent = isOnline ? 'RUNNING' : 'STOPPED';
+  }
+
+  const links = document.getElementById('ws-project-links');
+  if (links) {
+    const url = p.port ? `http://127.0.0.1:${p.port}` : null;
+    const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
+    const ctrId = `webdep-ctr-${p.id}-${p.slug}`;
+    links.innerHTML = `
+      ${url ? (isOnline
+        ? `<a class="domain-badge" href="${url}" target="_blank">${url} &nearr;</a>`
+        : `<span class="domain-badge" style="opacity:0.55; cursor:not-allowed;" title="Container is stopped">${url} (Offline)</span>`
+      ) : ''}
+      <span>Container: <code>${escapeHtml(ctrId)}</code></span>
+      <span>&bull;</span>
+      <span>Isolated DB: <code>data/containers/${escapeHtml(p.slug)}/db</code></span>
+      <span>&bull;</span>
+      <span>Branch: <strong>${escapeHtml(p.branch || 'main')}</strong></span>
+      <span>&bull;</span>
+      <span>SHA: <code>${escapeHtml(sha)}</code></span>
+      ${p.port ? `<span>&bull; Port: <strong>${p.port}</strong></span>` : ''}
+    `;
+  }
+
+  const actions = document.getElementById('ws-project-actions');
+  if (actions) {
+    actions.innerHTML = `
+      ${hasPower('deploy') ? `
+        <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
+        <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})">Fetch Git</button>
+      ` : ''}
+      ${hasPower('process') ? `
+        ${isOnline
+          ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+          : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+        }
+        <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})">Restart</button>
+      ` : ''}
+      ${hasPower('domains') ? `
+        <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">Caddy / SSL</button>
+      ` : ''}
+      ${hasPower('projects_manage') ? `
+        <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">Website Config</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">Delete</button>
+      ` : ''}
+    `;
+  }
+
+  const tabPowerMap = {
+    env: 'env',
+    backups: 'backups',
+  };
+
+  document.querySelectorAll('#ws-tabs-bar .ws-tab-btn').forEach((btn) => {
+    const tab = btn.getAttribute('data-ws-tab');
+    const reqPower = tabPowerMap[tab];
+    if (reqPower && !hasPower(reqPower)) {
+      btn.style.display = 'none';
+    } else {
+      btn.style.display = '';
     }
+    const isActive = tab === state.currentView;
+    btn.className = `btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm ws-tab-btn`;
   });
+}
+
+function syncProjectSelectors() {
+  renderWebsiteWorkspaceHeader();
 }
 
 function renderCurrentView() {
   updateBreadcrumbs();
-  syncProjectSelectors();
+  renderWebsiteWorkspaceHeader();
 
   // Close SSE log stream when leaving the logs view so it never holds browser sockets open
   if (state.currentView !== 'logs' && state.logEventSource) {
@@ -282,9 +420,10 @@ function renderCurrentView() {
   document.querySelector('.sidebar')?.classList.remove('mobile-open');
   document.getElementById('sidebar-backdrop')?.classList.remove('active');
 
-  // Update sidebar active classes
+  // Update sidebar active classes (highlight 'projects' when inside a website card workspace)
+  const activeSidebarView = WEBSITE_WORKSPACE_TABS.has(state.currentView) ? 'projects' : state.currentView;
   document.querySelectorAll('.nav-item').forEach((item) => {
-    item.classList.toggle('active', item.getAttribute('data-view') === state.currentView);
+    item.classList.toggle('active', item.getAttribute('data-view') === activeSidebarView);
   });
 
   // Switch view section visibility
@@ -318,17 +457,13 @@ function renderCurrentView() {
 async function loadProjects() {
   try {
     state.projects = await api('/api/projects');
-    document.getElementById('badge-projects-count').textContent = state.projects.length;
-
-    const select = document.getElementById('global-project-select');
-    select.innerHTML = '<option value="">All Projects (Global)</option>' +
-      state.projects.map((p) => `<option value="${p.id}" ${state.selectedProjectId === p.id ? 'selected' : ''}>${escapeHtml(p.name)} (${p.slug})</option>`).join('');
+    const badgeEl = document.getElementById('badge-projects-count');
+    if (badgeEl) badgeEl.textContent = state.projects.length;
 
     if (state.projects.length > 0 && !state.selectedProjectId) {
       state.selectedProjectId = state.projects[0].id;
-      select.value = String(state.projects[0].id);
     }
-    syncProjectSelectors();
+    renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Failed to load projects: ${err.message}`, 'error');
   }
@@ -403,7 +538,8 @@ async function loadOverview() {
           const p = item.project;
           const isOnline = item.app?.running;
           const domains = p.domains && p.domains.length ? p.domains : [];
-          const domainLinks = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') || '<span style="color:var(--text-dim)">Local only</span>';
+          const domainLinks = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
+            (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>');
           const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">None</span>';
           
           let behindAhead = '--';
@@ -414,12 +550,12 @@ async function loadOverview() {
           const lastDep = item.lastSuccess ? `<span style="font-size:12px;">${formatRelativeTime(item.lastSuccess.finished_at || item.lastSuccess.started_at)}</span>` : '<span style="color:var(--text-dim)">Never</span>';
 
           return `
-            <tr>
+            <tr style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
               <td>
-                <strong style="color: var(--text-main); font-size: 14px; cursor: pointer;" onclick="navigateTo('projects', ${p.id})">${escapeHtml(p.name)}</strong>
+                <strong style="color: var(--accent-light); font-size: 14px;">${escapeHtml(p.name)}</strong>
                 <div style="font-size: 11px; color: var(--text-dim);">${escapeHtml(p.slug)} &bull; ${p.project_type}</div>
               </td>
-              <td>${domainLinks}</td>
+              <td onclick="event.stopPropagation()">${domainLinks}</td>
               <td>
                 <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
                 <span style="font-weight: 500; font-size: 12px; margin-left: 6px;">${isOnline ? 'Online' : 'Stopped'}</span>
@@ -427,11 +563,9 @@ async function loadOverview() {
               <td>${sha}</td>
               <td>${behindAhead}</td>
               <td>${lastDep}</td>
-              <td>
+              <td onclick="event.stopPropagation()">
                 <div style="display: flex; gap: 6px;">
-                  <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
-                  <button class="btn btn-secondary btn-sm" onclick="openLogsForProject(${p.id})">Logs</button>
-                  <button class="btn btn-secondary btn-sm" onclick="navigateTo('projects', ${p.id})">Manage</button>
+                  <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">Open Website &rarr;</button>
                 </div>
               </td>
             </tr>
@@ -500,13 +634,13 @@ function renderProjectsList() {
   container.innerHTML = filtered.map((p) => {
     const isOnline = p.app_status === 'running';
     const domains = p.domains && p.domains.length ? p.domains : [];
-    const domainBadges = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)} &nearr;</a>`).join(' ') ||
-      (p.port ? `<span class="domain-badge">http://127.0.0.1:${p.port}</span>` : '<span style="color:var(--text-dim); font-size:11px;">No domain assigned</span>');
+    const domainBadges = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank" onclick="event.stopPropagation()">${escapeHtml(d)} &nearr;</a>`).join(' ') ||
+      (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank" onclick="event.stopPropagation()">http://127.0.0.1:${p.port} &nearr;</a>` : '<span style="color:var(--text-dim); font-size:11px;">No domain assigned</span>');
 
     const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
 
     return `
-      <div class="project-card">
+      <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
         <div class="project-card-header">
           <div>
             <div class="project-info-title">
@@ -533,25 +667,21 @@ function renderProjectsList() {
 
         <div class="project-meta-row" style="margin-top: -6px;">
           <div class="project-meta-item">
-            <span>Method: <strong>${p.deploy_method}</strong></span>
+            <span>Container: <code>ctr-${escapeHtml(p.slug)}</code></span>
           </div>
           ${p.port ? `<div class="project-meta-item"><span>Port: <strong>${p.port}</strong></span></div>` : ''}
         </div>
 
-        <div class="project-card-actions">
-          <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
-          <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})">Fetch</button>
-          ${isOnline
-            ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-            : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
-          }
-          <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})">Restart</button>
-          <button class="btn btn-secondary btn-sm" onclick="openLogsForProject(${p.id})">Logs</button>
-          <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">Edit</button>
-          <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})" title="Caddy / Auto-SSL">Caddy</button>
-          <button class="btn btn-secondary btn-sm" onclick="navigateTo('env', ${p.id})" title="Environment">Env</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <div style="display: flex; gap: 6px;">
+            ${isOnline
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+            }
+            <button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
+            Manage Website &rarr;
           </button>
         </div>
       </div>
@@ -765,6 +895,9 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     closeModal('modal-website');
     await loadProjects();
     renderProjectsList();
+    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
+      renderWebsiteWorkspaceHeader();
+    }
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
   }
@@ -772,8 +905,14 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
 
 // Delete Project
 async function deleteProject(id, slug) {
-  const confirmSlug = prompt(`CAUTION: Deleting this website will remove its configuration and stop its running process.\n\nType the project slug "${slug}" to confirm:`);
-  if (!confirmSlug) return;
+  const confirmSlug = await showPromptDialog({
+    title: 'Delete Website',
+    message: `CAUTION: Deleting this website will remove its configuration from SQLite and stop its running process.\n\nType the website slug "${slug}" below to confirm deletion:`,
+    placeholder: slug,
+    confirmText: 'Delete Website',
+    danger: true,
+  });
+  if (confirmSlug === null) return;
   if (confirmSlug.trim() !== slug) {
     toast('Slug confirmation did not match. Deletion cancelled.', 'warning');
     return;
@@ -784,7 +923,7 @@ async function deleteProject(id, slug) {
     toast(`Website "${slug}" deleted.`, 'success');
     if (state.selectedProjectId === id) state.selectedProjectId = null;
     await loadProjects();
-    renderProjectsList();
+    navigateTo('projects');
   } catch (err) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
@@ -867,7 +1006,11 @@ async function loadGithubView() {
 async function generateDeployKey(projectId) {
   try {
     const res = await api(`/api/projects/${projectId}/deploy-key`, { method: 'POST' });
-    prompt('Add this Deploy Key to your GitHub repository Settings -> Deploy Keys (allow read access only):', res.publicKey);
+    await showCopyDialog({
+      title: 'SSH Deploy Key (Saved in SQLite)',
+      message: 'Add this public key to your GitHub repository under Settings -> Deploy Keys (allow read access):',
+      value: res.publicKey,
+    });
   } catch (err) {
     toast(`Failed to generate deploy key: ${err.message}`, 'error');
   }
@@ -875,11 +1018,20 @@ async function generateDeployKey(projectId) {
 window.generateDeployKey = generateDeployKey;
 
 async function rotateWebhookSecret(projectId) {
-  if (!confirm('Rotate the GitHub webhook secret? You will need to update the secret in your GitHub webhook settings.')) return;
+  const ok = await showConfirmDialog({
+    title: 'Rotate GitHub Webhook Secret',
+    message: 'Rotate the GitHub webhook secret for this website? You will need to update the secret in your GitHub repository webhook settings.',
+    confirmText: 'Rotate Secret',
+  });
+  if (!ok) return;
   try {
     const res = await api(`/api/projects/${projectId}/webhook-secret/rotate`, { method: 'POST' });
-    prompt('New Webhook Secret (paste into GitHub webhook secret field):', res.webhookSecret);
-    toast('Webhook secret rotated.', 'success');
+    toast('Webhook secret rotated and saved in SQLite.', 'success');
+    await showCopyDialog({
+      title: 'New GitHub Webhook Secret',
+      message: 'Paste this secret into your GitHub repository Webhook Secret field:',
+      value: res.webhookSecret,
+    });
   } catch (err) {
     toast(`Failed to rotate secret: ${err.message}`, 'error');
   }
@@ -1163,7 +1315,13 @@ async function loadRollbacksView() {
 }
 
 async function rollbackToRelease(projectId, releaseId) {
-  if (!confirm(`Are you sure you want to rollback to Release #${releaseId}?\n\nThe platform will atomically switch the symlink to this release, preserve your environment variables, and perform immediate health checks.`)) return;
+  const ok = await showConfirmDialog({
+    title: `Instant Rollback to Release #${releaseId}`,
+    message: `Are you sure you want to rollback to Release #${releaseId}?\n\nWebDep will atomically switch the active release junction, preserve your environment variables, and restart the website.`,
+    confirmText: `Rollback to #${releaseId}`,
+    danger: true,
+  });
+  if (!ok) return;
 
   try {
     const res = await api(`/api/projects/${projectId}/rollback`, { method: 'POST', body: { releaseId } });
@@ -1364,25 +1522,15 @@ async function loadEnvView() {
     } catch (_) {}
   }
 
-  // Populate website selector in the Environment card
-  const projSelect = document.getElementById('env-project-selector');
-  if (projSelect) {
-    projSelect.innerHTML = (state.projects || []).map((p) => `
-      <option value="${p.id}" ${state.selectedProjectId === p.id ? 'selected' : ''}>
-        ${escapeHtml(p.name)} (${p.slug})
-      </option>
-    `).join('');
-  }
-
   const p = getSelectedProject();
+  const projLabel = document.getElementById('env-active-project-label');
+  if (projLabel) {
+    projLabel.textContent = p ? `${p.name} (${p.slug})` : 'None';
+  }
   const tbody = document.getElementById('env-vars-table-body');
   if (!p) {
     if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">No website found. Create a website first.</td></tr>';
     return;
-  }
-
-  if (projSelect && p.id) {
-    projSelect.value = String(p.id);
   }
 
   try {
@@ -1606,7 +1754,14 @@ window.handleSaveEnv = handleSaveEnv;
 
 async function deleteEnvVar(key) {
   const p = getSelectedProject();
-  if (!p || !confirm(`Delete environment variable "${key}"?`)) return;
+  if (!p) return;
+  const ok = await showConfirmDialog({
+    title: 'Delete Environment Variable',
+    message: `Delete environment variable "${key}" from ${p.name}?`,
+    confirmText: 'Delete Variable',
+    danger: true,
+  });
+  if (!ok) return;
 
   try {
     await api(`/api/projects/${p.id}/env/${encodeURIComponent(key)}`, { method: 'DELETE' });
@@ -1644,69 +1799,126 @@ document.getElementById('confirm-reveal-btn')?.addEventListener('click', async (
   }
 });
 
-document.getElementById('env-restart-app-btn')?.addEventListener('click', () => {
-  const p = getSelectedProject();
-  if (p) restartProject(p.id);
-});
-
 // ============================================================================
 // View 9: Application Backups
 // ============================================================================
 async function loadBackupsView() {
   const p = getSelectedProject();
   const tbody = document.getElementById('backups-table-body');
-  if (!p) return;
+  if (!p) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">Select or create a website to view backups.</td></tr>';
+    return;
+  }
 
   try {
     const backups = await api(`/api/projects/${p.id}/backups`);
     if (!backups.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No backups taken yet. Automatic backups occur before deployments.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No backups taken yet. Click "Create Backup" above to snapshot your website & .env.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = backups.map((b) => `
-      <tr>
-        <td><strong>#${b.id}</strong></td>
-        <td>${formatDate(b.ts)}</td>
-        <td><span class="badge badge-neutral">${b.kind}</span></td>
-        <td>${(b.size / 1048576).toFixed(2)} MB</td>
-        <td>${escapeHtml(b.note || 'None')}</td>
-        <td>
-          <button class="btn btn-primary btn-sm" onclick="restoreBackup(${p.id}, ${b.id})">Restore</button>
-        </td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = backups.map((b) => {
+      const sizeStr = b.size >= 1048576
+        ? `${(b.size / 1048576).toFixed(2)} MB`
+        : `${Math.max(1, Math.round((b.size || 4096) / 1024))} KB`;
+      return `
+        <tr>
+          <td><strong>#${b.id}</strong></td>
+          <td>${formatDate(b.ts)}</td>
+          <td><span class="badge badge-info">${escapeHtml(b.kind || 'full-snapshot')}</span></td>
+          <td>${sizeStr}</td>
+          <td>${escapeHtml(b.note || 'Snapshot')}</td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-primary btn-sm" onclick="restoreBackup(${p.id}, ${b.id})">Restore</button>
+              ${b.kind !== 'release-snapshot' ? `
+                <button class="btn btn-danger btn-sm" onclick="deleteBackup(${p.id}, ${b.id})">Delete</button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
-document.getElementById('create-backup-btn')?.addEventListener('click', async () => {
+document.getElementById('create-backup-btn')?.addEventListener('click', () => {
+  const p = getSelectedProject();
+  if (!p) {
+    toast('Please select or create a website first.', 'warning');
+    return;
+  }
+  document.getElementById('create-backup-form')?.reset();
+  const noteInput = document.getElementById('backup-note-input');
+  if (noteInput) noteInput.value = `${p.name} snapshot (${new Date().toLocaleDateString()})`;
+  openModal('modal-create-backup');
+});
+
+document.getElementById('confirm-create-backup-btn')?.addEventListener('click', async (e) => {
+  e.preventDefault();
   const p = getSelectedProject();
   if (!p) return;
-  const note = prompt('Optional backup note:');
-  if (note === null) return;
+  const kind = document.getElementById('backup-kind-select')?.value || 'full-snapshot';
+  const note = (document.getElementById('backup-note-input')?.value || '').trim() || 'Manual snapshot';
+  const btn = document.getElementById('confirm-create-backup-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Creating Snapshot...';
+  }
 
   try {
-    await api(`/api/projects/${p.id}/backup`, { method: 'POST', body: { note } });
-    toast('Backup job enqueued.', 'info');
+    await api(`/api/projects/${p.id}/backup`, { method: 'POST', body: { note, kind }, timeoutMs: 30000 });
+    toast(`Backup snapshot "${note}" created and saved in SQLite!`, 'success');
+    closeModal('modal-create-backup');
     loadBackupsView();
   } catch (err) {
     toast(`Backup failed: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Create Snapshot';
+    }
   }
 });
 
 async function restoreBackup(projectId, backupId) {
-  if (!confirm(`Restore from backup #${backupId}?\nThis will restore application state and restart the service.`)) return;
+  const ok = await showConfirmDialog({
+    title: `Restore Backup #${backupId}`,
+    message: `Restore website files and environment variables from Backup #${backupId}?\n\nThis will restore the snapshot state and restart the website service.`,
+    confirmText: `Restore Backup #${backupId}`,
+  });
+  if (!ok) return;
 
   try {
-    await api(`/api/projects/${projectId}/backups/restore`, { method: 'POST', body: { backupId } });
-    toast('Restore operation enqueued.', 'info');
+    await api(`/api/projects/${projectId}/backups/restore`, { method: 'POST', body: { backupId }, timeoutMs: 30000 });
+    toast(`Backup #${backupId} restored successfully!`, 'success');
+    loadBackupsView();
   } catch (err) {
     toast(`Restore failed: ${err.message}`, 'error');
   }
 }
 window.restoreBackup = restoreBackup;
+
+async function deleteBackup(projectId, backupId) {
+  const ok = await showConfirmDialog({
+    title: `Delete Backup #${backupId}`,
+    message: `Permanently delete Backup #${backupId} from disk and SQLite?`,
+    confirmText: 'Delete Backup',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await api(`/api/projects/${projectId}/backups/${backupId}`, { method: 'DELETE' });
+    toast(`Backup #${backupId} deleted.`, 'info');
+    loadBackupsView();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+window.deleteBackup = deleteBackup;
 
 // ============================================================================
 // View 10: Server Monitoring
@@ -1730,9 +1942,13 @@ async function loadMonitorView() {
       document.getElementById('mon-nginx-version').textContent = `nginx/${ng.version}`;
     } catch { /* ignore */ }
 
-    // Projects table
+    // Projects table (scoped to the active website card when inside a website workspace)
+    const activeProject = getSelectedProject();
+    const monProjects = activeProject
+      ? (data.projects || []).filter((p) => p.id === activeProject.id)
+      : (data.projects || []);
     const tbody = document.getElementById('monitor-projects-table');
-    tbody.innerHTML = (data.projects || []).map((p) => `
+    tbody.innerHTML = monProjects.map((p) => `
       <tr>
         <td><strong>${escapeHtml(p.name)}</strong></td>
         <td>
@@ -1766,94 +1982,279 @@ async function loadSettingsView() {
     if (s.github_token_configured === 'true') {
       if (tokBadge) tokBadge.innerHTML = `<span class="badge badge-success">Saved in SQLite (${escapeHtml(s.github_token_masked || 'Configured')})</span>`;
       if (tokInput) {
-        tokInput.value = '';
-        tokInput.placeholder = `${s.github_token_masked || 'Token saved'} (enter new token to replace)`;
+        tokInput.value = s.github_token || '';
+        tokInput.placeholder = `${s.github_token_masked || 'Token saved in SQLite'}`;
       }
     } else {
       if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">Not Configured</span>';
-      if (tokInput) tokInput.placeholder = 'github_pat_...';
+      if (tokInput) {
+        tokInput.value = '';
+        tokInput.placeholder = 'github_pat_...';
+      }
     }
 
     // Users list
-    if (state.user.role === 'admin') {
+    let cachedUsers = [];
+    if (state.user.role === 'admin' || state.user.isMainAdmin || (state.user.permissions && state.user.permissions.includes('settings_manage'))) {
       const users = await api('/api/users');
+      state.usersList = users;
       const tbody = document.getElementById('users-table-body');
-      tbody.innerHTML = users.map((u) => `
-        <tr>
-          <td><strong>${escapeHtml(u.username)}</strong></td>
-          <td><span class="badge badge-neutral">${u.role}</span></td>
-          <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
-          <td>
-            ${u.id !== state.user.id ? `
-              <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
-                ${u.disabled ? 'Enable' : 'Disable'}
-              </button>
-            ` : '<span style="color:var(--text-dim)">You</span>'}
-          </td>
-        </tr>
-      `).join('');
+      const powerLabels = {
+        '*': 'All Powers (*)',
+        deploy: 'Deploy',
+        process: 'Start/Stop',
+        logs: 'Logs',
+        env: 'Env (.env)',
+        domains: 'Domains/SSL',
+        backups: 'Backups',
+        projects_manage: 'Manage Sites',
+        settings_manage: 'Settings/Users',
+      };
+
+      tbody.innerHTML = users.map((u) => {
+        const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
+        const projHtml = (isMain || u.allProjects)
+          ? '<span class="badge badge-info">All Websites (*)</span>'
+          : (u.allowedProjects && u.allowedProjects.length
+              ? u.allowedProjects.map((pid) => {
+                  const proj = state.projects.find((p) => p.id === pid);
+                  return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
+                }).join(' ')
+              : '<span class="badge badge-warning">No Websites Assigned</span>');
+
+        const perms = isMain || (u.permissions && u.permissions.includes('*'))
+          ? ['*']
+          : (u.permissions || []);
+        const permsHtml = perms.length
+          ? perms.map((p) => `<span class="badge badge-neutral" style="margin:2px; font-size:10px;">${escapeHtml(powerLabels[p] || p)}</span>`).join(' ')
+          : '<span style="color:var(--text-dim); font-size:12px;">Read-Only</span>';
+
+        return `
+          <tr>
+            <td>
+              <strong>${escapeHtml(u.username)}</strong>
+              ${isMain ? '<span class="badge badge-info" style="margin-left:6px; font-size:10px;">MAIN ADMIN</span>' : ''}
+              ${u.id === state.user.id ? '<span style="color:var(--text-dim); font-size:11px; margin-left:4px;">(You)</span>' : ''}
+            </td>
+            <td><span class="badge badge-neutral">${escapeHtml((u.role || 'operator').toUpperCase())}</span></td>
+            <td>${projHtml}</td>
+            <td style="max-width: 280px;">${permsHtml}</td>
+            <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
+            <td>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                ${!isMain ? `
+                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${u.id})">Edit Access</button>
+                  <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
+                    ${u.disabled ? 'Enable' : 'Disable'}
+                  </button>
+                  ${u.id !== state.user.id ? `
+                    <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
+                  ` : ''}
+                ` : '<span style="color:var(--text-dim); font-size:12px;">Full Root Access</span>'}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
   } catch (err) {
     toast(`Failed to load settings: ${err.message}`, 'error');
   }
 }
 
+document.getElementById('toggle-github-token-btn')?.addEventListener('click', () => {
+  const input = document.getElementById('setting-github-token');
+  const btn = document.getElementById('toggle-github-token-btn');
+  if (!input || !btn) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    input.type = 'password';
+    btn.textContent = 'Show';
+  }
+});
+
 document.getElementById('settings-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = {
-    min_free_mb: Number(document.getElementById('setting-min-free-mb').value),
-    default_retention: Number(document.getElementById('setting-default-retention').value),
-    step_timeout_s: Number(document.getElementById('setting-step-timeout').value),
-    deploy_timeout_s: Number(document.getElementById('setting-deploy-timeout').value),
+    min_free_mb: Number(document.getElementById('setting-min-free-mb').value) || 500,
+    default_retention: Number(document.getElementById('setting-default-retention').value) || 10,
+    step_timeout_s: Number(document.getElementById('setting-step-timeout').value) || 900,
+    deploy_timeout_s: Number(document.getElementById('setting-deploy-timeout').value) || 1800,
   };
   const token = document.getElementById('setting-github-token').value.trim();
   if (token) payload.github_token = token;
 
   try {
     await api('/api/settings', { method: 'PUT', body: payload });
-    toast('Settings saved in SQLite.', 'success');
+    toast('Global settings & GitHub token saved in SQLite!', 'success');
     loadSettingsView();
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
   }
 });
 
+const ROLE_PRESET_POWERS = {
+  admin: ['deploy', 'process', 'logs', 'env', 'domains', 'backups', 'projects_manage', 'settings_manage'],
+  operator: ['deploy', 'process', 'logs', 'backups'],
+  developer: ['deploy', 'process', 'logs', 'env'],
+  viewer: ['logs'],
+};
+
+function applyRolePresetToCheckboxes(role) {
+  const powers = ROLE_PRESET_POWERS[role];
+  if (!powers) return;
+  document.querySelectorAll('.user-power-check').forEach((cb) => {
+    cb.checked = powers.includes(cb.value);
+  });
+}
+
+function renderUserProjectsChecklist(selectedIds = [], allProjects = true) {
+  const allCheck = document.getElementById('user-all-projects-check');
+  const container = document.getElementById('user-projects-checklist');
+  if (allCheck) allCheck.checked = allProjects;
+  if (!container) return;
+
+  if (!state.projects.length) {
+    container.innerHTML = '<div style="color:var(--text-dim); font-size:12px; grid-column: 1 / -1;">No websites created yet.</div>';
+    return;
+  }
+
+  container.innerHTML = state.projects.map((p) => {
+    const checked = allProjects || selectedIds.includes(p.id);
+    return `
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; opacity:${allProjects ? '0.6' : '1'};">
+        <input type="checkbox" class="user-project-check" value="${p.id}" ${checked ? 'checked' : ''} ${allProjects ? 'disabled' : ''}>
+        <span>${escapeHtml(p.name)} <code style="font-size:11px;">(:${p.port || 3000})</code></span>
+      </label>
+    `;
+  }).join('');
+}
+
+document.getElementById('user-new-role')?.addEventListener('change', (e) => {
+  applyRolePresetToCheckboxes(e.target.value);
+});
+
+document.getElementById('user-all-projects-check')?.addEventListener('change', (e) => {
+  const isAll = e.target.checked;
+  const currentSelected = Array.from(document.querySelectorAll('.user-project-check:checked')).map((cb) => Number(cb.value));
+  renderUserProjectsChecklist(currentSelected, isAll);
+});
+
 document.getElementById('create-user-modal-btn')?.addEventListener('click', () => {
   document.getElementById('create-user-form').reset();
+  document.getElementById('user-edit-id').value = '';
+  document.getElementById('user-modal-title').textContent = 'Create Platform User';
+  document.getElementById('save-new-user-btn').textContent = 'Create User';
+  const unameInput = document.getElementById('user-new-username');
+  unameInput.disabled = false;
+  document.getElementById('user-password-label').textContent = 'Password (min 6 chars) *';
+  document.getElementById('user-new-password').placeholder = '••••••••';
+  document.getElementById('user-new-role').value = 'operator';
+  applyRolePresetToCheckboxes('operator');
+  renderUserProjectsChecklist([], true);
   openModal('modal-create-user');
 });
 
+function openEditUserModal(userId) {
+  const u = (state.usersList || []).find((x) => x.id === userId);
+  if (!u) return;
+
+  document.getElementById('create-user-form').reset();
+  document.getElementById('user-edit-id').value = String(u.id);
+  document.getElementById('user-modal-title').textContent = `Edit Access & Powers: ${u.username}`;
+  document.getElementById('save-new-user-btn').textContent = 'Save Access & Powers';
+
+  const unameInput = document.getElementById('user-new-username');
+  unameInput.value = u.username;
+  unameInput.disabled = true;
+
+  document.getElementById('user-password-label').textContent = 'Reset Password (Optional)';
+  document.getElementById('user-new-password').value = '';
+  document.getElementById('user-new-password').placeholder = 'Leave blank to keep current password';
+
+  document.getElementById('user-new-role').value = u.role || 'custom';
+
+  const hasWildcard = (u.permissions || []).includes('*');
+  document.querySelectorAll('.user-power-check').forEach((cb) => {
+    cb.checked = hasWildcard || (u.permissions || []).includes(cb.value);
+  });
+
+  renderUserProjectsChecklist(u.allowedProjects || [], Boolean(u.allProjects));
+  openModal('modal-create-user');
+}
+window.openEditUserModal = openEditUserModal;
+
 document.getElementById('save-new-user-btn')?.addEventListener('click', async (e) => {
   e.preventDefault();
+  const editId = document.getElementById('user-edit-id').value.trim();
   const username = document.getElementById('user-new-username').value.trim();
   const password = document.getElementById('user-new-password').value;
   const role = document.getElementById('user-new-role').value;
+  const permissions = Array.from(document.querySelectorAll('.user-power-check:checked')).map((cb) => cb.value);
+  const allProjects = document.getElementById('user-all-projects-check').checked;
+  const allowedProjects = allProjects
+    ? []
+    : Array.from(document.querySelectorAll('.user-project-check:checked')).map((cb) => Number(cb.value));
 
-  if (!username || password.length < 10) {
-    toast('Username required and password must be >= 10 chars.', 'warning');
+  if (!editId && (!username || password.length < 6)) {
+    toast('Username required and password must be at least 6 characters.', 'warning');
+    return;
+  }
+  if (editId && password && password.length < 6) {
+    toast('New password must be at least 6 characters.', 'warning');
     return;
   }
 
   try {
-    await api('/api/users', { method: 'POST', body: { username, password, role } });
-    toast(`User "${username}" created.`, 'success');
+    if (editId) {
+      const body = { role, permissions, allProjects, allowedProjects };
+      if (password) body.password = password;
+      await api(`/api/users/${editId}`, { method: 'PUT', body });
+      toast(`Updated permissions & website access for "${username}".`, 'success');
+    } else {
+      await api('/api/users', {
+        method: 'POST',
+        body: { username, password, role, permissions, allProjects, allowedProjects },
+      });
+      toast(`User "${username}" created in SQLite.`, 'success');
+    }
     closeModal('modal-create-user');
-    loadSettingsView();
+    await loadSettingsView();
   } catch (err) {
-    toast(`Failed to create user: ${err.message}`, 'error');
+    toast(`Failed to save user: ${err.message}`, 'error');
   }
 });
 
 async function toggleUserDisabled(userId, disabled) {
   try {
-    await api(`/api/users/${userId}`, { method: 'PUT', body: { disabled } });
-    toast('User status updated.', 'success');
+    await api(`/api/users/${userId}`, { method: 'PUT', body: { disabled: Boolean(disabled) } });
+    toast(disabled ? 'User account disabled.' : 'User account enabled.', 'success');
     loadSettingsView();
   } catch (err) {
     toast(`Update failed: ${err.message}`, 'error');
   }
 }
 window.toggleUserDisabled = toggleUserDisabled;
+
+async function deleteUser(userId, username) {
+  const ok = await showConfirmDialog({
+    title: 'Remove Platform User',
+    message: `Are you sure you want to permanently remove user "${username}" and revoke all of their sessions?`,
+    confirmText: 'Remove User',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/users/${userId}`, { method: 'DELETE' });
+    toast(`User "${username}" removed from SQLite.`, 'success');
+    loadSettingsView();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+window.deleteUser = deleteUser;
 
 // ============================================================================
 // View 12: Activity & Audit Logs
@@ -1867,12 +2268,25 @@ async function loadAuditView() {
       return;
     }
 
+    const activeProject = WEBSITE_WORKSPACE_TABS.has(state.currentView) ? getSelectedProject() : null;
     const q = (document.getElementById('audit-search-input')?.value || '').toLowerCase();
     const filtered = logs.filter((l) => {
+      if (activeProject) {
+        const tgt = `${l.target || ''} ${l.detail || ''}`.toLowerCase();
+        const matchSite = tgt.includes((activeProject.slug || '').toLowerCase()) ||
+          tgt.includes((activeProject.name || '').toLowerCase()) ||
+          tgt.includes(`#${activeProject.id}`);
+        if (!matchSite) return false;
+      }
       return !q || (l.action && l.action.toLowerCase().includes(q)) ||
         (l.actor && l.actor.toLowerCase().includes(q)) ||
         (l.target && l.target.toLowerCase().includes(q));
     });
+
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px; color: var(--text-dim);">No activity records for this website yet.</td></tr>';
+      return;
+    }
 
     tbody.innerHTML = filtered.map((l) => `
       <tr>
@@ -1961,6 +2375,7 @@ async function startProject(projectId) {
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
     if (state.currentView === 'overview') loadOverview();
+    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Start failed: ${err.message}`, 'error');
   }
@@ -1974,6 +2389,7 @@ async function stopProject(projectId) {
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
     if (state.currentView === 'overview') loadOverview();
+    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Stop failed: ${err.message}`, 'error');
   }
@@ -1992,6 +2408,7 @@ async function restartProject(projectId) {
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
     if (state.currentView === 'overview') loadOverview();
+    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Restart failed: ${err.message}`, 'error');
   }
@@ -2012,9 +2429,16 @@ function startPolling() {
       if (state.currentView === 'overview') {
         await loadOverview();
       } else if (state.currentView === 'deployments') {
+        await loadProjects();
+        renderWebsiteWorkspaceHeader();
         await loadDeploymentsView();
       } else if (state.currentView === 'monitor') {
+        await loadProjects();
+        renderWebsiteWorkspaceHeader();
         await loadMonitorView();
+      } else if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
+        await loadProjects();
+        renderWebsiteWorkspaceHeader();
       }
     } finally {
       pollInFlight = false;
@@ -2103,6 +2527,130 @@ function openModal(modalId) {
 
 function closeModal(modalId) {
   document.getElementById(modalId)?.classList.remove('active');
+}
+
+function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText = 'Confirm', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-dialog');
+    const titleEl = document.getElementById('dialog-modal-title');
+    const msgEl = document.getElementById('dialog-modal-message');
+    const inputWrap = document.getElementById('dialog-input-wrapper');
+    const confirmBtn = document.getElementById('dialog-confirm-btn');
+    const cancelBtn = document.getElementById('dialog-cancel-btn');
+    const closeBtn = document.getElementById('dialog-modal-close');
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    inputWrap.style.display = 'none';
+    cancelBtn.style.display = '';
+    cancelBtn.textContent = 'Cancel';
+    confirmBtn.textContent = confirmText;
+    confirmBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+
+    const cleanup = (result) => {
+      modal.classList.remove('active');
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      closeBtn.onclick = null;
+      resolve(result);
+    };
+
+    confirmBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+    closeBtn.onclick = () => cleanup(false);
+    modal.classList.add('active');
+  });
+}
+
+function showPromptDialog({ title = 'Input Required', message = '', placeholder = '', defaultValue = '', confirmText = 'Confirm', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-dialog');
+    const titleEl = document.getElementById('dialog-modal-title');
+    const msgEl = document.getElementById('dialog-modal-message');
+    const inputWrap = document.getElementById('dialog-input-wrapper');
+    const inputEl = document.getElementById('dialog-modal-input');
+    const confirmBtn = document.getElementById('dialog-confirm-btn');
+    const cancelBtn = document.getElementById('dialog-cancel-btn');
+    const closeBtn = document.getElementById('dialog-modal-close');
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    inputWrap.style.display = 'block';
+    inputEl.readOnly = false;
+    inputEl.value = defaultValue;
+    inputEl.placeholder = placeholder;
+    cancelBtn.style.display = '';
+    cancelBtn.textContent = 'Cancel';
+    confirmBtn.textContent = confirmText;
+    confirmBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+
+    const cleanup = (result) => {
+      modal.classList.remove('active');
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      closeBtn.onclick = null;
+      inputEl.onkeydown = null;
+      resolve(result);
+    };
+
+    confirmBtn.onclick = () => cleanup(inputEl.value);
+    cancelBtn.onclick = () => cleanup(null);
+    closeBtn.onclick = () => cleanup(null);
+    inputEl.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        cleanup(inputEl.value);
+      }
+    };
+    modal.classList.add('active');
+    setTimeout(() => inputEl.focus(), 50);
+  });
+}
+
+function showCopyDialog({ title = 'Copy Value', message = '', value = '' } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-dialog');
+    const titleEl = document.getElementById('dialog-modal-title');
+    const msgEl = document.getElementById('dialog-modal-message');
+    const inputWrap = document.getElementById('dialog-input-wrapper');
+    const inputEl = document.getElementById('dialog-modal-input');
+    const confirmBtn = document.getElementById('dialog-confirm-btn');
+    const cancelBtn = document.getElementById('dialog-cancel-btn');
+    const closeBtn = document.getElementById('dialog-modal-close');
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    inputWrap.style.display = 'block';
+    inputEl.readOnly = true;
+    inputEl.value = value;
+    cancelBtn.style.display = '';
+    cancelBtn.textContent = 'Close';
+    confirmBtn.textContent = 'Copy to Clipboard';
+    confirmBtn.className = 'btn btn-primary';
+
+    const cleanup = () => {
+      modal.classList.remove('active');
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      closeBtn.onclick = null;
+      resolve();
+    };
+
+    confirmBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast('Copied to clipboard!', 'success');
+      } catch {
+        inputEl.select();
+        document.execCommand('copy');
+        toast('Copied to clipboard!', 'success');
+      }
+      cleanup();
+    };
+    cancelBtn.onclick = () => cleanup();
+    closeBtn.onclick = () => cleanup();
+    modal.classList.add('active');
+  });
 }
 
 document.querySelectorAll('[data-close-modal]').forEach((btn) => {

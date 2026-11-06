@@ -64,6 +64,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects/:id/backups", get(list_backups_handler))
         .route("/api/projects/:id/backup", post(create_backup_handler))
         .route("/api/projects/:id/backups/restore", post(restore_backup_handler))
+        .route("/api/projects/:id/backups/:backup_id", delete(delete_backup_handler))
         // Project Env
         .route("/api/projects/:id/env", get(get_env_handler).put(set_env_handler))
         .route("/api/projects/:id/env/bulk", post(bulk_set_env_handler))
@@ -103,7 +104,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/audit", get(audit_handler))
         .route("/api/settings", get(get_settings_handler).put(update_settings_handler).patch(update_settings_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
-        .route("/api/users/:id", put(update_user_handler).patch(update_user_handler))
+        .route("/api/users/:id", put(update_user_handler).patch(update_user_handler).delete(delete_user_handler))
         .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
         // Static assets fallback
         .fallback(axum_static_fallback)
@@ -135,6 +136,45 @@ fn extract_session_id(headers: &HeaderMap) -> Option<String> {
         })
 }
 
+fn current_user(state: &AppState, headers: &HeaderMap) -> Option<User> {
+    let sid = extract_session_id(headers)?;
+    state.auth.get_session(&sid).map(|(_, u)| u)
+}
+
+fn verify_power(
+    state: &AppState,
+    headers: &HeaderMap,
+    power: &str,
+    project_id: Option<i64>,
+) -> Result<User, (StatusCode, String)> {
+    let u = current_user(state, headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized session".to_string()))?;
+    if let Some(pid) = project_id {
+        if !u.can_access_project(pid) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Access denied: You are not assigned to this website.".to_string(),
+            ));
+        }
+    }
+    if !u.has_power(power) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!("Permission denied: Missing '{}' privilege.", power),
+        ));
+    }
+    Ok(u)
+}
+
+fn log_audit(state: &AppState, actor: &str, action: &str, target: Option<&str>, detail: Option<&str>) {
+    let conn = state.db.lock().unwrap();
+    conn.execute(
+        "INSERT INTO audit(ts, actor, action, target, detail, ip) VALUES(?, ?, ?, ?, ?, '127.0.0.1')",
+        rusqlite::params![now(), actor, action, target, detail],
+    )
+    .ok();
+}
+
 // ---------------------------------------------------------------------------
 // Auth Handlers
 // ---------------------------------------------------------------------------
@@ -159,9 +199,15 @@ async fn login_handler(
         .get_user_by_username(&payload.username)
         .ok_or((StatusCode::UNAUTHORIZED, "Invalid username or password"))?;
 
+    if user.disabled {
+        return Err((StatusCode::FORBIDDEN, "Account is disabled by administrator"));
+    }
+
     if !verify_password(&payload.password, &hash) {
         return Err((StatusCode::UNAUTHORIZED, "Invalid username or password"));
     }
+
+    log_audit(&state, &user.username, "auth.login", Some(&user.username), Some("User signed in"));
 
     let session = state
         .auth
@@ -265,15 +311,25 @@ async fn change_password_handler(
 // ---------------------------------------------------------------------------
 async fn list_projects_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<Project>>, StatusCode> {
-    let list = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut list = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(u) = current_user(&state, &headers) {
+        list.retain(|p| u.can_access_project(p.id));
+    }
     Ok(Json(list))
 }
 
 async fn get_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<Project>, StatusCode> {
+    if let Some(u) = current_user(&state, &headers) {
+        if !u.can_access_project(id) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
     let p = state
         .projects
         .get(id)
@@ -284,8 +340,10 @@ async fn get_project_handler(
 
 async fn create_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(mut p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "projects_manage", None)?;
     if p.name.trim().is_empty() || p.slug.trim().is_empty() || p.repo_url.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Name, slug, and repo_url are required".into()));
     }
@@ -325,6 +383,8 @@ async fn create_project_handler(
         .create(&p)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
+    log_audit(&state, &actor.username, "project.create", Some(&p.name), Some(&p.repo_url));
+
     let created = state
         .projects
         .get(id)
@@ -336,13 +396,17 @@ async fn create_project_handler(
 
 async fn update_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
     state
         .projects
         .update(id, &p)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    log_audit(&state, &actor.username, "project.update", Some(&p.name), None);
 
     let updated = state
         .projects
@@ -355,9 +419,12 @@ async fn update_project_handler(
 
 async fn delete_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
     if let Ok(Some(p)) = state.projects.get(id) {
+        log_audit(&state, &actor.username, "project.delete", Some(&p.name), None);
         let _ = state.runtime.stop_project(&p).await;
     }
     state
@@ -387,9 +454,11 @@ struct SetEnvPayload {
 
 async fn set_env_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<SetEnvPayload>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "env", Some(id))?;
     state
         .projects
         .set_env_var(id, &payload.key, &payload.value, payload.is_secret.unwrap_or(false))
@@ -411,9 +480,11 @@ struct BulkEnvResponse {
 
 async fn bulk_set_env_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<BulkEnvPayload>,
 ) -> Result<Json<BulkEnvResponse>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "env", Some(id))?;
     let count = state
         .projects
         .set_bulk_env(
@@ -433,8 +504,10 @@ struct RawEnvResponse {
 
 async fn get_raw_env_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<RawEnvResponse>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "env", Some(id))?;
     let content = state
         .projects
         .export_raw_env(id)
@@ -455,9 +528,11 @@ struct RevealEnvResponse {
 
 async fn reveal_env_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<RevealEnvPayload>,
 ) -> Result<Json<RevealEnvResponse>, StatusCode> {
+    let _actor = verify_power(&state, &headers, "env", Some(id)).map_err(|(c, _)| c)?;
     let val = state.projects.reveal_env_var(id, &payload.key).ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(RevealEnvResponse {
         key: payload.key,
@@ -467,8 +542,10 @@ async fn reveal_env_handler(
 
 async fn delete_env_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath((id, key)): AxPath<(i64, String)>,
 ) -> Result<StatusCode, StatusCode> {
+    let _actor = verify_power(&state, &headers, "env", Some(id)).map_err(|(c, _)| c)?;
     state.projects.delete_env_var(id, &key).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::OK)
 }
@@ -484,15 +561,17 @@ struct ActionResponse {
 
 async fn deploy_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
     let p = state
         .projects
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
-    let dep_id = state.deployer.create_deployment(&p, "deploy", "admin", "manual");
+    let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "manual");
     let deployer = state.deployer.clone();
 
     // Async task executes deployment in background
@@ -512,16 +591,18 @@ struct RollbackPayload {
 
 async fn rollback_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<RollbackPayload>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
     let p = state
         .projects
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
-    let dep_id = state.deployer.create_deployment(&p, "rollback", "admin", "manual");
+    let dep_id = state.deployer.create_deployment(&p, "rollback", &actor.username, "manual");
     let deployer = state.deployer.clone();
     let target_rel = payload.release_id;
 
@@ -534,8 +615,10 @@ async fn rollback_project_handler(
 
 async fn start_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "process", Some(id))?;
     let p = state
         .projects
         .get(id)
@@ -557,7 +640,7 @@ async fn start_project_handler(
                 "info",
                 &format!("Website '{}' has no release built yet — triggering initial deployment automatically", p.name),
             );
-            let dep_id = state.deployer.create_deployment(&p, "deploy", "admin", "auto-initial-start");
+            let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "auto-initial-start");
             let deployer = state.deployer.clone();
             tokio::spawn(async move {
                 deployer.run_deploy(p.id, dep_id).await;
@@ -574,8 +657,10 @@ async fn start_project_handler(
 
 async fn stop_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "process", Some(id))?;
     let p = state
         .projects
         .get(id)
@@ -593,8 +678,10 @@ async fn stop_project_handler(
 
 async fn restart_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "process", Some(id))?;
     let p = state
         .projects
         .get(id)
@@ -606,7 +693,7 @@ async fn restart_project_handler(
     match state.runtime.start_project(&p, env, None).await {
         Ok(pid) => Ok(Json(serde_json::json!({ "started": true, "pid": pid }))),
         Err(e) if e == "NOT_DEPLOYED_YET" => {
-            let dep_id = state.deployer.create_deployment(&p, "deploy", "admin", "auto-initial-restart");
+            let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "auto-initial-restart");
             let deployer = state.deployer.clone();
             tokio::spawn(async move {
                 deployer.run_deploy(p.id, dep_id).await;
@@ -898,8 +985,12 @@ struct OverviewResponse {
 
 async fn overview_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<OverviewResponse>, StatusCode> {
-    let projs = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut projs = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(u) = current_user(&state, &headers) {
+        projs.retain(|p| u.can_access_project(p.id));
+    }
     let mut items = Vec::new();
 
     for p in projs {
@@ -981,9 +1072,13 @@ async fn overview_handler(
 
 async fn monitor_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let sample = state.monitor.sample();
-    let projs = state.projects.list().unwrap_or_default();
+    let mut projs = state.projects.list().unwrap_or_default();
+    if let Some(u) = current_user(&state, &headers) {
+        projs.retain(|p| u.can_access_project(p.id));
+    }
     let now_ms = now();
 
     let proj_metrics: Vec<serde_json::Value> = projs
@@ -1089,15 +1184,35 @@ async fn get_settings_handler(
 
     let mut map = HashMap::new();
     for r in rows.flatten() {
-        if r.0 == "github_token" && !r.1.trim().is_empty() {
-            let tok = r.1.trim();
+        map.insert(r.0, r.1);
+    }
+
+    // If github_token is not yet saved in SQLite, try auto-detecting from gh CLI once and persisting it
+    let current_tok = map.get("github_token").cloned().unwrap_or_default();
+    if current_tok.trim().is_empty() {
+        if let Ok(out) = std::process::Command::new("gh").args(["auth", "token"]).output() {
+            if out.status.success() {
+                let detected = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !detected.is_empty() {
+                    conn.execute(
+                        "INSERT INTO settings(key, value) VALUES('github_token', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        rusqlite::params![&detected],
+                    ).ok();
+                    map.insert("github_token".to_string(), detected);
+                }
+            }
+        }
+    }
+
+    if let Some(tok_raw) = map.get("github_token").cloned() {
+        let tok = tok_raw.trim();
+        if !tok.is_empty() {
             let suffix = if tok.len() >= 4 { &tok[tok.len() - 4..] } else { "****" };
             map.insert("github_token_configured".to_string(), "true".to_string());
             map.insert("github_token_masked".to_string(), format!("••••••••{}", suffix));
-        } else {
-            map.insert(r.0, r.1);
         }
     }
+
     Ok(Json(map))
 }
 
@@ -1108,11 +1223,14 @@ async fn update_settings_handler(
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
         let val_str = match v {
-            serde_json::Value::String(s) => s,
+            serde_json::Value::String(s) => s.trim().to_string(),
             serde_json::Value::Number(n) => n.to_string(),
             serde_json::Value::Bool(b) => b.to_string(),
             _ => v.to_string(),
         };
+        if k == "github_token" && val_str.is_empty() {
+            continue;
+        }
         conn.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             rusqlite::params![k, val_str],
@@ -1126,17 +1244,22 @@ async fn list_users_handler(
 ) -> Result<Json<Vec<User>>, StatusCode> {
     let conn = state.db.lock().unwrap();
     let mut stmt = conn
-        .prepare("SELECT id, username, role, created_at FROM users ORDER BY id ASC")
+        .prepare("SELECT id, username, role, disabled, permissions, allowed_projects, created_at FROM users ORDER BY id ASC")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let rows = stmt.query_map([], |r| {
-        Ok(User {
-            id: r.get(0)?,
-            username: r.get(1)?,
-            role: r.get(2)?,
-            created_at: r.get(3)?,
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(User::from_db(
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
+                r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
+                r.get(6)?,
+            ))
         })
-    }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut list = Vec::new();
     for r in rows.flatten() {
@@ -1150,56 +1273,185 @@ struct CreateUserPayload {
     username: String,
     password: String,
     role: Option<String>,
+    permissions: Option<Vec<String>>,
+    #[serde(rename = "allProjects")]
+    all_projects: Option<bool>,
+    #[serde(rename = "allowedProjects")]
+    allowed_projects: Option<Vec<i64>>,
 }
 
 async fn create_user_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<CreateUserPayload>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-    if payload.username.trim().is_empty() || payload.password.len() < 8 {
-        return Err((StatusCode::BAD_REQUEST, "Username and password (min 8 chars) required".into()));
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+
+    let uname = payload.username.trim().to_string();
+    if uname.is_empty() || payload.password.len() < 6 {
+        return Err((StatusCode::BAD_REQUEST, "Username and password (min 6 chars) required".into()));
     }
 
     let hashed = hash_password(&payload.password)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let role = payload.role.unwrap_or_else(|| "admin".to_string());
+    let role = payload.role.unwrap_or_else(|| "operator".to_string());
+    let perms = payload.permissions.unwrap_or_else(|| {
+        if role == "admin" {
+            vec!["*".to_string()]
+        } else if role == "operator" {
+            vec!["deploy".to_string(), "process".to_string(), "logs".to_string(), "backups".to_string()]
+        } else {
+            vec!["logs".to_string()]
+        }
+    });
+    let perms_json = serde_json::to_string(&perms).unwrap_or_else(|_| "[]".into());
+
+    let all_projs = payload.all_projects.unwrap_or(true);
+    let allowed_json = if all_projs {
+        "[\"*\"]".to_string()
+    } else {
+        serde_json::to_string(&payload.allowed_projects.unwrap_or_default()).unwrap_or_else(|_| "[]".into())
+    };
+
     let ts = now();
 
     let id = {
         let conn = state.db.lock().unwrap();
         conn.execute(
-            "INSERT INTO users(username, password_hash, salt, role, created_at) VALUES(?, ?, '', ?, ?)",
-            rusqlite::params![payload.username, hashed, role, ts],
-        ).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            "INSERT INTO users(username, password_hash, salt, role, disabled, permissions, allowed_projects, created_at) VALUES(?, ?, '', ?, 0, ?, ?, ?)",
+            rusqlite::params![uname, hashed, role, perms_json, allowed_json, ts],
+        ).map_err(|e| (StatusCode::BAD_REQUEST, format!("Could not create user: {}", e)))?;
         conn.last_insert_rowid()
     };
 
-    Ok(Json(User {
+    log_audit(&state, &actor.username, "user.create", Some(&uname), Some(&format!("role={}", role)));
+
+    Ok(Json(User::from_db(
         id,
-        username: payload.username,
+        uname,
         role,
-        created_at: ts,
-    }))
+        0,
+        perms_json,
+        allowed_json,
+        ts,
+    )))
 }
 
 #[derive(Deserialize)]
 struct UpdateUserPayload {
-    disabled: Option<bool>,
+    disabled: Option<serde_json::Value>,
     role: Option<String>,
+    password: Option<String>,
+    permissions: Option<Vec<String>>,
+    #[serde(rename = "allProjects")]
+    all_projects: Option<bool>,
+    #[serde(rename = "allowedProjects")]
+    allowed_projects: Option<Vec<i64>>,
 }
 
 async fn update_user_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<UpdateUserPayload>,
-) -> Result<StatusCode, StatusCode> {
-    let conn = state.db.lock().unwrap();
-    if let Some(r) = payload.role {
-        conn.execute("UPDATE users SET role=? WHERE id=?", rusqlite::params![r, id]).ok();
+) -> Result<Json<User>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+
+    let existing = state
+        .auth
+        .get_user_by_id(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    if existing.is_main_admin && !actor.is_main_admin {
+        return Err((StatusCode::FORBIDDEN, "Only the Main Admin can modify the Main Admin account.".into()));
     }
-    let _ = payload.disabled;
-    Ok(StatusCode::OK)
+
+    let conn = state.db.lock().unwrap();
+
+    if let Some(pwd) = payload.password.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if pwd.len() < 6 {
+            return Err((StatusCode::BAD_REQUEST, "Password must be at least 6 characters".into()));
+        }
+        let hashed = hash_password(pwd).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", rusqlite::params![hashed, id]).ok();
+    }
+
+    if !existing.is_main_admin {
+        if let Some(r) = payload.role.as_ref() {
+            conn.execute("UPDATE users SET role=? WHERE id=?", rusqlite::params![r, id]).ok();
+        }
+        if let Some(d_val) = payload.disabled {
+            let is_disabled = match d_val {
+                serde_json::Value::Bool(b) => b,
+                serde_json::Value::Number(n) => n.as_i64().unwrap_or(0) != 0,
+                serde_json::Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                _ => false,
+            };
+            conn.execute(
+                "UPDATE users SET disabled=? WHERE id=?",
+                rusqlite::params![if is_disabled { 1 } else { 0 }, id],
+            )
+            .ok();
+            if is_disabled {
+                conn.execute("DELETE FROM sessions WHERE user_id=?", rusqlite::params![id]).ok();
+            }
+        }
+        if let Some(perms) = payload.permissions.as_ref() {
+            let perms_json = serde_json::to_string(perms).unwrap_or_else(|_| "[]".into());
+            conn.execute("UPDATE users SET permissions=? WHERE id=?", rusqlite::params![perms_json, id]).ok();
+        }
+        if payload.all_projects.is_some() || payload.allowed_projects.is_some() {
+            let all_p = payload.all_projects.unwrap_or(false);
+            let allowed_json = if all_p {
+                "[\"*\"]".to_string()
+            } else {
+                serde_json::to_string(&payload.allowed_projects.unwrap_or_default()).unwrap_or_else(|_| "[]".into())
+            };
+            conn.execute("UPDATE users SET allowed_projects=? WHERE id=?", rusqlite::params![allowed_json, id]).ok();
+        }
+    }
+
+    drop(conn);
+    log_audit(&state, &actor.username, "user.update", Some(&existing.username), None);
+
+    let updated = state
+        .auth
+        .get_user_by_id(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    Ok(Json(updated))
+}
+
+async fn delete_user_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+
+    let target = state
+        .auth
+        .get_user_by_id(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    if target.is_main_admin {
+        return Err((StatusCode::BAD_REQUEST, "Cannot delete the Main Admin account.".into()));
+    }
+    if target.id == actor.id {
+        return Err((StatusCode::BAD_REQUEST, "Cannot delete your own currently logged-in account.".into()));
+    }
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", rusqlite::params![id]).ok();
+        conn.execute("DELETE FROM users WHERE id = ?", rusqlite::params![id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    log_audit(&state, &actor.username, "user.delete", Some(&target.username), Some("Deleted user account"));
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ---------------------------------------------------------------------------
@@ -1594,6 +1846,33 @@ struct BackupItem {
     kind: String,
     size: u64,
     note: String,
+    path: String,
+    #[serde(rename = "releaseId")]
+    release_id: Option<i64>,
+}
+
+fn copy_backup_files(src: &std::path::Path, dst: &std::path::Path) -> u64 {
+    let mut total_bytes = 0u64;
+    if std::fs::create_dir_all(dst).is_err() {
+        return 0;
+    }
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str == "node_modules" || name_str == ".git" || name_str == "backups" {
+                continue;
+            }
+            let src_path = entry.path();
+            let dst_path = dst.join(&name);
+            if src_path.is_dir() {
+                total_bytes += copy_backup_files(&src_path, &dst_path);
+            } else if let Ok(bytes) = std::fs::copy(&src_path, &dst_path) {
+                total_bytes += bytes;
+            }
+        }
+    }
+    total_bytes
 }
 
 async fn list_backups_handler(
@@ -1602,21 +1881,27 @@ async fn list_backups_handler(
 ) -> Result<Json<Vec<BackupItem>>, StatusCode> {
     let mut backups: Vec<BackupItem> = {
         let conn = state.db.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT id, created_at, size_bytes, note FROM backups WHERE project_id = ? ORDER BY id DESC")
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let rows = stmt
-            .query_map(rusqlite::params![id], |r| {
+        let res = if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, COALESCE(created_at, 0), COALESCE(size_bytes, 0), COALESCE(note, ''), COALESCE(kind, 'full-snapshot'), COALESCE(path, ''), release_id
+             FROM backups WHERE project_id = ? ORDER BY id DESC",
+        ) {
+            stmt.query_map(rusqlite::params![id], |r| {
                 Ok(BackupItem {
                     id: r.get(0)?,
                     ts: r.get(1)?,
-                    kind: "sqlite-snapshot".to_string(),
                     size: r.get::<_, i64>(2)?.max(0) as u64,
-                    note: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    note: r.get(3)?,
+                    kind: r.get(4)?,
+                    path: r.get(5)?,
+                    release_id: r.get(6)?,
                 })
             })
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        rows.flatten().collect()
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        res
     };
 
     if backups.is_empty() {
@@ -1628,7 +1913,9 @@ async fn list_backups_handler(
                 ts: r.created_at,
                 kind: "release-snapshot".to_string(),
                 size: 5 * 1024 * 1024,
-                note: format!("Release #{} ({})", r.id, r.short_sha),
+                note: format!("Automated Release Snapshot #{} ({})", r.id, r.short_sha),
+                path: r.dir,
+                release_id: Some(r.id),
             })
             .collect();
     }
@@ -1639,35 +1926,91 @@ async fn list_backups_handler(
 #[derive(Deserialize)]
 struct CreateBackupPayload {
     note: Option<String>,
+    kind: Option<String>,
 }
 
 async fn create_backup_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<CreateBackupPayload>,
-) -> Result<StatusCode, StatusCode> {
-    let note = payload.note.unwrap_or_else(|| "Manual backup snapshot".to_string());
-    let p = state.projects.get(id).ok().flatten();
-    let path_str = p.map(|proj| proj.deploy_dir).unwrap_or_default();
-    let ts = now();
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "backups", Some(id))?;
+    let note = payload
+        .note
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Manual backup snapshot".to_string());
+    let kind = payload
+        .kind
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "full-snapshot".to_string());
 
-    {
-        let conn = state.db.lock().unwrap();
-        conn.execute(
-            "INSERT INTO backups(project_id, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?)",
-            rusqlite::params![id, path_str, 5 * 1024 * 1024i64, note, ts],
-        )
-        .ok();
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Website not found".to_string()))?;
+
+    let ts = now();
+    let base_dir = std::path::PathBuf::from(&p.deploy_dir);
+    let backup_dir = base_dir.join("backups").join(format!("backup-{}", ts));
+    let _ = std::fs::create_dir_all(&backup_dir);
+
+    let mut total_size = 0u64;
+
+    // 1. Snapshot .env variables
+    if let Ok(raw_env) = state.projects.export_raw_env(id) {
+        let env_path = backup_dir.join("backup.env");
+        if std::fs::write(&env_path, &raw_env).is_ok() {
+            total_size += raw_env.len() as u64;
+        }
     }
 
+    // 2. Snapshot website release files & database files (excluding node_modules/.git)
+    if kind != "env-only" {
+        let src_dir = if base_dir.join("current").exists() {
+            base_dir.join("current")
+        } else if base_dir.join("repo").exists() {
+            base_dir.join("repo")
+        } else {
+            base_dir.clone()
+        };
+        if src_dir.exists() {
+            total_size += copy_backup_files(&src_dir, &backup_dir.join("files"));
+        }
+    }
+
+    if total_size == 0 {
+        total_size = 4096;
+    }
+
+    let backup_path_str = backup_dir.to_string_lossy().to_string();
+    let backup_id = {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO backups(project_id, release_id, kind, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![id, p.current_release_id, kind, backup_path_str, total_size as i64, note, ts],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        conn.last_insert_rowid()
+    };
+
+    log_audit(&state, &actor.username, "backup.create", Some(&p.name), Some(&note));
     state.logs.add(
         Some(id),
         None,
         "backup",
         "info",
-        &format!("Saved backup snapshot in SQLite: {}", note),
+        &format!("Created {} backup #{} ({}) in SQLite & disk", kind, backup_id, note),
     );
-    Ok(StatusCode::OK)
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "backupId": backup_id,
+        "size": total_size
+    })))
 }
 
 #[derive(Deserialize)]
@@ -1678,23 +2021,107 @@ struct RestoreBackupPayload {
 
 async fn restore_backup_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<RestoreBackupPayload>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "backups", Some(id))?;
     let p = state
         .projects
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+        .ok_or((StatusCode::NOT_FOUND, "Website not found".into()))?;
 
-    let dep_id = state.deployer.create_deployment(&p, "rollback", "admin", "backup-restore");
-    let deployer = state.deployer.clone();
-    let target_rel = payload.backup_id;
-    tokio::spawn(async move {
-        deployer.run_rollback(id, dep_id, target_rel).await;
-    });
+    let backup_row: Option<(Option<i64>, String, String)> = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT release_id, COALESCE(path, ''), COALESCE(note, '') FROM backups WHERE id = ? AND project_id = ?",
+            rusqlite::params![payload.backup_id, id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .ok()
+    };
 
-    Ok(StatusCode::OK)
+    if let Some((rel_id, b_path, note)) = backup_row {
+        let b_dir = std::path::PathBuf::from(&b_path);
+        // Restore .env if present in snapshot
+        let env_file = b_dir.join("backup.env");
+        if let Ok(raw_env) = std::fs::read_to_string(&env_file) {
+            if !raw_env.trim().is_empty() {
+                let _ = state.projects.set_bulk_env(id, &raw_env, true, false);
+            }
+        }
+        // Restore files if present in snapshot
+        let files_dir = b_dir.join("files");
+        let target_current = std::path::PathBuf::from(&p.deploy_dir).join("current");
+        if files_dir.exists() && target_current.exists() {
+            let _ = copy_backup_files(&files_dir, &target_current);
+        }
+        if let Some(target_rel) = rel_id {
+            let dep_id = state.deployer.create_deployment(&p, "rollback", &actor.username, "backup-restore");
+            let deployer = state.deployer.clone();
+            tokio::spawn(async move {
+                deployer.run_rollback(id, dep_id, target_rel).await;
+            });
+        } else {
+            let _ = state.runtime.stop_project(&p).await;
+            let env = state.projects.get_env_map(id);
+            let _ = state.runtime.start_project(&p, env, None).await;
+        }
+        log_audit(&state, &actor.username, "backup.restore", Some(&p.name), Some(&note));
+        state.logs.add(
+            Some(id),
+            None,
+            "backup",
+            "info",
+            &format!("Restored backup #{} ({}) for {}", payload.backup_id, note, p.name),
+        );
+    } else {
+        // Fallback: treat backup_id as release_id
+        let dep_id = state.deployer.create_deployment(&p, "rollback", &actor.username, "backup-restore");
+        let deployer = state.deployer.clone();
+        let target_rel = payload.backup_id;
+        tokio::spawn(async move {
+            deployer.run_rollback(id, dep_id, target_rel).await;
+        });
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn delete_backup_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath((id, backup_id)): AxPath<(i64, i64)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "backups", Some(id))?;
+    let b_path: Option<String> = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT path FROM backups WHERE id = ? AND project_id = ?",
+            rusqlite::params![backup_id, id],
+            |r| r.get(0),
+        )
+        .ok()
+    };
+
+    if let Some(p_str) = b_path {
+        if p_str.contains("backups") && std::path::Path::new(&p_str).exists() {
+            let _ = std::fs::remove_dir_all(&p_str);
+        }
+    }
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "DELETE FROM backups WHERE id = ? AND project_id = ?",
+            rusqlite::params![backup_id, id],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    log_audit(&state, &actor.username, "backup.delete", Some(&format!("backup #{}", backup_id)), None);
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Serialize)]
