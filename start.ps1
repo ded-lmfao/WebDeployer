@@ -1,13 +1,13 @@
-# Nexus Deploy 2.0 - Easy Start Script (PowerShell)
+# WebDep - Easy Start Script (PowerShell)
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
 Write-Host "===================================================" -ForegroundColor Cyan
-Write-Host "          Nexus Deploy 2.0 (Rust Engine)" -ForegroundColor Cyan
+Write-Host "     WebDep - Multi-Website Hosting Platform" -ForegroundColor Cyan
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host ""
 
-$binaryPath = Join-Path $PSScriptRoot "target\release\nexus-deploy.exe"
+$binaryPath = Join-Path $PSScriptRoot "target\release\webdep.exe"
 
 if (-not (Test-Path $binaryPath)) {
     Write-Host "[*] Compiling optimized release binary..." -ForegroundColor Yellow
@@ -21,7 +21,11 @@ if (-not (Test-Path $binaryPath)) {
 $port = if ($env:PORT) { $env:PORT } else { "4600" }
 $url = "http://127.0.0.1:$port"
 
-Write-Host "[*] Starting server on $url" -ForegroundColor Green
+Stop-Process -Name "webdep" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "nexus-deploy" -Force -ErrorAction SilentlyContinue
+
+Write-Host "[*] Starting WebDep server on $url" -ForegroundColor Green
+Write-Host "[*] SQLite Database: data\webdep.sqlite" -ForegroundColor Cyan
 Write-Host "[*] Default Credentials:" -ForegroundColor Yellow
 Write-Host "    - Username: admin" -ForegroundColor White
 Write-Host "    - Password: admin123" -ForegroundColor White
@@ -35,4 +39,3 @@ Start-Job -ScriptBlock {
 } -ArgumentList $url | Out-Null
 
 & $binaryPath
-

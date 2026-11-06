@@ -1,5 +1,5 @@
 /**
- * Nexus Deploy 2.0 — Frontend Application Controller
+ * WebDep — Frontend Application Controller
  * Single-Page Reactive Client for Self-Hosted Multi-Website Deployment Platform
  */
 
@@ -41,7 +41,7 @@ const PRESETS = {
     install_cmd: 'npm ci',
     build_cmd: '',
     start_cmd: 'node server.js',
-    health_url: 'http://127.0.0.1:3000/healthz',
+    health_url: 'http://127.0.0.1:3000/',
   },
   express: {
     port: 3000,
@@ -49,7 +49,7 @@ const PRESETS = {
     install_cmd: 'npm ci',
     build_cmd: '',
     start_cmd: 'node app.js',
-    health_url: 'http://127.0.0.1:3000/health',
+    health_url: 'http://127.0.0.1:3000/',
   },
   nextjs: {
     port: 3000,
@@ -117,7 +117,20 @@ async function api(path, options = {}) {
     options.body = JSON.stringify(options.body);
   }
 
-  const res = await fetch(path, { credentials: 'same-origin', ...options, headers });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 15000);
+
+  let res;
+  try {
+    res = await fetch(path, {
+      credentials: 'same-origin',
+      signal: controller.signal,
+      ...options,
+      headers,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
   
   if (res.status === 401 && !path.startsWith('/api/auth/login')) {
     showLogin();
@@ -240,8 +253,30 @@ function updateBreadcrumbs() {
   }
 }
 
+function syncProjectSelectors() {
+  const optionsHtml = (state.projects || []).map((p) => `
+    <option value="${p.id}" ${state.selectedProjectId === p.id ? 'selected' : ''}>
+      ${escapeHtml(p.name)} (${p.slug})
+    </option>
+  `).join('');
+
+  document.querySelectorAll('.view-project-selector, #env-project-selector').forEach((sel) => {
+    sel.innerHTML = optionsHtml;
+    if (state.selectedProjectId) {
+      sel.value = String(state.selectedProjectId);
+    }
+  });
+}
+
 function renderCurrentView() {
   updateBreadcrumbs();
+  syncProjectSelectors();
+
+  // Close SSE log stream when leaving the logs view so it never holds browser sockets open
+  if (state.currentView !== 'logs' && state.logEventSource) {
+    state.logEventSource.close();
+    state.logEventSource = null;
+  }
 
   // Close mobile sidebar if open
   document.querySelector('.sidebar')?.classList.remove('mobile-open');
@@ -293,6 +328,7 @@ async function loadProjects() {
       state.selectedProjectId = state.projects[0].id;
       select.value = String(state.projects[0].id);
     }
+    syncProjectSelectors();
   } catch (err) {
     toast(`Failed to load projects: ${err.message}`, 'error');
   }
@@ -612,18 +648,32 @@ async function detectProjectConfiguration() {
 }
 window.detectProjectConfiguration = detectProjectConfiguration;
 
+function getNextAvailablePort(basePort = 3000) {
+  const used = new Set((state.projects || []).map((p) => Number(p.port)).filter(Boolean));
+  used.add(4600); // Reserve WebDep dashboard port
+  let port = Number(basePort) || 3000;
+  while (used.has(port)) {
+    port++;
+  }
+  return port;
+}
+
 function applyPreset(type) {
   const conf = PRESETS[type] || PRESETS.node;
   document.querySelectorAll('.preset-chip').forEach((c) => {
     c.classList.toggle('active', c.getAttribute('data-type') === type);
   });
 
-  document.getElementById('website-port').value = conf.port || '';
+  const isEditing = Boolean(document.getElementById('website-form-id')?.value);
+  const assignedPort = isEditing ? (conf.port || 3000) : getNextAvailablePort(conf.port || 3000);
+  const healthUrl = (conf.health_url || '').replace(`:${conf.port}`, `:${assignedPort}`);
+
+  document.getElementById('website-port').value = assignedPort || '';
   document.getElementById('website-deploy-method').value = conf.deploy_method || 'managed';
   document.getElementById('website-install-cmd').value = conf.install_cmd || '';
   document.getElementById('website-build-cmd').value = conf.build_cmd || '';
   document.getElementById('website-start-cmd').value = conf.start_cmd || '';
-  document.getElementById('website-health-url').value = conf.health_url || '';
+  document.getElementById('website-health-url').value = healthUrl;
 }
 
 // Preset chips click
@@ -672,7 +722,7 @@ document.getElementById('website-name')?.addEventListener('input', (e) => {
   if (!document.getElementById('website-form-id').value) {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     slugInput.value = slug;
-    dirInput.value = slug ? `/var/www/${slug}` : '';
+    dirInput.value = slug ? `./data/sites/${slug}` : '';
   }
 });
 
@@ -699,18 +749,18 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     install_cmd: document.getElementById('website-install-cmd').value.trim(),
     build_cmd: document.getElementById('website-build-cmd').value.trim(),
     start_cmd: document.getElementById('website-start-cmd').value.trim(),
-    auto_deploy: document.getElementById('website-auto-deploy').checked ? 1 : 0,
-    auto_backup: document.getElementById('website-auto-backup').checked ? 1 : 0,
+    auto_deploy: Boolean(document.getElementById('website-auto-deploy').checked),
+    auto_backup: Boolean(document.getElementById('website-auto-backup').checked),
   };
 
   try {
     if (id) {
       await api(`/api/projects/${id}`, { method: 'PUT', body: payload });
-      toast('Website updated successfully', 'success');
+      toast('Website updated in SQLite', 'success');
     } else {
       const res = await api('/api/projects', { method: 'POST', body: payload });
-      toast(`Website "${payload.name}" created!`, 'success');
-      state.selectedProjectId = res.project.id;
+      toast(`Website "${payload.name}" saved in SQLite!`, 'success');
+      state.selectedProjectId = res.project ? res.project.id : res.id;
     }
     closeModal('modal-website');
     await loadProjects();
@@ -862,9 +912,15 @@ document.getElementById('github-fetch-btn')?.addEventListener('click', async () 
 });
 
 async function fetchProjectUpdates(projectId) {
+  toast('Fetching latest commits from GitHub...', 'info');
   try {
-    await api(`/api/projects/${projectId}/fetch`, { method: 'POST' });
-    toast('Fetch updates queued.', 'info');
+    const res = await api(`/api/projects/${projectId}/fetch`, { method: 'POST', timeoutMs: 30000 });
+    const shortSha = res.sha ? res.sha.slice(0, 7) : 'latest';
+    toast(`Fetched latest updates (${shortSha}) from GitHub!`, 'success');
+    await loadProjects();
+    if (state.currentView === 'projects') renderProjectsList();
+    if (state.currentView === 'github') loadGithubView();
+    if (state.currentView === 'overview') loadOverview();
   } catch (err) {
     toast(`Fetch failed: ${err.message}`, 'error');
   }
@@ -1122,11 +1178,17 @@ window.rollbackToRelease = rollbackToRelease;
 // ============================================================================
 // View 7: Real-Time Live Logs
 // ============================================================================
-function loadLogsView() {
-  const terminal = document.getElementById('log-terminal-output');
-  if (!state.logEventSource) {
-    startLogStream();
-  }
+async function loadLogsView() {
+  startLogStream();
+  try {
+    const p = getSelectedProject();
+    let url = '/api/logs?limit=300';
+    if (p) url += `&project=${p.id}`;
+    const history = await api(url);
+    if (Array.isArray(history)) {
+      state.logLines = history;
+    }
+  } catch (_) {}
   renderTerminalLogs();
 }
 
@@ -1144,9 +1206,13 @@ function startLogStream() {
     try {
       const data = JSON.parse(e.data);
       if (Array.isArray(data)) {
-        state.logLines.push(...data);
-        if (state.logLines.length > 2000) state.logLines.splice(0, state.logLines.length - 2000);
-        appendTerminalLogs(data);
+        const existingIds = new Set(state.logLines.map((x) => x.id));
+        const fresh = data.filter((x) => !x.id || !existingIds.has(x.id));
+        if (fresh.length) {
+          state.logLines.push(...fresh);
+          if (state.logLines.length > 2000) state.logLines.splice(0, state.logLines.length - 2000);
+          appendTerminalLogs(fresh);
+        }
       }
     } catch { /* keepalive or malformed */ }
   };
@@ -1167,9 +1233,17 @@ function renderTerminalLogs() {
   const filtered = state.logLines.filter((l) => {
     if (chanFilter && l.channel !== chanFilter) return false;
     if (lvlFilter && l.level !== lvlFilter) return false;
-    if (q && !l.message.toLowerCase().includes(q)) return false;
+    if (q && !(l.message || '').toLowerCase().includes(q)) return false;
     return true;
   });
+
+  if (!filtered.length) {
+    const filterNote = (chanFilter || lvlFilter || q)
+      ? `No log entries match filter (${[chanFilter, lvlFilter, q].filter(Boolean).join(', ')}). Switch filters to "All Channels" / "All Levels" to view all ${state.logLines.length} logs.`
+      : 'WebDep real-time log stream connected. Waiting for log events...';
+    terminal.innerHTML = `<div class="log-line"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-chan">[system]</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
+    return;
+  }
 
   terminal.innerHTML = filtered.map((l) => formatLogLine(l)).join('');
   if (document.getElementById('log-autoscroll')?.checked) {
@@ -1218,7 +1292,9 @@ function formatLogLine(l) {
 
 // Log filters bindings
 ['log-channel-filter', 'log-level-filter', 'log-search-input'].forEach((id) => {
-  document.getElementById(id)?.addEventListener('input', renderTerminalLogs);
+  const el = document.getElementById(id);
+  el?.addEventListener('input', renderTerminalLogs);
+  el?.addEventListener('change', renderTerminalLogs);
 });
 document.getElementById('log-clear-btn')?.addEventListener('click', () => {
   state.logLines = [];
@@ -1270,8 +1346,11 @@ document.getElementById('logs-app-tail-btn')?.addEventListener('click', async ()
 });
 
 function openLogsForProject(projectId) {
+  const chanSel = document.getElementById('log-channel-filter');
+  const lvlSel = document.getElementById('log-level-filter');
+  if (chanSel) chanSel.value = '';
+  if (lvlSel) lvlSel.value = '';
   navigateTo('logs', projectId);
-  startLogStream();
 }
 window.openLogsForProject = openLogsForProject;
 
@@ -1279,25 +1358,53 @@ window.openLogsForProject = openLogsForProject;
 // View 8: Environment Variables
 // ============================================================================
 async function loadEnvView() {
+  if (!state.projects || state.projects.length === 0) {
+    try {
+      state.projects = await api('/api/projects');
+    } catch (_) {}
+  }
+
+  // Populate website selector in the Environment card
+  const projSelect = document.getElementById('env-project-selector');
+  if (projSelect) {
+    projSelect.innerHTML = (state.projects || []).map((p) => `
+      <option value="${p.id}" ${state.selectedProjectId === p.id ? 'selected' : ''}>
+        ${escapeHtml(p.name)} (${p.slug})
+      </option>
+    `).join('');
+  }
+
   const p = getSelectedProject();
   const tbody = document.getElementById('env-vars-table-body');
-  if (!p) return;
+  if (!p) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">No website found. Create a website first.</td></tr>';
+    return;
+  }
+
+  if (projSelect && p.id) {
+    projSelect.value = String(p.id);
+  }
 
   try {
     const vars = await api(`/api/projects/${p.id}/env`);
     if (!vars.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">No environment variables configured. Click "Add Variable" to set secrets or config.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">No environment variables configured. Click "Add Variable" or "Bulk / .env File" above to add.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = vars.map((v) => `
+    tbody.innerHTML = vars.map((v) => {
+      const isSecret = Boolean(v.is_secret ?? v.secret);
+      return `
       <tr>
         <td><code>${escapeHtml(v.key)}</code></td>
         <td id="env-val-${v.key}">
-          <span style="font-family: var(--font-mono); color: var(--text-dim);">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+          ${isSecret
+            ? '<span style="font-family: var(--font-mono); color: var(--text-dim);">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>'
+            : `<code style="color: var(--text-main);">${escapeHtml(v.value)}</code>`
+          }
         </td>
-        <td>${v.secret ? '<span class="badge badge-warning">Secret</span>' : '<span class="badge badge-neutral">Public</span>'}</td>
-        <td>${formatDate(v.updated_at)}</td>
+        <td>${isSecret ? '<span class="badge badge-warning">Secret</span>' : '<span class="badge badge-neutral">Public</span>'}</td>
+        <td><span class="badge badge-success">Saved in SQLite</span></td>
         <td>
           <div style="display: flex; gap: 6px;">
             <button class="btn btn-secondary btn-sm" onclick="promptRevealEnv('${escapeHtml(v.key)}')">Reveal</button>
@@ -1305,37 +1412,197 @@ async function loadEnvView() {
           </div>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
-document.getElementById('add-env-btn')?.addEventListener('click', () => {
-  document.getElementById('add-env-form').reset();
-  openModal('modal-env');
-});
+function onEnvProjectChange(projectId) {
+  state.selectedProjectId = Number(projectId);
+  const globalSel = document.getElementById('global-project-select');
+  if (globalSel) globalSel.value = String(projectId);
+  syncProjectSelectors();
+  renderCurrentView();
+}
+window.onEnvProjectChange = onEnvProjectChange;
 
-document.getElementById('save-env-btn')?.addEventListener('click', async (e) => {
-  e.preventDefault();
+function restartCurrentProject() {
   const p = getSelectedProject();
-  if (!p) return;
+  if (p) restartProject(p.id);
+}
+window.restartCurrentProject = restartCurrentProject;
 
-  const key = document.getElementById('env-key-input').value.trim();
-  const value = document.getElementById('env-value-input').value;
-  const secret = document.getElementById('env-secret-checkbox').checked;
+// Environment modal state & tab switching
+let activeEnvTab = 'single';
 
-  if (!key) return;
+function switchEnvModalTab(tab) {
+  activeEnvTab = tab;
+  const singleTab = document.getElementById('tab-env-single');
+  const bulkTab = document.getElementById('tab-env-bulk');
+  const singleSec = document.getElementById('env-section-single');
+  const bulkSec = document.getElementById('env-section-bulk');
+  const title = document.getElementById('env-modal-title');
+  const saveBtn = document.getElementById('save-env-btn');
 
-  try {
-    await api(`/api/projects/${p.id}/env`, { method: 'PUT', body: { key, value, secret } });
-    toast(`Variable "${key}" saved. Restart application for it to take effect.`, 'success');
-    closeModal('modal-env');
-    loadEnvView();
-  } catch (err) {
-    toast(`Save failed: ${err.message}`, 'error');
+  if (tab === 'single') {
+    if (singleTab) {
+      singleTab.style.background = 'var(--bg-card)';
+      singleTab.style.borderColor = 'var(--accent)';
+      singleTab.style.color = 'var(--accent-light)';
+    }
+    if (bulkTab) {
+      bulkTab.style.background = 'transparent';
+      bulkTab.style.borderColor = 'transparent';
+      bulkTab.style.color = 'var(--text-muted)';
+    }
+    if (singleSec) singleSec.style.display = 'block';
+    if (bulkSec) bulkSec.style.display = 'none';
+    if (title) title.textContent = 'Add Environment Variable';
+    if (saveBtn) saveBtn.textContent = 'Save Variable';
+  } else {
+    if (singleTab) {
+      singleTab.style.background = 'transparent';
+      singleTab.style.borderColor = 'transparent';
+      singleTab.style.color = 'var(--text-muted)';
+    }
+    if (bulkTab) {
+      bulkTab.style.background = 'var(--bg-card)';
+      bulkTab.style.borderColor = 'var(--accent)';
+      bulkTab.style.color = 'var(--accent-light)';
+    }
+    if (singleSec) singleSec.style.display = 'none';
+    if (bulkSec) bulkSec.style.display = 'block';
+    if (title) title.textContent = 'Bulk / .env File Import';
+    if (saveBtn) saveBtn.textContent = 'Import & Save .env';
   }
-});
+}
+window.switchEnvModalTab = switchEnvModalTab;
+
+function openAddEnvModal() {
+  const p = getSelectedProject();
+  if (!p) {
+    toast('Please select or create a website first.', 'warning');
+    return;
+  }
+  const targetLabel = document.getElementById('env-modal-target-project');
+  if (targetLabel) targetLabel.textContent = `${p.name} (${p.slug})`;
+  document.getElementById('add-env-form')?.reset();
+  switchEnvModalTab('single');
+  openModal('modal-env');
+}
+window.openAddEnvModal = openAddEnvModal;
+
+function openBulkEnvModal() {
+  const p = getSelectedProject();
+  if (!p) {
+    toast('Please select or create a website first.', 'warning');
+    return;
+  }
+  const targetLabel = document.getElementById('env-modal-target-project');
+  if (targetLabel) targetLabel.textContent = `${p.name} (${p.slug})`;
+  switchEnvModalTab('bulk');
+  openModal('modal-env');
+}
+window.openBulkEnvModal = openBulkEnvModal;
+
+async function loadCurrentEnv() {
+  const p = getSelectedProject();
+  if (!p) {
+    toast('No website selected.', 'error');
+    return;
+  }
+  try {
+    const res = await api(`/api/projects/${p.id}/env/raw`);
+    const bulkInput = document.getElementById('env-bulk-input');
+    if (bulkInput) {
+      bulkInput.value = res.content || '';
+      toast(`Current .env loaded for "${p.name}".`, 'info');
+    }
+  } catch (err) {
+    toast(`Failed to load .env: ${err.message}`, 'error');
+  }
+}
+window.loadCurrentEnv = loadCurrentEnv;
+
+async function exportEnvFile() {
+  const p = getSelectedProject();
+  if (!p) {
+    toast('No website selected.', 'error');
+    return;
+  }
+  try {
+    const res = await api(`/api/projects/${p.id}/env/raw`);
+    if (!res.content || !res.content.trim()) {
+      toast('No environment variables to export.', 'info');
+      return;
+    }
+    const blob = new Blob([res.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${p.slug || 'app'}.env`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(`Exported ${p.slug || 'app'}.env!`, 'success');
+  } catch (err) {
+    toast(`Export failed: ${err.message}`, 'error');
+  }
+}
+window.exportEnvFile = exportEnvFile;
+
+async function handleSaveEnv(e) {
+  if (e) e.preventDefault();
+  const p = getSelectedProject();
+  if (!p) {
+    toast('No website selected. Please select a website first.', 'error');
+    return;
+  }
+
+  if (activeEnvTab === 'single') {
+    const key = (document.getElementById('env-key-input')?.value || '').trim();
+    const value = document.getElementById('env-value-input')?.value || '';
+    const is_secret = document.getElementById('env-secret-checkbox')?.checked ?? true;
+
+    if (!key) {
+      toast('Variable key is required.', 'error');
+      return;
+    }
+
+    try {
+      await api(`/api/projects/${p.id}/env`, { method: 'PUT', body: { key, value, is_secret } });
+      toast(`Variable "${key}" saved. Restart application for it to take effect.`, 'success');
+      closeModal('modal-env');
+      loadEnvView();
+    } catch (err) {
+      toast(`Save failed: ${err.message}`, 'error');
+    }
+  } else {
+    const content = document.getElementById('env-bulk-input')?.value || '';
+    if (!content.trim()) {
+      toast('Please enter or paste .env file contents.', 'error');
+      return;
+    }
+    const is_secret = document.getElementById('env-bulk-secret-checkbox')?.checked ?? true;
+    const replace_all = document.getElementById('env-bulk-replace-checkbox')?.checked ?? false;
+
+    try {
+      const res = await api(`/api/projects/${p.id}/env/bulk`, {
+        method: 'POST',
+        body: { content, is_secret, replace_all },
+      });
+      toast(`Successfully saved ${res.count || 0} variables for ${p.name}! Restart app to apply.`, 'success');
+      closeModal('modal-env');
+      loadEnvView();
+    } catch (err) {
+      toast(`Bulk save failed: ${err.message}`, 'error');
+    }
+  }
+}
+window.handleSaveEnv = handleSaveEnv;
 
 async function deleteEnvVar(key) {
   const p = getSelectedProject();
@@ -1494,6 +1761,19 @@ async function loadSettingsView() {
     document.getElementById('setting-step-timeout').value = s.step_timeout_s || 900;
     document.getElementById('setting-deploy-timeout').value = s.deploy_timeout_s || 1800;
 
+    const tokBadge = document.getElementById('github-token-status-badge');
+    const tokInput = document.getElementById('setting-github-token');
+    if (s.github_token_configured === 'true') {
+      if (tokBadge) tokBadge.innerHTML = `<span class="badge badge-success">Saved in SQLite (${escapeHtml(s.github_token_masked || 'Configured')})</span>`;
+      if (tokInput) {
+        tokInput.value = '';
+        tokInput.placeholder = `${s.github_token_masked || 'Token saved'} (enter new token to replace)`;
+      }
+    } else {
+      if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">Not Configured</span>';
+      if (tokInput) tokInput.placeholder = 'github_pat_...';
+    }
+
     // Users list
     if (state.user.role === 'admin') {
       const users = await api('/api/users');
@@ -1531,7 +1811,8 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
 
   try {
     await api('/api/settings', { method: 'PUT', body: payload });
-    toast('Settings saved successfully.', 'success');
+    toast('Settings saved in SQLite.', 'success');
+    loadSettingsView();
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
   }
@@ -1670,7 +1951,12 @@ document.getElementById('nginx-certbot-btn')?.addEventListener('click', async ()
 // ============================================================================
 async function startProject(projectId) {
   try {
-    await api(`/api/projects/${projectId}/start`, { method: 'POST' });
+    const res = await api(`/api/projects/${projectId}/start`, { method: 'POST' });
+    if (res && res.autoDeployed) {
+      toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
+      navigateTo('deployments', projectId);
+      return;
+    }
     toast('Process started.', 'success');
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
@@ -1682,7 +1968,6 @@ async function startProject(projectId) {
 window.startProject = startProject;
 
 async function stopProject(projectId) {
-  if (!confirm('Stop this application process?')) return;
   try {
     await api(`/api/projects/${projectId}/stop`, { method: 'POST' });
     toast('Process stopped.', 'info');
@@ -1697,10 +1982,16 @@ window.stopProject = stopProject;
 
 async function restartProject(projectId) {
   try {
-    await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
-    toast('Restart initiated.', 'info');
+    const res = await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
+    if (res && res.autoDeployed) {
+      toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
+      navigateTo('deployments', projectId);
+      return;
+    }
+    toast('Application restarted.', 'success');
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
+    if (state.currentView === 'overview') loadOverview();
   } catch (err) {
     toast(`Restart failed: ${err.message}`, 'error');
   }
@@ -1710,19 +2001,33 @@ window.restartProject = restartProject;
 // ============================================================================
 // Global Polling & Live Updates
 // ============================================================================
+let pollInFlight = false;
 function startPolling() {
   if (state.overviewTimer) clearInterval(state.overviewTimer);
 
   state.overviewTimer = setInterval(async () => {
-    if (state.currentView === 'overview') {
-      loadOverview();
-    } else if (state.currentView === 'deployments') {
-      loadDeploymentsView();
-    } else if (state.currentView === 'monitor') {
-      loadMonitorView();
+    if (pollInFlight) return;
+    pollInFlight = true;
+    try {
+      if (state.currentView === 'overview') {
+        await loadOverview();
+      } else if (state.currentView === 'deployments') {
+        await loadDeploymentsView();
+      } else if (state.currentView === 'monitor') {
+        await loadMonitorView();
+      }
+    } finally {
+      pollInFlight = false;
     }
   }, 4000);
 }
+
+window.addEventListener('beforeunload', () => {
+  if (state.logEventSource) {
+    state.logEventSource.close();
+    state.logEventSource = null;
+  }
+});
 
 // Global project selector binding
 document.getElementById('global-project-select')?.addEventListener('change', (e) => {

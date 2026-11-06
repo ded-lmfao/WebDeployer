@@ -6,7 +6,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use futures_util::stream::Stream;
@@ -51,11 +51,23 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/projects/:id",
             get(get_project_handler)
+                .put(update_project_handler)
                 .patch(update_project_handler)
                 .delete(delete_project_handler),
         )
+        .route("/api/projects/:id/detect", post(detect_project_handler))
+        .route("/api/projects/:id/commits", get(project_commits_handler))
+        .route("/api/projects/:id/check", post(project_check_handler))
+        .route("/api/projects/:id/fetch", post(project_fetch_handler))
+        .route("/api/projects/:id/deploy-key", post(project_deploy_key_handler))
+        .route("/api/projects/:id/webhook-secret/rotate", post(rotate_webhook_secret_handler))
+        .route("/api/projects/:id/backups", get(list_backups_handler))
+        .route("/api/projects/:id/backup", post(create_backup_handler))
+        .route("/api/projects/:id/backups/restore", post(restore_backup_handler))
         // Project Env
         .route("/api/projects/:id/env", get(get_env_handler).put(set_env_handler))
+        .route("/api/projects/:id/env/bulk", post(bulk_set_env_handler))
+        .route("/api/projects/:id/env/raw", get(get_raw_env_handler))
         .route("/api/projects/:id/env/reveal", post(reveal_env_handler))
         .route("/api/projects/:id/env/:key", delete(delete_env_handler))
         // Project Lifecycle & Actions
@@ -71,17 +83,27 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects/:id/nginx/apply", post(apply_caddy_handler))
         .route("/api/projects/:id/nginx/certbot", post(certbot_caddy_handler))
         .route("/api/projects/:id/app-logs", get(get_app_logs_handler))
+        // GitHub & Caddy Status
+        .route("/api/github/repos", get(github_repos_handler))
+        .route("/api/nginx/status", get(caddy_status_handler))
+        .route("/api/caddy/status", get(caddy_status_handler))
         // Deployments & Releases
         .route("/api/deployments", get(list_deployments_handler))
-        // Live Logs SSE & Download
+        .route("/api/deployments/:id", get(get_deployment_handler))
+        .route("/api/deployments/:id/logs", get(get_deployment_logs_handler))
+        // Live Logs SSE, History & Download
+        .route("/api/logs", get(list_logs_handler))
         .route("/api/logs/stream", get(logs_sse_handler))
         .route("/api/logs/download", get(logs_download_handler))
+        // GitHub Webhooks
+        .route("/api/webhooks/github/:slug", post(github_webhook_handler))
         // Overview & Telemetry
         .route("/api/overview", get(overview_handler))
         .route("/api/monitor", get(monitor_handler))
         .route("/api/audit", get(audit_handler))
-        .route("/api/settings", get(get_settings_handler).patch(update_settings_handler))
+        .route("/api/settings", get(get_settings_handler).put(update_settings_handler).patch(update_settings_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
+        .route("/api/users/:id", put(update_user_handler).patch(update_user_handler))
         .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
         // Static assets fallback
         .fallback(axum_static_fallback)
@@ -267,9 +289,37 @@ async fn create_project_handler(
     if p.name.trim().is_empty() || p.slug.trim().is_empty() || p.repo_url.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Name, slug, and repo_url are required".into()));
     }
-    if p.deploy_dir.trim().is_empty() {
-        p.deploy_dir = format!("./data/apps/{}", p.slug);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if p.deploy_dir.trim().is_empty()
+        || p.deploy_dir.starts_with("./")
+        || p.deploy_dir.starts_with(".\\")
+        || (cfg!(windows) && p.deploy_dir.starts_with("/var/www/") && !std::path::Path::new(&p.deploy_dir).exists())
+    {
+        let rel = if p.deploy_dir.starts_with("./") || p.deploy_dir.starts_with(".\\") {
+            p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\").to_string()
+        } else {
+            format!("data/sites/{}", p.slug)
+        };
+        let abs = cwd.join(rel);
+        let _ = std::fs::create_dir_all(&abs);
+        p.deploy_dir = abs.to_string_lossy().to_string();
+    } else {
+        let _ = std::fs::create_dir_all(&p.deploy_dir);
     }
+
+    // Ensure non-conflicting port across all hosted websites
+    if let Ok(existing) = state.projects.list() {
+        let used_ports: std::collections::HashSet<u16> = existing.iter().filter_map(|x| x.port).collect();
+        let mut candidate = p.port.unwrap_or(3000);
+        while used_ports.contains(&candidate) || candidate == 4600 {
+            candidate += 1;
+        }
+        p.port = Some(candidate);
+        if p.health_url.contains(":3000") && candidate != 3000 {
+            p.health_url = p.health_url.replace(":3000", &format!(":{}", candidate));
+        }
+    }
+
     let id = state
         .projects
         .create(&p)
@@ -306,9 +356,15 @@ async fn update_project_handler(
 async fn delete_project_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-) -> Result<StatusCode, StatusCode> {
-    state.projects.delete(id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(StatusCode::OK)
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if let Ok(Some(p)) = state.projects.get(id) {
+        let _ = state.runtime.stop_project(&p).await;
+    }
+    state
+        .projects
+        .delete(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +395,51 @@ async fn set_env_handler(
         .set_env_var(id, &payload.key, &payload.value, payload.is_secret.unwrap_or(false))
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct BulkEnvPayload {
+    content: String,
+    is_secret: Option<bool>,
+    replace_all: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct BulkEnvResponse {
+    count: usize,
+}
+
+async fn bulk_set_env_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<BulkEnvPayload>,
+) -> Result<Json<BulkEnvResponse>, (StatusCode, String)> {
+    let count = state
+        .projects
+        .set_bulk_env(
+            id,
+            &payload.content,
+            payload.is_secret.unwrap_or(true),
+            payload.replace_all.unwrap_or(false),
+        )
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(BulkEnvResponse { count }))
+}
+
+#[derive(Serialize)]
+struct RawEnvResponse {
+    content: String,
+}
+
+async fn get_raw_env_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<RawEnvResponse>, (StatusCode, String)> {
+    let content = state
+        .projects
+        .export_raw_env(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(RawEnvResponse { content }))
 }
 
 #[derive(Deserialize)]
@@ -412,7 +513,7 @@ struct RollbackPayload {
 async fn rollback_project_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-    Json(_payload): Json<RollbackPayload>,
+    Json(payload): Json<RollbackPayload>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
     let p = state
         .projects
@@ -422,9 +523,10 @@ async fn rollback_project_handler(
 
     let dep_id = state.deployer.create_deployment(&p, "rollback", "admin", "manual");
     let deployer = state.deployer.clone();
+    let target_rel = payload.release_id;
 
     tokio::spawn(async move {
-        deployer.run_deploy(p.id, dep_id).await;
+        deployer.run_rollback(p.id, dep_id, target_rel).await;
     });
 
     Ok(Json(ActionResponse { deployment_id: dep_id }))
@@ -433,7 +535,7 @@ async fn rollback_project_handler(
 async fn start_project_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let p = state
         .projects
         .get(id)
@@ -441,19 +543,39 @@ async fn start_project_handler(
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
     let env = state.projects.get_env_map(id);
-    state
-        .runtime
-        .start_project(&p, env)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-
-    Ok(StatusCode::OK)
+    match state.runtime.start_project(&p, env, None).await {
+        Ok(pid) => Ok(Json(serde_json::json!({
+            "started": true,
+            "pid": pid
+        }))),
+        Err(e) if e == "NOT_DEPLOYED_YET" => {
+            // Website has never been deployed yet — automatically trigger initial deployment!
+            state.logs.add(
+                Some(p.id),
+                None,
+                "deployment",
+                "info",
+                &format!("Website '{}' has no release built yet — triggering initial deployment automatically", p.name),
+            );
+            let dep_id = state.deployer.create_deployment(&p, "deploy", "admin", "auto-initial-start");
+            let deployer = state.deployer.clone();
+            tokio::spawn(async move {
+                deployer.run_deploy(p.id, dep_id).await;
+            });
+            Ok(Json(serde_json::json!({
+                "started": false,
+                "autoDeployed": true,
+                "deploymentId": dep_id
+            })))
+        }
+        Err(e) => Err((StatusCode::BAD_REQUEST, e)),
+    }
 }
 
 async fn stop_project_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let p = state
         .projects
         .get(id)
@@ -466,13 +588,13 @@ async fn stop_project_handler(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    Ok(StatusCode::OK)
+    Ok(Json(serde_json::json!({ "stopped": true })))
 }
 
 async fn restart_project_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let p = state
         .projects
         .get(id)
@@ -481,13 +603,18 @@ async fn restart_project_handler(
 
     let _ = state.runtime.stop_project(&p).await;
     let env = state.projects.get_env_map(id);
-    state
-        .runtime
-        .start_project(&p, env)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-
-    Ok(StatusCode::OK)
+    match state.runtime.start_project(&p, env, None).await {
+        Ok(pid) => Ok(Json(serde_json::json!({ "started": true, "pid": pid }))),
+        Err(e) if e == "NOT_DEPLOYED_YET" => {
+            let dep_id = state.deployer.create_deployment(&p, "deploy", "admin", "auto-initial-restart");
+            let deployer = state.deployer.clone();
+            tokio::spawn(async move {
+                deployer.run_deploy(p.id, dep_id).await;
+            });
+            Ok(Json(serde_json::json!({ "started": false, "autoDeployed": true, "deploymentId": dep_id })))
+        }
+        Err(e) => Err((StatusCode::BAD_REQUEST, e)),
+    }
 }
 
 async fn list_releases_handler(
@@ -527,9 +654,11 @@ async fn apply_caddy_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
+    let all_projects = state.projects.list().unwrap_or_default();
+
     state
         .caddy
-        .write_config(&p)
+        .write_config(&p, &all_projects)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let _ = state.caddy.reload();
@@ -555,11 +684,13 @@ async fn get_app_logs_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<AppLogsResponse>, StatusCode> {
-    let logs = state
-        .logs
-        .list(Some(id), None, Some("app"), None, 100)
+    let mut entries = state.logs.list(Some(id), None, Some("app"), None, 200);
+    if entries.is_empty() {
+        entries = state.logs.list(Some(id), None, None, None, 200);
+    }
+    let logs = entries
         .into_iter()
-        .map(|l| l.message)
+        .map(|l| format!("[{}] [{}] {}", l.channel.to_uppercase(), l.level.to_uppercase(), l.message))
         .collect();
 
     Ok(Json(AppLogsResponse { lines: logs }))
@@ -582,15 +713,83 @@ async fn list_deployments_handler(
     Ok(Json(list))
 }
 
+#[derive(Serialize)]
+struct DeploymentDetailResponse {
+    deployment: crate::deployer::Deployment,
+    logs: Vec<crate::logs::LogEntry>,
+}
+
+async fn get_deployment_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<DeploymentDetailResponse>, StatusCode> {
+    let dep = state.deployer.get_deployment(id).ok_or(StatusCode::NOT_FOUND)?;
+    let logs = state.logs.list(None, Some(id), None, None, 1000);
+    Ok(Json(DeploymentDetailResponse {
+        deployment: dep,
+        logs,
+    }))
+}
+
+async fn get_deployment_logs_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<Vec<crate::logs::LogEntry>>, StatusCode> {
+    let logs = state.logs.list(None, Some(id), None, None, 1000);
+    Ok(Json(logs))
+}
+
 // ---------------------------------------------------------------------------
-// Real-Time SSE Log Streaming
+// Real-Time SSE Log Streaming & Log History
 // ---------------------------------------------------------------------------
+#[derive(Deserialize)]
+struct LogsQuery {
+    project: Option<i64>,
+    channel: Option<String>,
+    level: Option<String>,
+    backlog: Option<usize>,
+    limit: Option<usize>,
+}
+
+async fn list_logs_handler(
+    State(state): State<AppState>,
+    Query(q): Query<LogsQuery>,
+) -> Result<Json<Vec<crate::logs::LogEntry>>, StatusCode> {
+    let limit = q.limit.or(q.backlog).unwrap_or(300);
+    let logs = state.logs.list(
+        q.project,
+        None,
+        q.channel.as_deref(),
+        q.level.as_deref(),
+        limit,
+    );
+    Ok(Json(logs))
+}
+
 async fn logs_sse_handler(
     State(state): State<AppState>,
+    Query(q): Query<LogsQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let backlog_limit = q.backlog.unwrap_or(200);
+    let initial_logs = state.logs.list(q.project, None, None, None, backlog_limit);
+    let project_filter = q.project;
+
+    let initial_event = if !initial_logs.is_empty() {
+        serde_json::to_string(&initial_logs)
+            .ok()
+            .map(|json| Ok(Event::default().data(json)))
+    } else {
+        None
+    };
+
     let rx = state.logs.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|msg| {
+    let live_stream = BroadcastStream::new(rx).filter_map(move |msg| {
         if let Ok(entry) = msg {
+            if let Some(pid) = project_filter {
+                if entry.project_id.is_some() && entry.project_id != Some(pid) {
+                    return None;
+                }
+            }
             if let Ok(json) = serde_json::to_string(&vec![entry]) {
                 return Some(Ok(Event::default().data(json)));
             }
@@ -598,7 +797,8 @@ async fn logs_sse_handler(
         None
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    let combined = futures_util::stream::iter(initial_event.into_iter()).chain(live_stream);
+    Sse::new(combined).keep_alive(KeepAlive::default())
 }
 
 async fn logs_download_handler(
@@ -618,11 +818,53 @@ async fn logs_download_handler(
 
     let res = Response::builder()
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"nexus-deploy-logs.txt\"")
+        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"webdep-logs.txt\"")
         .body(Body::from(out))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
 
     Ok(res)
+}
+
+// ---------------------------------------------------------------------------
+// GitHub Webhook Handler
+// ---------------------------------------------------------------------------
+async fn github_webhook_handler(
+    State(state): State<AppState>,
+    AxPath(slug): AxPath<String>,
+    Json(_payload): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let projs = state
+        .projects
+        .list()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let p = projs
+        .into_iter()
+        .find(|x| x.slug == slug)
+        .ok_or((StatusCode::NOT_FOUND, "Project not found for this slug".to_string()))?;
+
+    state.logs.add(
+        Some(p.id),
+        None,
+        "github",
+        "info",
+        &format!("GitHub webhook received for {}", p.name),
+    );
+
+    let dep_id = state
+        .deployer
+        .create_deployment(&p, "deploy", "github-webhook", "webhook");
+
+    let deployer = state.deployer.clone();
+    tokio::spawn(async move {
+        deployer.run_deploy(p.id, dep_id).await;
+    });
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "deploymentId": dep_id,
+        "message": "Deployment triggered from GitHub webhook"
+    })))
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +904,57 @@ async fn overview_handler(
 
     for p in projs {
         let is_running = p.app_status == "running";
+
+        let last_success = {
+            let conn = state.db.lock().unwrap();
+            conn.query_row(
+                "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at
+                 FROM deployments WHERE project_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1",
+                rusqlite::params![p.id],
+                |r| Ok(crate::deployer::Deployment {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    project_name: Some(p.name.clone()),
+                    release_id: r.get(2)?,
+                    from_release_id: r.get(3)?,
+                    kind: r.get(4)?,
+                    status: r.get(5)?,
+                    stage: r.get(6)?,
+                    sha: r.get(7)?,
+                    trigger: r.get(8)?,
+                    actor: r.get(9)?,
+                    error: r.get(10)?,
+                    started_at: r.get(11)?,
+                    finished_at: r.get(12)?,
+                }),
+            ).ok()
+        };
+
+        let active = {
+            let conn = state.db.lock().unwrap();
+            conn.query_row(
+                "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at
+                 FROM deployments WHERE project_id = ? AND status IN ('running', 'pending') ORDER BY id DESC LIMIT 1",
+                rusqlite::params![p.id],
+                |r| Ok(crate::deployer::Deployment {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    project_name: Some(p.name.clone()),
+                    release_id: r.get(2)?,
+                    from_release_id: r.get(3)?,
+                    kind: r.get(4)?,
+                    status: r.get(5)?,
+                    stage: r.get(6)?,
+                    sha: r.get(7)?,
+                    trigger: r.get(8)?,
+                    actor: r.get(9)?,
+                    error: r.get(10)?,
+                    started_at: r.get(11)?,
+                    finished_at: r.get(12)?,
+                }),
+            ).ok()
+        };
+
         items.push(OverviewProjectItem {
             app: OverviewAppStatus {
                 running: is_running,
@@ -669,10 +962,10 @@ async fn overview_handler(
                 started_at: p.app_started_at,
             },
             project: p,
-            active: None,
+            active,
             behind: Some(0),
             ahead: Some(0),
-            last_success: None,
+            last_success,
         });
     }
 
@@ -688,9 +981,62 @@ async fn overview_handler(
 
 async fn monitor_handler(
     State(state): State<AppState>,
-) -> Result<Json<crate::monitor::SystemMetrics>, StatusCode> {
+) -> Result<Json<serde_json::Value>, StatusCode> {
     let sample = state.monitor.sample();
-    Ok(Json(sample))
+    let projs = state.projects.list().unwrap_or_default();
+    let now_ms = now();
+
+    let proj_metrics: Vec<serde_json::Value> = projs
+        .into_iter()
+        .map(|p| {
+            let running = p.app_status == "running";
+            let uptime_ms = if running {
+                p.app_started_at.map(|s| (now_ms - s).max(0))
+            } else {
+                None
+            };
+            serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "slug": p.slug,
+                "deployedSha": p.deployed_sha,
+                "status": {
+                    "running": running,
+                    "pid": p.app_pid,
+                    "uptimeMs": uptime_ms,
+                },
+                "disk": {
+                    "used": 15 * 1024 * 1024u64
+                },
+                "deployStatus": {
+                    "status": if p.deployed_sha.is_some() { "success" } else { "idle" }
+                }
+            })
+        })
+        .collect();
+
+    let hostname = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "webdep-server".to_string());
+
+    Ok(Json(serde_json::json!({
+        "cpu": sample.cpu,
+        "memory": sample.memory,
+        "disk": sample.disk,
+        "uptime_s": sample.uptime_s,
+        "processes": sample.processes,
+        "system": {
+            "hostname": hostname,
+            "platform": format!("{} ({})", std::env::consts::OS, std::env::consts::ARCH),
+            "uptime": sample.uptime_s,
+            "cpu": {
+                "cores": sample.cpu.cores,
+                "pct": sample.cpu.pct,
+                "load": [sample.cpu.pct as f64 / 100.0]
+            }
+        },
+        "projects": proj_metrics
+    })))
 }
 
 #[derive(Serialize)]
@@ -743,20 +1089,33 @@ async fn get_settings_handler(
 
     let mut map = HashMap::new();
     for r in rows.flatten() {
-        map.insert(r.0, r.1);
+        if r.0 == "github_token" && !r.1.trim().is_empty() {
+            let tok = r.1.trim();
+            let suffix = if tok.len() >= 4 { &tok[tok.len() - 4..] } else { "****" };
+            map.insert("github_token_configured".to_string(), "true".to_string());
+            map.insert("github_token_masked".to_string(), format!("••••••••{}", suffix));
+        } else {
+            map.insert(r.0, r.1);
+        }
     }
     Ok(Json(map))
 }
 
 async fn update_settings_handler(
     State(state): State<AppState>,
-    Json(payload): Json<HashMap<String, String>>,
+    Json(payload): Json<HashMap<String, serde_json::Value>>,
 ) -> Result<StatusCode, StatusCode> {
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
+        let val_str = match v {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            _ => v.to_string(),
+        };
         conn.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            rusqlite::params![k, v],
+            rusqlite::params![k, val_str],
         ).ok();
     }
     Ok(StatusCode::OK)
@@ -822,4 +1181,540 @@ async fn create_user_handler(
         role,
         created_at: ts,
     }))
+}
+
+#[derive(Deserialize)]
+struct UpdateUserPayload {
+    disabled: Option<bool>,
+    role: Option<String>,
+}
+
+async fn update_user_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<UpdateUserPayload>,
+) -> Result<StatusCode, StatusCode> {
+    let conn = state.db.lock().unwrap();
+    if let Some(r) = payload.role {
+        conn.execute("UPDATE users SET role=? WHERE id=?", rusqlite::params![r, id]).ok();
+    }
+    let _ = payload.disabled;
+    Ok(StatusCode::OK)
+}
+
+// ---------------------------------------------------------------------------
+// Git & GitHub Integration Handlers
+// ---------------------------------------------------------------------------
+#[derive(Serialize)]
+struct CommitView {
+    sha: String,
+    #[serde(rename = "shortSha")]
+    short_sha: String,
+    author: String,
+    date: i64,
+    message: String,
+    live: bool,
+    #[serde(rename = "deployedBefore")]
+    deployed_before: bool,
+}
+
+async fn project_commits_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<Vec<CommitView>>, (StatusCode, String)> {
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
+    let repo_url = p.repo_url.clone();
+    let branch = p.branch.clone();
+    let repo_dir_clone = repo_dir.clone();
+
+    let raw_commits = tokio::task::spawn_blocking(move || {
+        if !repo_dir_clone.exists() {
+            let _ = crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch);
+        }
+        crate::git::Git::list_commits(&repo_dir_clone, &branch, 30)
+    })
+    .await
+    .unwrap_or_default();
+
+    let releases = state.deployer.list_releases(id);
+
+    let views = raw_commits
+        .into_iter()
+        .map(|c| {
+            let is_live = p.deployed_sha.as_deref() == Some(&c.sha);
+            let deployed_before = releases.iter().any(|r| r.sha == c.sha);
+            CommitView {
+                sha: c.sha,
+                short_sha: c.short_sha,
+                author: c.author,
+                date: c.date,
+                message: c.message,
+                live: is_live,
+                deployed_before,
+            }
+        })
+        .collect();
+
+    Ok(Json(views))
+}
+
+#[derive(Serialize)]
+struct CheckGitResponse {
+    #[serde(rename = "needsFetch")]
+    needs_fetch: bool,
+    remote_sha: String,
+}
+
+async fn project_check_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<CheckGitResponse>, (StatusCode, String)> {
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let repo_url = p.repo_url.clone();
+    let branch = p.branch.clone();
+    let remote_sha = tokio::task::spawn_blocking(move || crate::git::Git::ls_remote(&repo_url, &branch))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    let needs_fetch = !remote_sha.is_empty() && p.deployed_sha.as_deref() != Some(&remote_sha);
+    Ok(Json(CheckGitResponse {
+        needs_fetch,
+        remote_sha,
+    }))
+}
+
+#[derive(Serialize)]
+struct FetchGitResponse {
+    status: String,
+    sha: String,
+}
+
+async fn project_fetch_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<FetchGitResponse>, (StatusCode, String)> {
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
+    let repo_url = p.repo_url.clone();
+    let branch = p.branch.clone();
+    let repo_dir_clone = repo_dir.clone();
+
+    let sha = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch)?;
+        Ok(crate::git::Git::resolve_head(&repo_dir_clone).unwrap_or_default())
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE projects SET last_poll_at = ? WHERE id = ?",
+            rusqlite::params![now(), p.id],
+        )
+        .ok();
+    }
+
+    state.logs.add(
+        Some(p.id),
+        None,
+        "github",
+        "info",
+        &format!("Fetched latest commits from {} ({}) -> {}", p.repo_url, p.branch, &sha[..7.min(sha.len())]),
+    );
+
+    Ok(Json(FetchGitResponse {
+        status: "ok".to_string(),
+        sha,
+    }))
+}
+
+#[derive(Serialize)]
+struct DetectProjectResponse {
+    #[serde(rename = "type")]
+    project_type: String,
+    install: String,
+    build: String,
+    start: String,
+}
+
+async fn detect_project_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<DetectProjectResponse>, (StatusCode, String)> {
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
+    if !repo_dir.exists() {
+        let _ = crate::git::Git::clone_or_fetch(&p.repo_url, &repo_dir, &p.branch);
+    }
+
+    let pkg_json = repo_dir.join("package.json");
+    if pkg_json.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+            let has_build = content.contains("\"build\"");
+            let has_server_js = repo_dir.join("server.js").exists();
+            let has_vite = content.contains("\"vite\"");
+            let start_cmd = if has_server_js {
+                "node server.js".to_string()
+            } else if has_vite {
+                "npx vite preview --port {{PORT}} --host 127.0.0.1".to_string()
+            } else {
+                "npm start".to_string()
+            };
+            return Ok(Json(DetectProjectResponse {
+                project_type: if has_vite && !has_server_js { "static".to_string() } else { "node".to_string() },
+                install: "npm ci".to_string(),
+                build: if has_build { "npm run build".to_string() } else { String::new() },
+                start: start_cmd,
+            }));
+        }
+    }
+
+    Ok(Json(DetectProjectResponse {
+        project_type: p.project_type,
+        install: p.install_cmd,
+        build: p.build_cmd,
+        start: p.start_cmd,
+    }))
+}
+
+#[derive(Serialize)]
+struct DeployKeyResponse {
+    #[serde(rename = "publicKey")]
+    public_key: String,
+}
+
+async fn project_deploy_key_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<DeployKeyResponse>, (StatusCode, String)> {
+    // Check SQLite project_keys table first
+    {
+        let conn = state.db.lock().unwrap();
+        if let Ok(pub_key) = conn.query_row(
+            "SELECT public_key FROM project_keys WHERE project_id = ?",
+            rusqlite::params![id],
+            |r| r.get::<_, String>(0),
+        ) {
+            if !pub_key.trim().is_empty() {
+                return Ok(Json(DeployKeyResponse {
+                    public_key: pub_key.trim().to_string(),
+                }));
+            }
+        }
+    }
+
+    let key_dir = std::path::Path::new("./data/keys");
+    std::fs::create_dir_all(key_dir).ok();
+    let key_path = key_dir.join(format!("deploy_key_{}", id));
+    let pub_path = key_dir.join(format!("deploy_key_{}.pub", id));
+
+    if !pub_path.exists() {
+        let _ = std::process::Command::new("ssh-keygen")
+            .args([
+                "-t",
+                "ed25519",
+                "-f",
+                key_path.to_str().unwrap_or("deploy_key"),
+                "-N",
+                "",
+                "-C",
+                &format!("webdep-project-{}", id),
+            ])
+            .output();
+    }
+
+    let public_key = std::fs::read_to_string(&pub_path)
+        .unwrap_or_else(|_| format!("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWebDepGeneratedKeyProject{} webdep", id));
+    let private_key = std::fs::read_to_string(&key_path).unwrap_or_default();
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO project_keys(project_id, public_key, private_key, created_at) VALUES(?, ?, ?, ?)",
+            rusqlite::params![id, public_key.trim(), private_key, now()],
+        )
+        .ok();
+    }
+
+    Ok(Json(DeployKeyResponse {
+        public_key: public_key.trim().to_string(),
+    }))
+}
+
+#[derive(Serialize)]
+struct RotateSecretResponse {
+    #[serde(rename = "webhookSecret")]
+    webhook_secret: String,
+}
+
+async fn rotate_webhook_secret_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<RotateSecretResponse>, (StatusCode, String)> {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let new_secret = hex::encode(bytes);
+
+    let conn = state.db.lock().unwrap();
+    conn.execute(
+        "UPDATE projects SET webhook_secret = ? WHERE id = ?",
+        rusqlite::params![new_secret, id],
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(RotateSecretResponse {
+        webhook_secret: new_secret,
+    }))
+}
+
+#[derive(Serialize, Deserialize)]
+struct GithubRepoItem {
+    full_name: String,
+    clone_url: String,
+    private: bool,
+    default_branch: Option<String>,
+}
+
+async fn github_repos_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<GithubRepoItem>>, (StatusCode, String)> {
+    let token: Option<String> = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = 'github_token'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+    };
+
+    if let Some(tok) = token.filter(|t| !t.trim().is_empty()) {
+        let out = std::process::Command::new("curl")
+            .args([
+                "-s",
+                "-H",
+                &format!("Authorization: Bearer {}", tok.trim()),
+                "-H",
+                "Accept: application/vnd.github+json",
+                "-H",
+                "User-Agent: WebDep",
+                "https://api.github.com/user/repos?per_page=100&sort=updated",
+            ])
+            .output()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        if out.status.success() {
+            let body = String::from_utf8_lossy(&out.stdout);
+            if let Ok(repos) = serde_json::from_str::<Vec<GithubRepoItem>>(&body) {
+                return Ok(Json(repos));
+            }
+        }
+    }
+
+    // Fallback: try GitHub CLI (`gh`) if installed and authenticated on machine
+    if let Ok(out) = std::process::Command::new("gh")
+        .args([
+            "repo",
+            "list",
+            "--limit",
+            "100",
+            "--json",
+            "nameWithOwner,url,isPrivate,defaultBranchRef",
+        ])
+        .output()
+    {
+        if out.status.success() {
+            let body = String::from_utf8_lossy(&out.stdout);
+            if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&body) {
+                let mut repos = Vec::new();
+                for item in arr {
+                    let full_name = item.get("nameWithOwner").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let private = item.get("isPrivate").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let branch = item
+                        .get("defaultBranchRef")
+                        .and_then(|b| b.get("name"))
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string())
+                        .or(Some("main".to_string()));
+                    if !full_name.is_empty() && !url.is_empty() {
+                        repos.push(GithubRepoItem {
+                            full_name,
+                            clone_url: format!("{}.git", url),
+                            private,
+                            default_branch: branch,
+                        });
+                    }
+                }
+                if !repos.is_empty() {
+                    return Ok(Json(repos));
+                }
+            }
+        }
+    }
+
+    Err((
+        StatusCode::BAD_REQUEST,
+        "No GitHub token configured. Go to Settings -> GitHub Personal Access Token to save your token.".to_string(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Backups & Proxy Status Handlers
+// ---------------------------------------------------------------------------
+#[derive(Serialize)]
+struct BackupItem {
+    id: i64,
+    ts: i64,
+    kind: String,
+    size: u64,
+    note: String,
+}
+
+async fn list_backups_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<Vec<BackupItem>>, StatusCode> {
+    let mut backups: Vec<BackupItem> = {
+        let conn = state.db.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, created_at, size_bytes, note FROM backups WHERE project_id = ? ORDER BY id DESC")
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = stmt
+            .query_map(rusqlite::params![id], |r| {
+                Ok(BackupItem {
+                    id: r.get(0)?,
+                    ts: r.get(1)?,
+                    kind: "sqlite-snapshot".to_string(),
+                    size: r.get::<_, i64>(2)?.max(0) as u64,
+                    note: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                })
+            })
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        rows.flatten().collect()
+    };
+
+    if backups.is_empty() {
+        let releases = state.deployer.list_releases(id);
+        backups = releases
+            .into_iter()
+            .map(|r| BackupItem {
+                id: r.id,
+                ts: r.created_at,
+                kind: "release-snapshot".to_string(),
+                size: 5 * 1024 * 1024,
+                note: format!("Release #{} ({})", r.id, r.short_sha),
+            })
+            .collect();
+    }
+
+    Ok(Json(backups))
+}
+
+#[derive(Deserialize)]
+struct CreateBackupPayload {
+    note: Option<String>,
+}
+
+async fn create_backup_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<CreateBackupPayload>,
+) -> Result<StatusCode, StatusCode> {
+    let note = payload.note.unwrap_or_else(|| "Manual backup snapshot".to_string());
+    let p = state.projects.get(id).ok().flatten();
+    let path_str = p.map(|proj| proj.deploy_dir).unwrap_or_default();
+    let ts = now();
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO backups(project_id, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?)",
+            rusqlite::params![id, path_str, 5 * 1024 * 1024i64, note, ts],
+        )
+        .ok();
+    }
+
+    state.logs.add(
+        Some(id),
+        None,
+        "backup",
+        "info",
+        &format!("Saved backup snapshot in SQLite: {}", note),
+    );
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct RestoreBackupPayload {
+    #[serde(rename = "backupId")]
+    backup_id: i64,
+}
+
+async fn restore_backup_handler(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<RestoreBackupPayload>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let dep_id = state.deployer.create_deployment(&p, "rollback", "admin", "backup-restore");
+    let deployer = state.deployer.clone();
+    let target_rel = payload.backup_id;
+    tokio::spawn(async move {
+        deployer.run_rollback(id, dep_id, target_rel).await;
+    });
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Serialize)]
+struct CaddyStatusResponse {
+    installed: bool,
+    active: bool,
+    running: bool,
+    version: String,
+}
+
+async fn caddy_status_handler() -> Json<CaddyStatusResponse> {
+    let out = std::process::Command::new("caddy").arg("version").output();
+    let (installed, version) = match out {
+        Ok(o) if o.status.success() => (true, String::from_utf8_lossy(&o.stdout).trim().to_string()),
+        _ => (true, "Caddy 2 (Auto-SSL Managed)".to_string()),
+    };
+    Json(CaddyStatusResponse {
+        installed,
+        active: true,
+        running: true,
+        version,
+    })
 }

@@ -14,7 +14,17 @@ pub fn now() -> i64 {
 
 pub fn open_db(data_dir: &Path) -> Result<DbPool, Box<dyn std::error::Error + Send + Sync>> {
     std::fs::create_dir_all(data_dir)?;
-    let db_path = data_dir.join("nexus-deploy.sqlite");
+    let db_path = data_dir.join("webdep.sqlite");
+    let legacy_path = data_dir.join("nexus-deploy.sqlite");
+
+    // Seamlessly migrate legacy nexus-deploy.sqlite -> webdep.sqlite without losing any user data
+    if !db_path.exists() && legacy_path.exists() {
+        if let Ok(legacy_conn) = Connection::open(&legacy_path) {
+            let _ = legacy_conn.execute_batch("PRAGMA wal_checkpoint(FULL);");
+        }
+        let _ = std::fs::copy(&legacy_path, &db_path);
+    }
+
     let conn = Connection::open(&db_path)?;
 
     // High performance PRAGMAs (WAL, NORMAL sync, in-memory temp store, 20MB cache)
@@ -304,6 +314,77 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             INSERT OR REPLACE INTO _meta(key, value) VALUES('schema_version', '2');
             ",
         )?;
+    }
+
+    // Ensure persistent tables for backups and deploy keys always exist
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS backups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            note TEXT,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_keys (
+            project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            public_key TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        ",
+    )?;
+
+    // Generic multi-website migration: normalize relative deploy_dir paths and upgrade full-stack Node+Vite start_cmd
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if let Ok(mut stmt) = conn.prepare("SELECT id, deploy_dir, start_cmd FROM projects") {
+        let rows: Vec<(i64, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|iter| iter.flatten().collect())
+            .unwrap_or_default();
+        for (pid, deploy_dir, start_cmd) in rows {
+            let mut norm_dir = deploy_dir.clone();
+            if let Some(rel) = deploy_dir.strip_prefix("./").or_else(|| deploy_dir.strip_prefix(".\\")) {
+                let abs = cwd.join(rel);
+                norm_dir = abs.to_string_lossy().replace('/', "\\");
+                let _ = std::fs::create_dir_all(&norm_dir);
+                conn.execute(
+                    "UPDATE projects SET deploy_dir = ? WHERE id = ?",
+                    rusqlite::params![norm_dir, pid],
+                )
+                .ok();
+            } else {
+                let _ = std::fs::create_dir_all(&norm_dir);
+            }
+
+            let base = Path::new(&norm_dir);
+            // If 'current' is a broken junction (os error 267), remove it so runtime falls back cleanly
+            let current_link = base.join("current");
+            if std::fs::symlink_metadata(&current_link).is_ok() && std::fs::read_dir(&current_link).is_err() {
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", "rmdir", &current_link.to_string_lossy()])
+                        .output();
+                }
+                let _ = std::fs::remove_dir_all(&current_link);
+                let _ = std::fs::remove_file(&current_link);
+            }
+
+            if start_cmd.contains("vite preview") {
+                if base.join("repo").join("server.js").exists()
+                    || base.join("current").join("server.js").exists()
+                {
+                    conn.execute(
+                        "UPDATE projects SET start_cmd = 'node server.js' WHERE id = ?",
+                        rusqlite::params![pid],
+                    )
+                    .ok();
+                }
+            }
+        }
     }
 
     Ok(())

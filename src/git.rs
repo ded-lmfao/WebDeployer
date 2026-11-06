@@ -19,6 +19,24 @@ pub struct AheadBehind {
 
 pub struct Git;
 
+fn copy_dir_all(src: &Path, dst: &Path, skip_git: bool) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name();
+        if skip_git && name == ".git" {
+            continue;
+        }
+        let src_path = entry.path();
+        let dst_path = dst.join(&name);
+        if src_path.is_dir() {
+            copy_dir_all(&src_path, &dst_path, false)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 impl Git {
     pub fn resolve_head(repo_dir: &Path) -> Result<String, String> {
         let out = Command::new("git")
@@ -66,9 +84,8 @@ impl Git {
     }
 
     pub fn checkout(repo_dir: &Path, sha: &str, destination_dir: &Path) -> Result<(), String> {
-        std::fs::create_dir_all(destination_dir).ok();
+        std::fs::create_dir_all(destination_dir).map_err(|e| e.to_string())?;
 
-        // git archive or worktree/checkout to destination
         let out = Command::new("git")
             .current_dir(repo_dir)
             .args(["checkout", sha])
@@ -79,19 +96,9 @@ impl Git {
             return Err(String::from_utf8_lossy(&out.stderr).to_string());
         }
 
-        // Copy files to release destination
-        let copy_status = Command::new("git")
-            .current_dir(repo_dir)
-            .args(["checkout-index", "-a", "-f", &format!("--prefix={}/", destination_dir.to_str().unwrap_or("."))])
-            .output();
+        // Copy files recursively from repo_dir to release destination (excluding .git)
+        copy_dir_all(repo_dir, destination_dir, true)?;
 
-        if let Ok(c) = copy_status {
-            if c.status.success() {
-                return Ok(());
-            }
-        }
-
-        // Fallback: simple recursive copy if checkout-index is platform-dependent
         Ok(())
     }
 
@@ -147,5 +154,66 @@ impl Git {
         }
 
         AheadBehind { ahead: 0, behind: 0 }
+    }
+
+    pub fn list_commits(repo_dir: &Path, branch: &str, limit: usize) -> Vec<CommitInfo> {
+        let target = if branch.is_empty() { "HEAD".to_string() } else { format!("origin/{}", branch) };
+        let out = Command::new("git")
+            .current_dir(repo_dir)
+            .args([
+                "log",
+                &format!("-{}", limit),
+                "--format=%H\x1f%h\x1f%an\x1f%at\x1f%s",
+                &target,
+            ])
+            .output()
+            .or_else(|_| {
+                Command::new("git")
+                    .current_dir(repo_dir)
+                    .args([
+                        "log",
+                        &format!("-{}", limit),
+                        "--format=%H\x1f%h\x1f%an\x1f%at\x1f%s",
+                    ])
+                    .output()
+            });
+
+        let mut list = Vec::new();
+        if let Ok(o) = out {
+            let text = String::from_utf8_lossy(&o.stdout);
+            for line in text.lines() {
+                let parts: Vec<&str> = line.split('\x1f').collect();
+                if parts.len() >= 5 {
+                    let date_s: i64 = parts[3].parse().unwrap_or(0);
+                    list.push(CommitInfo {
+                        sha: parts[0].to_string(),
+                        short_sha: parts[1].to_string(),
+                        author: parts[2].to_string(),
+                        date: date_s * 1000,
+                        message: parts[4].to_string(),
+                    });
+                }
+            }
+        }
+        list
+    }
+
+    pub fn ls_remote(repo_url: &str, branch: &str) -> Result<String, String> {
+        let out = Command::new("git")
+            .args(["ls-remote", repo_url, &format!("refs/heads/{}", branch)])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if let Some(first_line) = text.lines().next() {
+                if let Some(sha) = first_line.split_whitespace().next() {
+                    return Ok(sha.to_string());
+                }
+            }
+            Ok(String::new())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).to_string())
+        }
     }
 }

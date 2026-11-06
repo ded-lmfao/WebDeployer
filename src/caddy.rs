@@ -27,7 +27,7 @@ impl Caddy {
         let domain_str = domains.join(", ");
 
         let mut config = format!(
-            "# Nexus Deploy 2.0 Auto-Generated Caddyfile\n# Project: {name} ({slug})\n# Automatic HTTPS, HTTP/3, and reverse proxy\n\n{domains} {{\n    reverse_proxy 127.0.0.1:{port}\n",
+            "# WebDep Auto-Generated Caddyfile\n# Project: {name} ({slug})\n# Automatic HTTPS, HTTP/3, and reverse proxy\n\n{domains} {{\n    reverse_proxy 127.0.0.1:{port}\n",
             name = p.name,
             slug = p.slug,
             domains = domain_str,
@@ -45,7 +45,7 @@ impl Caddy {
     /// Generates the master unified Caddyfile for all active websites.
     pub fn generate_master_caddyfile(&self, projects: &[Project]) -> String {
         let mut master = String::from(
-            "# Nexus Deploy 2.0 — Master Caddyfile\n# Generated automatically for all hosted projects\n\n{\n    # Global options\n    auto_https on\n}\n\n",
+            "# WebDep — Master Multi-Website Caddyfile\n# Generated automatically for all hosted projects\n\n{\n    # Global options\n    auto_https on\n}\n\n",
         );
 
         for p in projects {
@@ -56,14 +56,14 @@ impl Caddy {
         master
     }
 
-    pub fn write_config(&self, p: &Project) -> Result<PathBuf, std::io::Error> {
+    pub fn write_config(&self, p: &Project, all_projects: &[Project]) -> Result<PathBuf, std::io::Error> {
         let conf = self.generate_config(p);
         let path = self.caddy_dir.join(format!("{}.caddy", p.slug));
         fs::write(&path, conf)?;
 
-        // Also update master Caddyfile
+        // Also update master Caddyfile for all hosted websites
         let master_path = self.caddy_dir.join("Caddyfile");
-        fs::write(&master_path, self.generate_config(p))?;
+        fs::write(&master_path, self.generate_master_caddyfile(all_projects))?;
 
         Ok(path)
     }

@@ -1,14 +1,14 @@
 @echo off
-title Nexus Deploy 2.0 (Rust Engine)
+title WebDep — Multi-Website Deployment Platform
 cd /d "%~dp0"
 
 echo ===================================================
-echo           Nexus Deploy 2.0 - Rust Engine
+echo      WebDep - Multi-Website Hosting Platform
 echo ===================================================
 echo.
 
-if not exist "target\release\nexus-deploy.exe" (
-    echo [*] Release binary not found. Compiling first (this may take ~1 minute)...
+if not exist "target\release\webdep.exe" (
+    echo [*] Release binary not found. Compiling first...
     cargo build --release
     if errorlevel 1 (
         echo [!] Compilation failed. Please ensure Rust / cargo is installed.
@@ -17,18 +17,22 @@ if not exist "target\release\nexus-deploy.exe" (
     )
 )
 
-echo [*] Starting Nexus Deploy on http://127.0.0.1:4600 ...
+echo [*] Stopping any previous WebDep instance...
+taskkill /F /IM webdep.exe >nul 2>&1
+taskkill /F /IM nexus-deploy.exe >nul 2>&1
+
+echo [*] Starting WebDep on http://127.0.0.1:4600 ...
+echo [*] SQLite Database: data\webdep.sqlite
 echo [*] Default Login Credentials:
 echo     - Username: admin
 echo     - Password: admin123
 echo.
 
 start "" "http://127.0.0.1:4600"
-"target\release\nexus-deploy.exe"
+"target\release\webdep.exe"
 
 if errorlevel 1 (
     echo.
     echo [!] Server stopped unexpectedly.
     pause
 )
-

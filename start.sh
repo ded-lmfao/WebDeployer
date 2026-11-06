@@ -4,11 +4,11 @@ set -e
 cd "$(dirname "$0")"
 
 echo "==================================================="
-echo "          Nexus Deploy 2.0 (Rust Engine)"
+echo "     WebDep - Multi-Website Hosting Platform"
 echo "==================================================="
 echo ""
 
-if [ ! -f "target/release/nexus-deploy" ]; then
+if [ ! -f "target/release/webdep" ]; then
     echo "[*] Compiling optimized release binary..."
     cargo build --release
 fi
@@ -16,7 +16,8 @@ fi
 PORT="${PORT:-4600}"
 URL="http://127.0.0.1:${PORT}"
 
-echo "[*] Starting server on ${URL}"
+echo "[*] Starting WebDep server on ${URL}"
+echo "[*] SQLite Database: data/webdep.sqlite"
 echo "[*] Default Credentials:"
 echo "    - Username: admin"
 echo "    - Password: admin123"
@@ -29,5 +30,4 @@ elif command -v open &> /dev/null; then
     (sleep 1 && open "${URL}") &
 fi
 
-exec ./target/release/nexus-deploy
-
+exec ./target/release/webdep

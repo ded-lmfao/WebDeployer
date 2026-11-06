@@ -425,6 +425,15 @@ html, body {
   cursor: pointer;
 }
 
+/* Dark mode styling for all select dropdown options */
+select option,
+.project-selector select option,
+.form-control option {
+  background-color: #12141f !important;
+  color: #f1f5f9 !important;
+  padding: 8px 12px;
+}
+
 .header-right {
   display: flex;
   align-items: center;

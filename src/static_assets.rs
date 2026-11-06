@@ -46,7 +46,7 @@ pub async fn static_handler(path: &str) -> Response {
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
                 .header(header::ETAG, HeaderValue::from_str(&etag).unwrap())
-                .header(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+                .header(header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-store, must-revalidate"))
                 .body(Body::from(content.data))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }

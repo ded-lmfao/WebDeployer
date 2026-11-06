@@ -16,6 +16,24 @@ fn default_poll_interval_s() -> i64 { 60 }
 fn default_retention() -> i64 { 5 }
 fn default_true() -> bool { true }
 
+fn deserialize_bool_or_int<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrInt {
+        Bool(bool),
+        Int(i64),
+        Str(String),
+    }
+    match BoolOrInt::deserialize(deserializer)? {
+        BoolOrInt::Bool(b) => Ok(b),
+        BoolOrInt::Int(i) => Ok(i != 0),
+        BoolOrInt::Str(s) => Ok(s == "1" || s.eq_ignore_ascii_case("true")),
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Project {
     #[serde(default)]
@@ -47,9 +65,9 @@ pub struct Project {
     pub health_timeout_s: i64,
     #[serde(default = "default_stability_s")]
     pub stability_s: i64,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", deserialize_with = "deserialize_bool_or_int")]
     pub preflight: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     pub auto_deploy: bool,
     #[serde(default = "default_poll_interval_s")]
     pub poll_interval_s: i64,
@@ -73,11 +91,11 @@ pub struct Project {
     pub app_started_at: Option<i64>,
     #[serde(default)]
     pub domains: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     pub ssl_enabled: bool,
     #[serde(default)]
     pub ssl_email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     pub nginx_configured: bool,
     #[serde(default)]
     pub created_at: i64,
@@ -325,8 +343,18 @@ impl Projects {
     }
 
     pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.db.lock().unwrap();
-        conn.execute("DELETE FROM projects WHERE id=?", params![id])?;
+        let mut conn = self.db.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("UPDATE projects SET current_release_id = NULL WHERE id = ?", params![id]).ok();
+        tx.execute("DELETE FROM logs WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM deployments WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM releases WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM project_env WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM backups WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM project_keys WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM jobs WHERE project_id = ?", params![id]).ok();
+        tx.execute("DELETE FROM projects WHERE id = ?", params![id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -418,5 +446,125 @@ impl Projects {
             }
         }
         map
+    }
+
+    pub fn set_bulk_env(
+        &self,
+        project_id: i64,
+        raw_or_vars: &str,
+        is_secret: bool,
+        replace_all: bool,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let pairs = parse_dotenv(raw_or_vars);
+        if pairs.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.db.lock().unwrap();
+        let tx = conn.transaction()?;
+
+        if replace_all {
+            tx.execute("DELETE FROM project_env WHERE project_id = ?", params![project_id])?;
+        }
+
+        let mut count = 0;
+        for (k, v) in &pairs {
+            let enc = self.vault.encrypt(v)?;
+            tx.execute(
+                "INSERT INTO project_env(project_id, key, value_enc, is_secret) VALUES(?, ?, ?, ?)
+                 ON CONFLICT(project_id, key) DO UPDATE SET value_enc=excluded.value_enc, is_secret=excluded.is_secret",
+                params![project_id, k, enc, if is_secret { 1 } else { 0 }],
+            )?;
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
+    pub fn export_raw_env(&self, project_id: i64) -> Result<String, rusqlite::Error> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT key, value_enc, is_secret FROM project_env WHERE project_id = ? ORDER BY key ASC")?;
+        let rows = stmt.query_map(params![project_id], |r| {
+            let key: String = r.get(0)?;
+            let val_enc: String = r.get(1)?;
+            let is_secret: bool = r.get::<_, i64>(2)? != 0;
+            let val = self.vault.decrypt(&val_enc).unwrap_or_default();
+            Ok((key, val, is_secret))
+        })?;
+
+        let mut out = String::new();
+        for r in rows {
+            let (k, v, _) = r?;
+            if v.contains(' ') || v.contains('\n') || v.contains('"') {
+                out.push_str(&format!("{}=\"{}\"\n", k, v.replace('"', "\\\"")));
+            } else {
+                out.push_str(&format!("{}={}\n", k, v));
+            }
+        }
+        Ok(out)
+    }
+}
+
+pub fn parse_dotenv(input: &str) -> Vec<(String, String)> {
+    let mut vars = Vec::new();
+    for raw_line in input.lines() {
+        let line = raw_line.trim();
+        // Ignore comments and empty lines
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Strip optional leading 'export '
+        let line = if let Some(stripped) = line.strip_prefix("export ") {
+            stripped.trim()
+        } else {
+            line
+        };
+        // Split on first '='
+        if let Some((k, v)) = line.split_once('=') {
+            let key = k.trim().to_string();
+            if key.is_empty() {
+                continue;
+            }
+            let mut val = v.trim();
+            // Strip matching surrounding quotes if present
+            if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
+                || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
+            {
+                val = &val[1..val.len() - 1];
+            } else if let Some(idx) = val.find(" #") {
+                // If unquoted, strip trailing comment
+                val = val[..idx].trim_end();
+            }
+            vars.push((key, val.to_string()));
+        }
+    }
+    vars
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_dotenv() {
+        let sample = r#"
+        # Comment line
+        PORT=3000
+        DATABASE_URL="postgres://user:pass@localhost:5432/mydb?sslmode=disable"
+        export JWT_SECRET='super-secret-key-123'
+        DEBUG=true # inline comment
+        SPACED_KEY = value with spaces
+        EMPTY_LINE_BEFORE=123
+        "#;
+
+        let parsed = parse_dotenv(sample);
+        assert_eq!(parsed.len(), 6);
+        assert_eq!(parsed[0], ("PORT".into(), "3000".into()));
+        assert_eq!(parsed[1], ("DATABASE_URL".into(), "postgres://user:pass@localhost:5432/mydb?sslmode=disable".into()));
+        assert_eq!(parsed[2], ("JWT_SECRET".into(), "super-secret-key-123".into()));
+        assert_eq!(parsed[3], ("DEBUG".into(), "true".into()));
+        assert_eq!(parsed[4], ("SPACED_KEY".into(), "value with spaces".into()));
+        assert_eq!(parsed[5], ("EMPTY_LINE_BEFORE".into(), "123".into()));
     }
 }

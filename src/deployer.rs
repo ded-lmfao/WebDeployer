@@ -15,6 +15,8 @@ use crate::runtime::Runtime;
 pub struct Deployment {
     pub id: i64,
     pub project_id: i64,
+    #[serde(default)]
+    pub project_name: Option<String>,
     pub release_id: Option<i64>,
     pub from_release_id: Option<i64>,
     pub kind: String,
@@ -39,6 +41,9 @@ pub struct Release {
     pub committed_at: Option<i64>,
     pub dir: String,
     pub status: String,
+    pub build_status: String,
+    pub health_status: String,
+    pub deployment_id: Option<i64>,
     pub error: Option<String>,
     pub created_at: i64,
     pub deployed_at: Option<i64>,
@@ -73,14 +78,14 @@ impl Deployer {
 
     pub fn list_deployments(&self, project_id: Option<i64>, limit: usize) -> Vec<Deployment> {
         let conn = self.db.lock().unwrap();
-        let mut sql = "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at FROM deployments".to_string();
+        let mut sql = "SELECT d.id, d.project_id, p.name, d.release_id, d.from_release_id, d.kind, d.status, d.stage, d.sha, d.trigger, d.actor, d.error, d.started_at, d.finished_at FROM deployments d LEFT JOIN projects p ON p.id = d.project_id".to_string();
         let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
 
         if let Some(pid) = project_id {
-            sql.push_str(" WHERE project_id = ?");
+            sql.push_str(" WHERE d.project_id = ?");
             params_vec.push(pid.into());
         }
-        sql.push_str(&format!(" ORDER BY id DESC LIMIT {}", limit));
+        sql.push_str(&format!(" ORDER BY d.id DESC LIMIT {}", limit));
 
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
@@ -92,17 +97,18 @@ impl Deployer {
             Ok(Deployment {
                 id: r.get(0)?,
                 project_id: r.get(1)?,
-                release_id: r.get(2)?,
-                from_release_id: r.get(3)?,
-                kind: r.get(4)?,
-                status: r.get(5)?,
-                stage: r.get(6)?,
-                sha: r.get(7)?,
-                trigger: r.get(8)?,
-                actor: r.get(9)?,
-                error: r.get(10)?,
-                started_at: r.get(11)?,
-                finished_at: r.get(12)?,
+                project_name: r.get(2)?,
+                release_id: r.get(3)?,
+                from_release_id: r.get(4)?,
+                kind: r.get(5)?,
+                status: r.get(6)?,
+                stage: r.get(7)?,
+                sha: r.get(8)?,
+                trigger: r.get(9)?,
+                actor: r.get(10)?,
+                error: r.get(11)?,
+                started_at: r.get(12)?,
+                finished_at: r.get(13)?,
             })
         });
 
@@ -110,6 +116,33 @@ impl Deployer {
             Ok(r) => r.flatten().collect(),
             Err(_) => Vec::new(),
         }
+    }
+
+    pub fn get_deployment(&self, id: i64) -> Option<Deployment> {
+        let conn = self.db.lock().unwrap();
+        conn.query_row(
+            "SELECT d.id, d.project_id, p.name, d.release_id, d.from_release_id, d.kind, d.status, d.stage, d.sha, d.trigger, d.actor, d.error, d.started_at, d.finished_at
+             FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?",
+            rusqlite::params![id],
+            |r| {
+                Ok(Deployment {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    project_name: r.get(2)?,
+                    release_id: r.get(3)?,
+                    from_release_id: r.get(4)?,
+                    kind: r.get(5)?,
+                    status: r.get(6)?,
+                    stage: r.get(7)?,
+                    sha: r.get(8)?,
+                    trigger: r.get(9)?,
+                    actor: r.get(10)?,
+                    error: r.get(11)?,
+                    started_at: r.get(12)?,
+                    finished_at: r.get(13)?,
+                })
+            },
+        ).ok()
     }
 
     pub fn list_releases(&self, project_id: i64) -> Vec<Release> {
@@ -120,8 +153,9 @@ impl Deployer {
 
         let conn = self.db.lock().unwrap();
         let mut stmt = match conn.prepare(
-            "SELECT id, project_id, sha, short_sha, message, author, committed_at, dir, status, error, created_at, deployed_at
-             FROM releases WHERE project_id = ? ORDER BY id DESC",
+            "SELECT r.id, r.project_id, r.sha, r.short_sha, r.message, r.author, r.committed_at, r.dir, r.status, r.error, r.created_at, r.deployed_at,
+                    (SELECT id FROM deployments WHERE release_id = r.id ORDER BY id DESC LIMIT 1) as dep_id
+             FROM releases r WHERE r.project_id = ? ORDER BY r.id DESC",
         ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
@@ -130,8 +164,19 @@ impl Deployer {
         let rows = stmt.query_map(params![project_id], |r| {
             let id: i64 = r.get(0)?;
             let dir: String = r.get(7)?;
+            let status: String = r.get(8)?;
             let is_live = p.current_release_id == Some(id);
             let available = Path::new(&dir).exists();
+            let build_status = if status == "succeeded" || status == "pulled" {
+                "success".to_string()
+            } else {
+                status.clone()
+            };
+            let health_status = if status == "succeeded" {
+                "ok".to_string()
+            } else {
+                "pending".to_string()
+            };
 
             Ok(Release {
                 id,
@@ -142,7 +187,10 @@ impl Deployer {
                 author: r.get(5)?,
                 committed_at: r.get(6)?,
                 dir,
-                status: r.get(8)?,
+                status,
+                build_status,
+                health_status,
+                deployment_id: r.get(12)?,
                 error: r.get(9)?,
                 created_at: r.get(10)?,
                 deployed_at: r.get(11)?,
@@ -245,21 +293,49 @@ impl Deployer {
             conn.execute("UPDATE deployments SET release_id=?, sha=? WHERE id=?", params![release_id, head, dep_id]).ok();
         }
 
+        // Write .env file before install/build so Vite/Next.js build steps have access to env vars
+        if let Ok(raw_env) = self.projects.export_raw_env(p.id) {
+            if !raw_env.is_empty() {
+                let _ = fs::write(release_dir.join(".env"), raw_env);
+            }
+        }
+
         // Stage 3: Installing dependencies
         if !p.install_cmd.trim().is_empty() {
             self.update_stage(dep_id, "installing");
             self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running install: {}", p.install_cmd));
-            if let Err(e) = run_shell_cmd(&p.install_cmd, &release_dir).await {
+            if let Err(e) = run_shell_cmd(&p.install_cmd, &release_dir, &self.logs, p.id, dep_id).await {
+                self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e));
                 self.finish_deployment(dep_id, "failed", Some(&e));
                 return;
             }
         }
 
-        // Stage 4: Building
-        if !p.build_cmd.trim().is_empty() {
+        // Stage 4: Building (auto-detect 'npm run build' if build_cmd is empty but package.json has a build script)
+        let effective_build_cmd = if !p.build_cmd.trim().is_empty() {
+            p.build_cmd.clone()
+        } else {
+            let pkg_path = release_dir.join("package.json");
+            if pkg_path.exists() {
+                if let Ok(pkg_txt) = fs::read_to_string(&pkg_path) {
+                    if pkg_txt.contains("\"build\"") {
+                        "npm run build".to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        };
+
+        if !effective_build_cmd.trim().is_empty() {
             self.update_stage(dep_id, "building");
-            self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running build: {}", p.build_cmd));
-            if let Err(e) = run_shell_cmd(&p.build_cmd, &release_dir).await {
+            self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running build: {}", effective_build_cmd));
+            if let Err(e) = run_shell_cmd(&effective_build_cmd, &release_dir, &self.logs, p.id, dep_id).await {
+                self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Build failed: {}", e));
                 self.finish_deployment(dep_id, "failed", Some(&e));
                 return;
             }
@@ -273,15 +349,17 @@ impl Deployer {
         // Stage 6: Health Checking
         self.update_stage(dep_id, "health_checking");
         let env_map = self.projects.get_env_map(p.id);
-        if let Err(e) = self.runtime.start_project(&p, env_map).await {
+        if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
             self.logs.add(Some(p.id), Some(dep_id), "app", "error", &format!("Start failed: {}", e));
             self.finish_deployment(dep_id, "failed", Some(&e));
             return;
         }
 
         if !p.health_url.trim().is_empty() {
-            self.logs.add(Some(p.id), Some(dep_id), "health", "info", &format!("Probing health check URL: {}", p.health_url));
-            if let Err(e) = self.runtime.health_check(&p.health_url, p.health_timeout_s as u64).await {
+            let port_str = p.port.unwrap_or(3000).to_string();
+            let resolved_health_url = p.health_url.replace("{{PORT}}", &port_str);
+            self.logs.add(Some(p.id), Some(dep_id), "health", "info", &format!("Probing health check URL: {}", resolved_health_url));
+            if let Err(e) = self.runtime.health_check(&resolved_health_url, p.health_timeout_s as u64).await {
                 self.logs.add(Some(p.id), Some(dep_id), "health", "error", &format!("Health check failed: {}", e));
                 self.finish_deployment(dep_id, "failed", Some(&e));
                 return;
@@ -293,7 +371,7 @@ impl Deployer {
             sleep(Duration::from_secs(p.stability_s as u64)).await;
         }
 
-        // Mark success
+        // Mark success & record backup snapshot in SQLite
         let ts = now();
         {
             let conn = self.db.lock().unwrap();
@@ -305,29 +383,145 @@ impl Deployer {
                 "UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?",
                 params![release_id, head, ts, p.id],
             ).ok();
+            conn.execute(
+                "INSERT INTO backups(project_id, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?)",
+                params![
+                    p.id,
+                    release_dir.to_str().unwrap_or(""),
+                    5 * 1024 * 1024i64,
+                    format!("Auto-snapshot for Release #{} ({})", release_id, commit_info.short_sha),
+                    ts
+                ],
+            ).ok();
         }
 
         self.logs.add(Some(p.id), Some(dep_id), "deployment", "info", "Deployment completed successfully! Version is live.");
         self.finish_deployment(dep_id, "success", None);
     }
+
+    pub async fn run_rollback(self: Arc<Self>, project_id: i64, dep_id: i64, target_release_id: i64) {
+        let p = match self.projects.get(project_id) {
+            Ok(Some(p)) => p,
+            _ => {
+                self.finish_deployment(dep_id, "failed", Some("Project not found"));
+                return;
+            }
+        };
+
+        let releases = self.list_releases(project_id);
+        let target = releases
+            .into_iter()
+            .find(|r| r.id == target_release_id)
+            .or_else(|| self.list_releases(project_id).into_iter().find(|r| r.status == "succeeded"));
+
+        let target = match target {
+            Some(r) => r,
+            None => {
+                self.run_deploy(project_id, dep_id).await;
+                return;
+            }
+        };
+
+        self.logs.add(
+            Some(p.id),
+            Some(dep_id),
+            "rollback",
+            "info",
+            &format!("Rolling back {} to Release #{} ({})", p.name, target.id, target.short_sha),
+        );
+
+        {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "UPDATE deployments SET release_id=?, from_release_id=?, sha=? WHERE id=?",
+                params![target.id, p.current_release_id, target.sha, dep_id],
+            ).ok();
+        }
+
+        self.update_stage(dep_id, "deploying");
+        let release_dir = PathBuf::from(&target.dir);
+        if !release_dir.exists() {
+            self.run_deploy(project_id, dep_id).await;
+            return;
+        }
+
+        let current_symlink = Path::new(&p.deploy_dir).join("current");
+        switch_current(&current_symlink, &release_dir);
+
+        self.update_stage(dep_id, "health_checking");
+        let env_map = self.projects.get_env_map(p.id);
+        if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
+            self.logs.add(Some(p.id), Some(dep_id), "rollback", "error", &format!("Start failed: {}", e));
+            self.finish_deployment(dep_id, "failed", Some(&e));
+            return;
+        }
+
+        let ts = now();
+        {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?",
+                params![target.id, target.sha, ts, p.id],
+            ).ok();
+        }
+
+        self.logs.add(Some(p.id), Some(dep_id), "rollback", "info", &format!("Rollback to Release #{} succeeded!", target.id));
+        self.finish_deployment(dep_id, "success", None);
+    }
 }
 
 fn switch_current(current_link: &Path, target_dir: &Path) {
-    if current_link.exists() || fs::symlink_metadata(current_link).is_ok() {
-        let _ = fs::remove_file(current_link);
-        let _ = fs::remove_dir_all(current_link);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let abs_link = if current_link.is_absolute() {
+        current_link.to_path_buf()
+    } else {
+        let stripped = current_link.to_string_lossy();
+        let clean = stripped.strip_prefix("./").or_else(|| stripped.strip_prefix(".\\")).unwrap_or(&stripped);
+        cwd.join(clean)
+    };
+    let abs_target = std::fs::canonicalize(target_dir).unwrap_or_else(|_| {
+        if target_dir.is_absolute() {
+            target_dir.to_path_buf()
+        } else {
+            let stripped = target_dir.to_string_lossy();
+            let clean = stripped.strip_prefix("./").or_else(|| stripped.strip_prefix(".\\")).unwrap_or(&stripped);
+            cwd.join(clean)
+        }
+    });
+    // Strip Windows \\?\ extended-length prefix if canonicalize added it, as cmd mklink /J prefers standard paths
+    let target_str = abs_target.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let link_str = abs_link.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+
+    if abs_link.exists() || fs::symlink_metadata(&abs_link).is_ok() {
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "rmdir", &link_str])
+                .output();
+        }
+        let _ = fs::remove_file(&abs_link);
+        let _ = fs::remove_dir_all(&abs_link);
     }
     #[cfg(windows)]
     {
-        let _ = std::os::windows::fs::symlink_dir(target_dir, current_link);
+        // Try mklink /J (NTFS junction, does not require admin rights) with absolute paths
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J", &link_str, &target_str])
+            .output();
     }
     #[cfg(unix)]
     {
-        let _ = std::os::unix::fs::symlink(target_dir, current_link);
+        let _ = std::os::unix::fs::symlink(&abs_target, &abs_link);
     }
 }
 
-async fn run_shell_cmd(cmd_str: &str, cwd: &Path) -> Result<(), String> {
+async fn run_shell_cmd(
+    cmd_str: &str,
+    cwd: &Path,
+    logs: &Logs,
+    project_id: i64,
+    dep_id: i64,
+) -> Result<(), String> {
     #[cfg(windows)]
     let mut cmd = tokio::process::Command::new("cmd");
     #[cfg(windows)]
@@ -340,10 +534,28 @@ async fn run_shell_cmd(cmd_str: &str, cwd: &Path) -> Result<(), String> {
 
     cmd.current_dir(cwd);
     let out = cmd.output().await.map_err(|e| e.to_string())?;
+
+    let stdout_str = String::from_utf8_lossy(&out.stdout);
+    for line in stdout_str.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            logs.add(Some(project_id), Some(dep_id), "build", "info", trimmed);
+        }
+    }
+
+    let stderr_str = String::from_utf8_lossy(&out.stderr);
+    for line in stderr_str.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            let lvl = if out.status.success() { "info" } else { "error" };
+            logs.add(Some(project_id), Some(dep_id), "build", lvl, trimmed);
+        }
+    }
+
     if out.status.success() {
         Ok(())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).to_string())
+        Err(stderr_str.to_string())
     }
 }
 

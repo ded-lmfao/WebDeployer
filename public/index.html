@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nexus Deploy 2.0 — Self-Hosted Deployment Platform</title>
+  <title>WebDep — Multi-Website Deployment & Hosting Platform</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -12,9 +12,9 @@
   <div id="login-view" style="display: none;">
     <div class="login-card">
       <div class="login-brand">
-        <div class="brand-icon">ND</div>
-        <h2>Nexus Deploy 2.0</h2>
-        <p>Sign in to your deployment server</p>
+        <div class="brand-icon">WD</div>
+        <h2>WebDep</h2>
+        <p>Sign in to your multi-website deployment server</p>
       </div>
       <form id="login-form">
         <div class="form-group">
@@ -38,10 +38,10 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon">ND</div>
+        <div class="brand-icon">WD</div>
         <div class="brand-name">
-          Nexus Deploy
-          <span class="brand-badge">2.0</span>
+          WebDep
+          <span class="brand-badge">PRO</span>
         </div>
       </div>
 
@@ -305,6 +305,7 @@
               <p>Remote repository synchronization, webhooks, and commit history</p>
             </div>
             <div class="view-actions">
+              <select class="form-control view-project-selector" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
               <button class="btn btn-secondary btn-sm" id="github-check-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>Check GitHub</span>
@@ -370,6 +371,7 @@
               <p>Automated zero-downtime deployment pipelines and operation history</p>
             </div>
             <div class="view-actions">
+              <select class="form-control view-project-selector" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
               <button class="btn btn-primary" id="trigger-deploy-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                 <span>Deploy Latest</span>
@@ -427,6 +429,9 @@
               <h1>Release Retention History</h1>
               <p>Immutable releases, build artifacts, and instant rollback targets</p>
             </div>
+            <div class="view-actions">
+              <select class="form-control view-project-selector" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
+            </div>
           </div>
 
           <div class="card">
@@ -464,6 +469,9 @@
             <div class="view-title-group">
               <h1>Instant Rollback Cockpit</h1>
               <p>Restore previous verified working versions with zero downtime and automatic health checks</p>
+            </div>
+            <div class="view-actions">
+              <select class="form-control view-project-selector" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
             </div>
           </div>
 
@@ -514,6 +522,7 @@
               <p>Live SSE log streaming, search, error highlighting, and application logs</p>
             </div>
             <div class="view-actions">
+              <select class="form-control view-project-selector" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
               <button class="btn btn-secondary btn-sm" id="logs-copy-btn" title="Copy all logs to clipboard">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 <span>Copy Logs</span>
@@ -562,7 +571,7 @@
               </div>
             </div>
             <div class="log-terminal" id="log-terminal-output">
-              <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-chan">SYSTEM</span><span class="log-lvl-info">Nexus Deploy 2.0 log stream connected.</span></div>
+              <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-chan">SYSTEM</span><span class="log-lvl-info">WebDep real-time log stream connected.</span></div>
             </div>
           </div>
         </section>
@@ -574,9 +583,13 @@
               <h1>Environment Variables & Secrets</h1>
               <p>Encrypted at rest with AES-256-GCM. Masked in browser and never leaked into build logs.</p>
             </div>
-            <div class="view-actions">
-              <button class="btn btn-primary" id="add-env-btn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <div class="view-actions" style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" id="bulk-env-btn" onclick="openBulkEnvModal()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                <span>Bulk / .env File</span>
+              </button>
+              <button class="btn btn-primary" id="add-env-btn" onclick="openAddEnvModal()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                 <span>Add Variable</span>
               </button>
             </div>
@@ -584,8 +597,14 @@
 
           <div class="card">
             <div class="card-header">
-              <span class="card-title">Project Environment Variables</span>
-              <button class="btn btn-secondary btn-sm" id="env-restart-app-btn">Restart App to Apply</button>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="card-title">Environment Variables for:</span>
+                <select id="env-project-selector" class="form-control" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" id="export-env-btn" onclick="exportEnvFile()">Export .env</button>
+                <button class="btn btn-secondary btn-sm" id="env-restart-app-btn" onclick="restartCurrentProject()">Restart App to Apply</button>
+              </div>
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
@@ -616,6 +635,7 @@
               <p>Pre-deployment automated snapshots, persistent directories, and instant recovery points</p>
             </div>
             <div class="view-actions">
+              <select class="form-control view-project-selector" style="width: auto; padding: 4px 10px; font-weight: 600;" onchange="onEnvProjectChange(this.value)"></select>
               <button class="btn btn-primary" id="create-backup-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                 <span>Create Backup</span>
@@ -738,9 +758,12 @@
                     <input type="number" id="setting-deploy-timeout" class="form-control" required min="60">
                   </div>
                   <div class="form-group">
-                    <label class="form-label" for="setting-github-token">GitHub Personal Access Token</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <label class="form-label" for="setting-github-token">GitHub Personal Access Token</label>
+                      <span id="github-token-status-badge" style="font-size: 11px;"></span>
+                    </div>
                     <input type="password" id="setting-github-token" class="form-control" placeholder="github_pat_...">
-                    <span class="form-hint">Enables private repository mirrors without per-repo SSH keys.</span>
+                    <span class="form-hint">Persisted in SQLite. Enables private repository mirrors and browsing your GitHub repositories.</span>
                   </div>
                   <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Save Global Settings</button>
                 </form>
@@ -881,7 +904,7 @@
 
           <div class="form-group">
             <label class="form-label" for="website-deploy-dir">Deployment Directory *</label>
-            <input type="text" id="website-deploy-dir" class="form-control" placeholder="/var/www/my-saas-api" required>
+            <input type="text" id="website-deploy-dir" class="form-control" placeholder="./data/sites/my-saas-api" required>
             <span class="form-hint">Isolated folder for releases, repo mirror, and process state.</span>
           </div>
 
@@ -960,34 +983,77 @@
     </div>
   </div>
 
-  <!-- ADD ENV VAR MODAL -->
+  <!-- ADD / BULK ENV VAR MODAL -->
   <div class="modal-overlay" id="modal-env">
-    <div class="modal-container" style="max-width: 450px;">
+    <div class="modal-container" style="max-width: 620px; width: 94%;">
       <div class="modal-header">
-        <h3 class="modal-title">Add Environment Variable</h3>
+        <h3 class="modal-title" id="env-modal-title">Add Environment Variable</h3>
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
-        <form id="add-env-form">
-          <div class="form-group">
-            <label class="form-label" for="env-key-input">Variable Key *</label>
-            <input type="text" id="env-key-input" class="form-control" placeholder="DATABASE_URL" required>
+        <!-- Target Website Indicator in Modal -->
+        <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-card); padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; border: 1px solid var(--border-subtle); font-size: 12px;">
+          <span style="color: var(--text-muted);">Target Website:</span>
+          <strong id="env-modal-target-project" style="color: var(--accent-light);">Loading...</strong>
+        </div>
+
+        <!-- Mode Switch Tabs -->
+        <div class="env-mode-tabs" style="display: flex; gap: 6px; background: var(--bg-input); padding: 4px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border-subtle);">
+          <button type="button" class="env-mode-tab active" id="tab-env-single" onclick="switchEnvModalTab('single')" style="flex: 1; padding: 8px 12px; background: var(--bg-card); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-light); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+            ➕ Single Variable
+          </button>
+          <button type="button" class="env-mode-tab" id="tab-env-bulk" onclick="switchEnvModalTab('bulk')" style="flex: 1; padding: 8px 12px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+            📄 Bulk .env File
+          </button>
+        </div>
+
+        <!-- Mode 1: Single Variable Form -->
+        <div id="env-section-single">
+          <form id="add-env-form" onsubmit="handleSaveEnv(event); return false;">
+            <div class="form-group">
+              <label class="form-label" for="env-key-input">Variable Key *</label>
+              <input type="text" id="env-key-input" class="form-control" placeholder="DATABASE_URL">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="env-value-input">Value *</label>
+              <textarea id="env-value-input" class="form-control" rows="3" placeholder="postgres://user:pass@localhost/db"></textarea>
+            </div>
+            <div class="form-group">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="env-secret-checkbox" checked>
+                Mask as Sensitive Secret (AES-256-GCM encrypted)
+              </label>
+            </div>
+          </form>
+        </div>
+
+        <!-- Mode 2: Bulk .env File Form -->
+        <div id="env-section-bulk" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label class="form-label" for="env-bulk-input" style="margin-bottom: 0;">Copy & Paste Raw .env File</label>
+            <button type="button" class="btn btn-secondary btn-sm" id="env-load-existing-btn" onclick="loadCurrentEnv()" style="font-size: 11px; padding: 3px 8px;">
+              Load Current .env
+            </button>
           </div>
           <div class="form-group">
-            <label class="form-label" for="env-value-input">Value *</label>
-            <textarea id="env-value-input" class="form-control" rows="3" placeholder="postgres://user:pass@localhost/db" required></textarea>
+            <textarea id="env-bulk-input" class="form-control" rows="11" placeholder="# Paste your .env file here&#10;PORT=3000&#10;DATABASE_URL=postgres://user:pass@localhost:5432/mydb&#10;JWT_SECRET=supersecret123&#10;NODE_ENV=production" style="font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre;"></textarea>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Supports KEY=VALUE, comments (#), optional "export", and quoted strings.</p>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-              <input type="checkbox" id="env-secret-checkbox" checked>
-              Mask as Sensitive Secret
+              <input type="checkbox" id="env-bulk-secret-checkbox" checked>
+              Mask imported variables as Sensitive Secrets
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="env-bulk-replace-checkbox">
+              Replace ALL existing variables (Warning: deletes variables not in this list)
             </label>
           </div>
-        </form>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close-modal>Cancel</button>
-        <button class="btn btn-primary" id="save-env-btn">Save Variable</button>
+        <button class="btn btn-primary" id="save-env-btn" onclick="handleSaveEnv(event)">Save Variable</button>
       </div>
     </div>
   </div>
@@ -1099,7 +1165,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js?v=2.0.2"></script>
 </body>
 </html>
 
