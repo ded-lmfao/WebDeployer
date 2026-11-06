@@ -1,0 +1,310 @@
+use rusqlite::Connection;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub type DbPool = Arc<Mutex<Connection>>;
+
+pub fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+pub fn open_db(data_dir: &Path) -> Result<DbPool, Box<dyn std::error::Error + Send + Sync>> {
+    std::fs::create_dir_all(data_dir)?;
+    let db_path = data_dir.join("nexus-deploy.sqlite");
+    let conn = Connection::open(&db_path)?;
+
+    // High performance PRAGMAs (WAL, NORMAL sync, in-memory temp store, 20MB cache)
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA foreign_keys = ON;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA cache_size = -20000;
+        PRAGMA temp_store = MEMORY;
+        ",
+    )?;
+
+    migrate(&conn)?;
+
+    Ok(Arc::new(Mutex::new(conn)))
+}
+
+fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS _meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        ",
+    )?;
+
+    // Dynamic schema alignment for existing databases
+    let has_users: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if has_users {
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(users)")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+            rows.flatten().collect()
+        };
+        if !cols.contains(&"password_hash".to_string()) && cols.contains(&"pass_hash".to_string()) {
+            conn.execute_batch("ALTER TABLE users RENAME COLUMN pass_hash TO password_hash;")?;
+        }
+        if !cols.contains(&"salt".to_string()) {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN salt TEXT NOT NULL DEFAULT '';")?;
+        }
+    }
+
+    let has_sessions: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if has_sessions {
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+            rows.flatten().collect()
+        };
+        if cols.contains(&"token_hash".to_string()) && !cols.contains(&"id".to_string()) {
+            conn.execute_batch(
+                "DROP TABLE sessions;
+                 CREATE TABLE sessions (
+                     id TEXT PRIMARY KEY,
+                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                     expires_at INTEGER NOT NULL,
+                     csrf_token TEXT NOT NULL
+                 );",
+            )?;
+        }
+    }
+
+    let has_projects: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if has_projects {
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(projects)")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+            rows.flatten().collect()
+        };
+        if !cols.contains(&"webhook_secret".to_string()) {
+            if cols.contains(&"webhook_secret_enc".to_string()) {
+                conn.execute_batch("ALTER TABLE projects RENAME COLUMN webhook_secret_enc TO webhook_secret;")?;
+            } else {
+                conn.execute_batch("ALTER TABLE projects ADD COLUMN webhook_secret TEXT;")?;
+            }
+        }
+        if !cols.contains(&"app_started_at".to_string()) {
+            if cols.contains(&"app_status_at".to_string()) {
+                conn.execute_batch("ALTER TABLE projects RENAME COLUMN app_status_at TO app_started_at;")?;
+            } else {
+                conn.execute_batch("ALTER TABLE projects ADD COLUMN app_started_at INTEGER;")?;
+            }
+        }
+        if !cols.contains(&"app_pid".to_string()) {
+            conn.execute_batch("ALTER TABLE projects ADD COLUMN app_pid INTEGER;")?;
+        }
+        if !cols.contains(&"domains".to_string()) {
+            conn.execute_batch("ALTER TABLE projects ADD COLUMN domains TEXT NOT NULL DEFAULT '[]';")?;
+        }
+        if !cols.contains(&"ssl_enabled".to_string()) {
+            conn.execute_batch("ALTER TABLE projects ADD COLUMN ssl_enabled INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        if !cols.contains(&"ssl_email".to_string()) {
+            conn.execute_batch("ALTER TABLE projects ADD COLUMN ssl_email TEXT DEFAULT '';")?;
+        }
+        if !cols.contains(&"nginx_configured".to_string()) {
+            conn.execute_batch("ALTER TABLE projects ADD COLUMN nginx_configured INTEGER NOT NULL DEFAULT 0;")?;
+        }
+    }
+
+    let version: i32 = conn
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM _meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if version < 1 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                repo_url TEXT NOT NULL,
+                branch TEXT NOT NULL DEFAULT 'main',
+                project_type TEXT NOT NULL DEFAULT 'node',
+                deploy_method TEXT NOT NULL DEFAULT 'managed',
+                deploy_dir TEXT NOT NULL,
+                port INTEGER,
+                install_cmd TEXT DEFAULT '',
+                build_cmd TEXT DEFAULT '',
+                start_cmd TEXT DEFAULT '',
+                health_url TEXT DEFAULT '',
+                health_cmd TEXT DEFAULT '',
+                health_timeout_s INTEGER NOT NULL DEFAULT 30,
+                stability_s INTEGER NOT NULL DEFAULT 5,
+                preflight INTEGER NOT NULL DEFAULT 1,
+                auto_deploy INTEGER NOT NULL DEFAULT 0,
+                poll_interval_s INTEGER NOT NULL DEFAULT 60,
+                webhook_secret TEXT,
+                retention INTEGER NOT NULL DEFAULT 5,
+                persistent_paths TEXT NOT NULL DEFAULT '[]',
+                current_release_id INTEGER,
+                deployed_sha TEXT,
+                last_poll_at INTEGER,
+                app_status TEXT NOT NULL DEFAULT 'stopped',
+                app_pid INTEGER,
+                app_started_at INTEGER,
+                domains TEXT NOT NULL DEFAULT '[]',
+                ssl_enabled INTEGER NOT NULL DEFAULT 0,
+                ssl_email TEXT DEFAULT '',
+                nginx_configured INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS project_env (
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                value_enc TEXT NOT NULL,
+                is_secret INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(project_id, key)
+            );
+
+            CREATE TABLE IF NOT EXISTS releases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                sha TEXT NOT NULL,
+                short_sha TEXT NOT NULL,
+                message TEXT,
+                author TEXT,
+                committed_at INTEGER,
+                dir TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT,
+                created_at INTEGER NOT NULL,
+                deployed_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_releases_proj ON releases(project_id, id DESC);
+
+            CREATE TABLE IF NOT EXISTS deployments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                release_id INTEGER REFERENCES releases(id),
+                from_release_id INTEGER REFERENCES releases(id),
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                stage TEXT NOT NULL DEFAULT 'pending',
+                sha TEXT,
+                trigger TEXT NOT NULL DEFAULT 'manual',
+                actor TEXT NOT NULL DEFAULT 'system',
+                error TEXT,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_deployments_proj ON deployments(project_id, id DESC);
+
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER,
+                deployment_id INTEGER,
+                channel TEXT NOT NULL DEFAULT 'system',
+                level TEXT NOT NULL DEFAULT 'info',
+                message TEXT NOT NULL,
+                ts INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_logs_proj ON logs(project_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_logs_dep ON logs(deployment_id, id ASC);
+            CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC);
+
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'admin',
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at INTEGER NOT NULL,
+                csrf_token TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS backups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                note TEXT,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+                type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                attempt INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id ASC);
+
+            CREATE TABLE IF NOT EXISTS locks (
+                key TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                acquired_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                actor TEXT NOT NULL,
+                action TEXT NOT NULL,
+                target TEXT,
+                detail TEXT,
+                ip TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts DESC);
+
+            INSERT OR REPLACE INTO _meta(key, value) VALUES('schema_version', '2');
+            ",
+        )?;
+    }
+
+    Ok(())
+}

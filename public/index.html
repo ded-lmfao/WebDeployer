@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus Deploy 2.0 — Self-Hosted Deployment Platform</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- ======================== LOGIN VIEW ======================== -->
+  <div id="login-view" style="display: none;">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-icon">ND</div>
+        <h2>Nexus Deploy 2.0</h2>
+        <p>Sign in to your deployment server</p>
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label class="form-label" for="login-username">Username</label>
+          <input type="text" id="login-username" class="form-control" placeholder="admin" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="login-password">Password</label>
+          <input type="password" id="login-password" class="form-control" placeholder="••••••••••••" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 12px;" id="login-btn">
+          Sign In
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================== MAIN APP SHELL ======================== -->
+  <div id="app">
+    
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">ND</div>
+        <div class="brand-name">
+          Nexus Deploy
+          <span class="brand-badge">2.0</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <div class="nav-section-title">Core</div>
+        <a class="nav-item active" data-view="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>Overview</span>
+        </a>
+        <a class="nav-item" data-view="projects">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <span>Websites</span>
+          <span class="nav-badge" id="badge-projects-count">0</span>
+        </a>
+        <a class="nav-item" data-view="github">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+          <span>GitHub</span>
+        </a>
+
+        <div class="nav-section-title">Deployment</div>
+        <a class="nav-item" data-view="deployments">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          <span>Deployments</span>
+          <span class="nav-badge" id="badge-active-deployments" style="display: none;">0</span>
+        </a>
+        <a class="nav-item" data-view="releases">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <span>Releases</span>
+        </a>
+        <a class="nav-item" data-view="rollbacks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+          <span>Rollbacks</span>
+        </a>
+
+        <div class="nav-section-title">Operations</div>
+        <a class="nav-item" data-view="logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+          <span>Live Logs</span>
+        </a>
+        <a class="nav-item" data-view="env">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span>Environment</span>
+        </a>
+        <a class="nav-item" data-view="backups">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span>Backups</span>
+        </a>
+        <a class="nav-item" data-view="monitor">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+          <span>Monitoring</span>
+        </a>
+
+        <div class="nav-section-title">Management</div>
+        <a class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
+        </a>
+        <a class="nav-item" data-view="audit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>Activity Log</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-snippet" id="user-profile-snippet" style="cursor: pointer;" title="Click to Change Password">
+          <div class="user-avatar" id="current-user-avatar">AD</div>
+          <div class="user-info">
+            <span class="user-name" id="current-user-name">Admin</span>
+            <span class="user-role" id="current-user-role">admin</span>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="logout-btn" title="Sign Out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        </button>
+      </div>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <!-- MAIN WRAPPER -->
+    <div class="main-wrapper">
+      
+      <!-- TOP HEADER -->
+      <header class="top-header">
+        <div class="header-left">
+          <button class="mobile-menu-btn" id="mobile-sidebar-toggle" aria-label="Toggle navigation">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <nav class="breadcrumbs" id="top-breadcrumbs" aria-label="Breadcrumbs">
+            <span class="crumb-section" id="breadcrumb-section">Overview</span>
+            <span class="crumb-separator" id="breadcrumb-sep" style="display: none;">/</span>
+            <span class="crumb-project" id="breadcrumb-project" style="display: none;"></span>
+          </nav>
+          <div class="project-selector">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            <select id="global-project-select">
+              <option value="">All Projects (Global)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <div class="server-pill">
+            <span class="status-dot online" id="server-status-dot"></span>
+            <span id="server-status-text">Server Online</span>
+          </div>
+          <button class="btn btn-primary btn-sm" id="global-add-website-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Add Website</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- CONTENT AREA -->
+      <main class="content-area">
+
+        <!-- ==================== 1. OVERVIEW VIEW ==================== -->
+        <section id="view-overview" class="view-section active">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>System Overview</h1>
+              <p>Global VM health, deployed websites, and recent deployment activity</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-secondary btn-sm" id="overview-refresh-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Server Stats Row -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Total Websites <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></div>
+              <div class="stat-value" id="stat-total-projects">0</div>
+              <div class="stat-meta"><span id="stat-online-count" style="color: var(--success); font-weight: 600;">0</span> online &bull; <span id="stat-offline-count">0</span> stopped</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">CPU Usage <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg></div>
+              <div class="stat-value" id="stat-cpu-pct">0%</div>
+              <div class="progress-bar"><div class="progress-fill green" id="stat-cpu-bar" style="width: 0%;"></div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Memory Usage <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon></svg></div>
+              <div class="stat-value" id="stat-mem-pct">0%</div>
+              <div class="progress-bar"><div class="progress-fill green" id="stat-mem-bar" style="width: 0%;"></div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Disk Free <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><path d="M22 12H2"></path><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></div>
+              <div class="stat-value" id="stat-disk-free">-- GB</div>
+              <div class="stat-meta" id="stat-disk-meta">-- total</div>
+            </div>
+          </div>
+
+          <!-- Quick Actions & Pipeline -->
+          <div id="overview-active-deployment-box" style="display: none;" class="card">
+            <div class="card-header">
+              <span class="card-title">
+                <span class="status-dot building"></span>
+                Active Deployment in Progress: <strong id="active-dep-project-name">...</strong>
+              </span>
+              <span class="badge badge-warning" id="active-dep-kind">DEPLOY</span>
+            </div>
+            <div class="card-body">
+              <div class="pipeline-track" id="overview-pipeline-track">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Websites Quick Grid -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Hosted Websites</span>
+              <button class="btn btn-secondary btn-sm" onclick="navigateTo('projects')">View All Websites &rarr;</button>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Domains</th>
+                      <th>Status</th>
+                      <th>Deployed SHA</th>
+                      <th>Behind / Ahead</th>
+                      <th>Last Deployment</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-projects-table">
+                    <tr><td colspan="7" style="text-align: center; padding: 24px;">No websites created yet. Click "Add Website" to get started.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent Deployments -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Recent Deployments</span>
+              <button class="btn btn-secondary btn-sm" onclick="navigateTo('deployments')">View All Deployments &rarr;</button>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Project</th>
+                      <th>Kind</th>
+                      <th>Trigger</th>
+                      <th>Commit</th>
+                      <th>Duration</th>
+                      <th>Status</th>
+                      <th>Time</th>
+                      <th>Logs</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-recent-table">
+                    <tr><td colspan="9" style="text-align: center; padding: 24px;">No recent deployments recorded.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 2. WEBSITES (PROJECTS) VIEW ==================== -->
+        <section id="view-projects" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Hosted Websites</h1>
+              <p>Manage independent multi-project web applications, domains, and processes</p>
+            </div>
+            <div class="view-actions">
+              <div class="filter-pills" id="projects-status-filters">
+                <button class="pill active" data-filter="all">All (<span id="filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span id="filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span id="filter-count-stopped">0</span>)</button>
+              </div>
+              <input type="text" id="projects-search-input" class="form-control" placeholder="Search websites or domains..." style="width: 220px;">
+              <button class="btn btn-primary" id="add-website-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>Add Website</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="projects-grid" id="projects-cards-container">
+            <!-- Dynamic cards injected via JS -->
+          </div>
+        </section>
+
+        <!-- ==================== 3. GITHUB VIEW ==================== -->
+        <section id="view-github" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>GitHub Integration</h1>
+              <p>Remote repository synchronization, webhooks, and commit history</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-secondary btn-sm" id="github-check-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Check GitHub</span>
+              </button>
+              <button class="btn btn-primary btn-sm" id="github-fetch-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                <span>Fetch Updates</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-bottom: 20px;">
+            <div class="card" style="margin-bottom: 0;">
+              <div class="card-header"><span class="card-title">Repository Configuration</span></div>
+              <div class="card-body" id="github-repo-details">
+                <p style="color: var(--text-dim);">Select a project to inspect GitHub configuration.</p>
+              </div>
+            </div>
+
+            <div class="card" style="margin-bottom: 0;">
+              <div class="card-header">
+                <span class="card-title">GitHub Webhook (Instant Deploys)</span>
+              </div>
+              <div class="card-body" id="github-webhook-details">
+                <p style="color: var(--text-dim);">Select a project to view webhook URL and secret.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Commits list -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Commit History (Remote Mirror)</span>
+              <span class="badge badge-neutral" id="github-branch-badge">main</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Commit</th>
+                      <th>Message</th>
+                      <th>Author</th>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="github-commits-table">
+                    <tr><td colspan="6" style="text-align: center; padding: 24px;">Select a project or fetch updates to load commits.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 4. DEPLOYMENTS VIEW ==================== -->
+        <section id="view-deployments" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Deployments Pipeline</h1>
+              <p>Automated zero-downtime deployment pipelines and operation history</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="trigger-deploy-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Deploy Latest</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Visual Stage Progression Container -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Pipeline Stages</span>
+              <span class="badge badge-neutral" id="pipeline-status-badge">Idle</span>
+            </div>
+            <div class="card-body">
+              <div class="pipeline-track" id="main-pipeline-track">
+                <!-- Rendered dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Deployments History Table -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Deployment Records</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Project</th>
+                      <th>Kind</th>
+                      <th>Trigger</th>
+                      <th>Commit</th>
+                      <th>Duration</th>
+                      <th>Status</th>
+                      <th>Timestamp</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deployments-table-body">
+                    <tr><td colspan="9" style="text-align: center; padding: 24px;">Loading deployments...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 5. RELEASES VIEW ==================== -->
+        <section id="view-releases" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Release Retention History</h1>
+              <p>Immutable releases, build artifacts, and instant rollback targets</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Retained Releases</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Release ID</th>
+                      <th>Commit</th>
+                      <th>Message</th>
+                      <th>Author</th>
+                      <th>Deployed At</th>
+                      <th>Build Status</th>
+                      <th>Health Check</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="releases-table-body">
+                    <tr><td colspan="9" style="text-align: center; padding: 24px;">Select a project to view releases.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 6. ROLLBACKS VIEW ==================== -->
+        <section id="view-rollbacks" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Instant Rollback Cockpit</h1>
+              <p>Restore previous verified working versions with zero downtime and automatic health checks</p>
+            </div>
+          </div>
+
+          <div class="card" style="border-left: 4px solid var(--accent);">
+            <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+              <div>
+                <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">Currently Live Release</h3>
+                <p style="color: var(--text-muted);" id="rollback-live-info">Checking live release...</p>
+              </div>
+              <div id="rollback-live-badge-container">
+                <span class="badge badge-success">LIVE</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Available Restore Points (Retained Successful Releases)</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Release ID</th>
+                      <th>Commit</th>
+                      <th>Message</th>
+                      <th>Author</th>
+                      <th>Deployment Date</th>
+                      <th>Safety Check</th>
+                      <th>Rollback Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rollbacks-table-body">
+                    <tr><td colspan="7" style="text-align: center; padding: 24px;">Select a project to inspect available rollback releases.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 7. LIVE LOGS VIEW ==================== -->
+        <section id="view-logs" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Real-Time Log Streamer</h1>
+              <p>Live SSE log streaming, search, error highlighting, and application logs</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-secondary btn-sm" id="logs-copy-btn" title="Copy all logs to clipboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <span>Copy Logs</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="logs-app-tail-btn">
+                <span>View App Logs</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="logs-download-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>Download</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="log-console-wrapper">
+            <div class="log-toolbar">
+              <div class="log-filters">
+                <div style="display: flex; gap: 6px; align-items: center; margin-right: 8px;">
+                  <span style="width: 10px; height: 10px; border-radius: 50%; background: #f43f5e; display: inline-block;"></span>
+                  <span style="width: 10px; height: 10px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
+                  <span style="width: 10px; height: 10px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
+                </div>
+                <select id="log-channel-filter" class="form-control" style="width: 130px; padding: 4px 8px; font-size: 12px;">
+                  <option value="">All Channels</option>
+                  <option value="deployment">Deployment</option>
+                  <option value="build">Build</option>
+                  <option value="app">App</option>
+                  <option value="system">System</option>
+                  <option value="rollback">Rollback</option>
+                  <option value="github">GitHub</option>
+                </select>
+                <select id="log-level-filter" class="form-control" style="width: 110px; padding: 4px 8px; font-size: 12px;">
+                  <option value="">All Levels</option>
+                  <option value="info">Info</option>
+                  <option value="warn">Warn</option>
+                  <option value="error">Error</option>
+                </select>
+                <input type="text" id="log-search-input" class="form-control" placeholder="Search log lines..." style="width: 180px; padding: 4px 8px; font-size: 12px;">
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <label style="font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="log-autoscroll" checked>
+                  Auto-scroll
+                </label>
+                <button class="btn btn-secondary btn-sm" id="log-clear-btn" style="padding: 2px 8px; font-size: 11px;">Clear</button>
+              </div>
+            </div>
+            <div class="log-terminal" id="log-terminal-output">
+              <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-chan">SYSTEM</span><span class="log-lvl-info">Nexus Deploy 2.0 log stream connected.</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 8. ENVIRONMENT VARIABLES VIEW ==================== -->
+        <section id="view-env" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Environment Variables & Secrets</h1>
+              <p>Encrypted at rest with AES-256-GCM. Masked in browser and never leaked into build logs.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="add-env-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>Add Variable</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Project Environment Variables</span>
+              <button class="btn btn-secondary btn-sm" id="env-restart-app-btn">Restart App to Apply</button>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Key Name</th>
+                      <th>Value</th>
+                      <th>Type</th>
+                      <th>Last Updated</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="env-vars-table-body">
+                    <tr><td colspan="5" style="text-align: center; padding: 24px;">Select a project to inspect environment variables.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 9. BACKUPS VIEW ==================== -->
+        <section id="view-backups" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Application Backups</h1>
+              <p>Pre-deployment automated snapshots, persistent directories, and instant recovery points</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="create-backup-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <span>Create Backup</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Retained Snapshots</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Size</th>
+                      <th>Note</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="backups-table-body">
+                    <tr><td colspan="6" style="text-align: center; padding: 24px;">Select a project to view backups.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 10. SERVER MONITORING VIEW ==================== -->
+        <section id="view-monitor" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Server Health & Resources</h1>
+              <p>Real-time Linux VM telemetry, resource consumption, and process supervisors</p>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Host Machine</div>
+              <div class="stat-value" style="font-size: 16px;" id="mon-hostname">--</div>
+              <div class="stat-meta" id="mon-platform">--</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">System Uptime</div>
+              <div class="stat-value" style="font-size: 20px;" id="mon-uptime">--</div>
+              <div class="stat-meta">Uptime in days/hours</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">CPU Cores & Load</div>
+              <div class="stat-value" id="mon-cpu-cores">--</div>
+              <div class="stat-meta" id="mon-cpu-load">Load: --</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Nginx Status</div>
+              <div class="stat-value" style="font-size: 18px;" id="mon-nginx-status">--</div>
+              <div class="stat-meta" id="mon-nginx-version">Version: --</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">Per-Project Resource Usage</span></div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Process Status</th>
+                      <th>Uptime</th>
+                      <th>Deployed SHA</th>
+                      <th>Disk Usage</th>
+                      <th>Deploy Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="monitor-projects-table">
+                    <tr><td colspan="6" style="text-align: center; padding: 24px;">Loading metrics...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 11. SETTINGS VIEW ==================== -->
+        <section id="view-settings" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Platform Settings</h1>
+              <p>Server safety thresholds, execution policies, and user authorization</p>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="card">
+              <div class="card-header"><span class="card-title">Global Deployment Configuration</span></div>
+              <div class="card-body">
+                <form id="settings-form">
+                  <div class="form-group">
+                    <label class="form-label" for="setting-min-free-mb">Minimum Free Disk Space (MB)</label>
+                    <input type="number" id="setting-min-free-mb" class="form-control" required min="100">
+                    <span class="form-hint">Prevents builds if VM free space is less than this.</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-default-retention">Default Release Retention Count</label>
+                    <input type="number" id="setting-default-retention" class="form-control" required min="2" max="50">
+                    <span class="form-hint">Number of previous releases kept on disk for rollbacks.</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-step-timeout">Step Timeout (seconds)</label>
+                    <input type="number" id="setting-step-timeout" class="form-control" required min="30">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-deploy-timeout">Total Deploy Timeout (seconds)</label>
+                    <input type="number" id="setting-deploy-timeout" class="form-control" required min="60">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-github-token">GitHub Personal Access Token</label>
+                    <input type="password" id="setting-github-token" class="form-control" placeholder="github_pat_...">
+                    <span class="form-hint">Enables private repository mirrors without per-repo SSH keys.</span>
+                  </div>
+                  <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Save Global Settings</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">User Management</span>
+                <button class="btn btn-primary btn-sm" id="create-user-modal-btn">Add User</button>
+              </div>
+              <div class="card-body" style="padding: 0;">
+                <div class="table-responsive">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="users-table-body">
+                      <tr><td colspan="4" style="text-align: center; padding: 24px;">Loading users...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 12. ACTIVITY / AUDIT LOGS VIEW ==================== -->
+        <section id="view-audit" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Activity & Audit Trail</h1>
+              <p>Tamper-evident logs of logins, deployments, configuration changes, and rollbacks</p>
+            </div>
+            <div class="view-actions">
+              <input type="text" id="audit-search-input" class="form-control" placeholder="Filter audit actions..." style="width: 220px;">
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Actor</th>
+                      <th>Action</th>
+                      <th>Target</th>
+                      <th>Detail</th>
+                      <th>IP</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-table-body">
+                    <tr><td colspan="6" style="text-align: center; padding: 24px;">Loading audit logs...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ======================== MODALS ======================== -->
+
+  <!-- ADD / EDIT WEBSITE MODAL -->
+  <div class="modal-overlay" id="modal-website">
+    <div class="modal-container" style="max-width: 680px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-website-title">Add New Website</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        
+        <!-- Application Presets -->
+        <div style="margin-bottom: 14px;">
+          <label class="form-label">Application Type Preset</label>
+          <div class="preset-selector" id="preset-buttons">
+            <div class="preset-chip active" data-type="node">Node.js</div>
+            <div class="preset-chip" data-type="express">Express</div>
+            <div class="preset-chip" data-type="nextjs">Next.js</div>
+            <div class="preset-chip" data-type="vite">Vite / React</div>
+            <div class="preset-chip" data-type="python">Python</div>
+            <div class="preset-chip" data-type="docker">Docker</div>
+            <div class="preset-chip" data-type="docker-compose">Docker Compose</div>
+            <div class="preset-chip" data-type="custom">Custom</div>
+          </div>
+        </div>
+
+        <form id="website-form">
+          <input type="hidden" id="website-form-id">
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="website-name">Project Name *</label>
+              <input type="text" id="website-name" class="form-control" placeholder="My SaaS API" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="website-slug">Slug (Unique identifier) *</label>
+              <input type="text" id="website-slug" class="form-control" placeholder="my-saas-api" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label class="form-label" for="website-repo">GitHub Repository URL *</label>
+                <a href="javascript:void(0)" id="browse-github-repos-btn" style="font-size: 11px; color: var(--accent-light); text-decoration: none;">Browse GitHub Repos &nearr;</a>
+              </div>
+              <input type="text" id="website-repo" class="form-control" placeholder="https://github.com/owner/repo" required>
+              <select id="github-repos-select" class="form-control" style="display: none; margin-top: 4px; font-size: 12px;"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="website-branch">Branch *</label>
+              <input type="text" id="website-branch" class="form-control" value="main" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="website-domains">Domain Names (comma-separated)</label>
+              <input type="text" id="website-domains" class="form-control" placeholder="api.example.com, example.com">
+              <span class="form-hint">Used for automatic Nginx reverse proxy configuration.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="website-port">Application Port *</label>
+              <input type="number" id="website-port" class="form-control" placeholder="3000" required min="1" max="65535">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="website-deploy-dir">Deployment Directory *</label>
+            <input type="text" id="website-deploy-dir" class="form-control" placeholder="/var/www/my-saas-api" required>
+            <span class="form-hint">Isolated folder for releases, repo mirror, and process state.</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="website-deploy-method">Supervision Method</label>
+              <select id="website-deploy-method" class="form-control">
+                <option value="managed">Managed Process (Built-in)</option>
+                <option value="pm2">PM2</option>
+                <option value="systemd">systemd Service</option>
+                <option value="docker">Docker Container</option>
+                <option value="compose">Docker Compose</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="website-health-url">Health-Check URL</label>
+              <input type="text" id="website-health-url" class="form-control" placeholder="http://127.0.0.1:3000/healthz">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="website-install-cmd">Install Command</label>
+              <input type="text" id="website-install-cmd" class="form-control" placeholder="npm ci">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="website-build-cmd">Build Command</label>
+              <input type="text" id="website-build-cmd" class="form-control" placeholder="npm run build">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="website-start-cmd">Start Command *</label>
+            <input type="text" id="website-start-cmd" class="form-control" placeholder="node server.js" required>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="website-auto-deploy">
+              Enable Automatic Deployment on Push
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="website-auto-backup" checked>
+              Auto-Backup Before Each Deploy
+            </label>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="website-detect-btn" style="display: none; margin-right: auto;" onclick="detectProjectConfiguration()">Auto-Detect Commands</button>
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-website-submit-btn">Create Website</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CADDY REVERSE PROXY & AUTO-SSL MODAL -->
+  <div class="modal-overlay" id="modal-nginx">
+    <div class="modal-container" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Caddy Reverse Proxy & Automatic SSL</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="nginx-modal-status-banner" style="margin-bottom: 16px;"></div>
+        <div class="form-group">
+          <label class="form-label">Auto-Generated Caddyfile</label>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Caddy automatically provisions, verifies, and renews Let's Encrypt / ZeroSSL certificates out-of-the-box with zero certbot setup.</p>
+          <textarea id="nginx-config-preview" class="form-control" rows="10" readonly style="font-family: monospace; font-size: 13px;"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Close</button>
+        <button class="btn btn-primary" id="nginx-apply-btn">Apply & Reload Caddy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD ENV VAR MODAL -->
+  <div class="modal-overlay" id="modal-env">
+    <div class="modal-container" style="max-width: 450px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Add Environment Variable</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="add-env-form">
+          <div class="form-group">
+            <label class="form-label" for="env-key-input">Variable Key *</label>
+            <input type="text" id="env-key-input" class="form-control" placeholder="DATABASE_URL" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="env-value-input">Value *</label>
+            <textarea id="env-value-input" class="form-control" rows="3" placeholder="postgres://user:pass@localhost/db" required></textarea>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="env-secret-checkbox" checked>
+              Mask as Sensitive Secret
+            </label>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-env-btn">Save Variable</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVEAL PASSWORD CONFIRMATION MODAL -->
+  <div class="modal-overlay" id="modal-reveal">
+    <div class="modal-container" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Confirm Password to Reveal</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">Enter your admin password to view this secret value.</p>
+        <div class="form-group">
+          <input type="password" id="reveal-password-input" class="form-control" placeholder="Current password" required>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="confirm-reveal-btn">Reveal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEPLOYMENT DETAILS MODAL -->
+  <div class="modal-overlay" id="modal-dep-details">
+    <div class="modal-container" style="max-width: 720px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="dep-details-title">Deployment Details</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="dep-details-meta" style="margin-bottom: 14px;"></div>
+        <div class="log-console-wrapper" style="height: 380px;">
+          <div class="log-terminal" id="dep-details-logs"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREATE USER MODAL -->
+  <div class="modal-overlay" id="modal-create-user">
+    <div class="modal-container" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Create Platform User</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="create-user-form">
+          <div class="form-group">
+            <label class="form-label" for="user-new-username">Username *</label>
+            <input type="text" id="user-new-username" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="user-new-password">Password (min 10 chars) *</label>
+            <input type="password" id="user-new-password" class="form-control" minlength="10" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="user-new-role">Role</label>
+            <select id="user-new-role" class="form-control">
+              <option value="viewer">Viewer (Read-only)</option>
+              <option value="operator">Operator (Deploy & Restart)</option>
+              <option value="admin">Admin (Full Control)</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-new-user-btn">Create User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHANGE PASSWORD MODAL -->
+  <div class="modal-overlay" id="modal-change-password">
+    <div class="modal-container" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Change Password</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="change-password-form">
+          <div class="form-group">
+            <label class="form-label" for="pwd-current">Current Password</label>
+            <input type="password" id="pwd-current" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="pwd-next">New Password (min 10 chars)</label>
+            <input type="password" id="pwd-next" class="form-control" minlength="10" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="pwd-confirm">Confirm New Password</label>
+            <input type="password" id="pwd-confirm" class="form-control" minlength="10" required>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-change-password-btn">Update Password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Client Script -->
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,11 @@
+node_modules/
+target/
+data/
+tmp-*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.key
+.env
+.DS_Store
+
