@@ -1314,7 +1314,8 @@ async fn audit_handler(
              WHERE project_id = ?1
                 OR LOWER(COALESCE(target, '')) = LOWER(?2)
                 OR LOWER(COALESCE(target, '')) = LOWER(?3)
-             ORDER BY id DESC LIMIT {}",
+                OR COALESCE(target, '') = CAST(?1 AS TEXT)
+             ORDER BY ts DESC, id DESC LIMIT {}",
             max_limit
         );
         let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1322,11 +1323,11 @@ async fn audit_handler(
             .query_map(rusqlite::params![pid, p_name, p_slug], |r| {
                 Ok(AuditItem {
                     id: r.get(0)?,
-                    project_id: r.get(1)?,
+                    project_id: Some(pid),
                     ts: r.get(2)?,
                     actor: r.get(3)?,
                     action: r.get(4)?,
-                    target: r.get(5)?,
+                    target: r.get::<_, Option<String>>(5)?.or_else(|| Some(p_name.clone())),
                     detail: r.get(6)?,
                     ip: r.get(7)?,
                 })
@@ -1335,6 +1336,125 @@ async fn audit_handler(
         for r in rows.flatten() {
             list.push(r);
         }
+
+        // Also include historical deployments & rollbacks from the `deployments` table
+        // that predate per-website audit rows so the Activity tab shows the full timeline.
+        if let Ok(mut dstmt) = conn.prepare(
+            "SELECT id, kind, status, sha, trigger, actor, error, started_at, finished_at, release_id
+             FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 200",
+        ) {
+            if let Ok(drows) = dstmt.query_map(rusqlite::params![pid], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, Option<String>>(6)?,
+                    r.get::<_, i64>(7)?,
+                    r.get::<_, Option<i64>>(8)?,
+                    r.get::<_, Option<i64>>(9)?,
+                ))
+            }) {
+                for d in drows.flatten() {
+                    let (dep_id, kind, status, sha, trigger, actor, error, started_at, finished_at, rel_id) = d;
+                    let dep_tag = format!("#{}", dep_id);
+                    let already_logged = list.iter().any(|a| {
+                        a.detail.as_deref().map(|s| s.contains(&dep_tag)).unwrap_or(false)
+                    });
+                    if !already_logged {
+                        let short_sha = sha.as_deref().map(|s| &s[..s.len().min(7)]).unwrap_or("HEAD");
+                        let action = match (kind.as_str(), status.as_str()) {
+                            ("rollback", "success") => "rollback.success",
+                            ("rollback", "failed") => "rollback.failed",
+                            ("rollback", _) => "rollback.trigger",
+                            (_, "success") => "deploy.success",
+                            (_, "failed") => "deploy.failed",
+                            _ => "deploy.trigger",
+                        };
+                        let detail = match status.as_str() {
+                            "success" => format!(
+                                "{} #{} succeeded (commit {}, release #{}, trigger: {})",
+                                if kind == "rollback" { "Rollback" } else { "Deployment" },
+                                dep_id,
+                                short_sha,
+                                rel_id.unwrap_or(0),
+                                trigger
+                            ),
+                            "failed" => format!(
+                                "{} #{} failed (commit {}): {}",
+                                if kind == "rollback" { "Rollback" } else { "Deployment" },
+                                dep_id,
+                                short_sha,
+                                error.unwrap_or_else(|| "build/runtime error".to_string())
+                            ),
+                            _ => format!(
+                                "{} #{} started (commit {}, trigger: {})",
+                                if kind == "rollback" { "Rollback" } else { "Deployment" },
+                                dep_id,
+                                short_sha,
+                                trigger
+                            ),
+                        };
+                        list.push(AuditItem {
+                            id: 1_000_000 + dep_id,
+                            project_id: Some(pid),
+                            ts: finished_at.unwrap_or(started_at),
+                            actor,
+                            action: action.to_string(),
+                            target: Some(p_name.clone()),
+                            detail: Some(detail),
+                            ip: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Also include historical snapshots from the `backups` table if not already in audit
+        if let Ok(mut bstmt) = conn.prepare(
+            "SELECT id, kind, note, size_bytes, created_at FROM backups WHERE project_id = ? ORDER BY id DESC LIMIT 100",
+        ) {
+            if let Ok(brows) = bstmt.query_map(rusqlite::params![pid], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            }) {
+                for b in brows.flatten() {
+                    let (bid, bkind, bnote, bsize, bts) = b;
+                    let note_str = bnote.unwrap_or_else(|| "Snapshot".to_string());
+                    let already_logged = list.iter().any(|a| {
+                        a.action.starts_with("backup.") && (a.ts - bts).abs() < 5000
+                    });
+                    if !already_logged && bts > 0 {
+                        list.push(AuditItem {
+                            id: 2_000_000 + bid,
+                            project_id: Some(pid),
+                            ts: bts,
+                            actor: "system".to_string(),
+                            action: "backup.create".to_string(),
+                            target: Some(p_name.clone()),
+                            detail: Some(format!(
+                                "Backup #{}: {} ({}, {} KB)",
+                                bid,
+                                note_str,
+                                bkind,
+                                (bsize / 1024).max(1)
+                            )),
+                            ip: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        list.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| b.id.cmp(&a.id)));
+        list.truncate(max_limit);
     } else {
         let sql = format!(
             "SELECT id, project_id, ts, actor, action, target, detail, ip FROM audit ORDER BY id DESC LIMIT {}",

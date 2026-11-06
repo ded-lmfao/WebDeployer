@@ -388,7 +388,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
-    // Dynamically ensure audit table has project_id for per-website audit trails
+    // Dynamically ensure audit table has project_id for per-website activity logs
     if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(audit)") {
         let a_cols: Vec<String> = stmt
             .query_map([], |r| r.get::<_, String>(1))
@@ -401,7 +401,9 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             "CREATE INDEX IF NOT EXISTS idx_audit_proj ON audit(project_id, id DESC);
              UPDATE audit SET project_id = (
                  SELECT p.id FROM projects p
-                 WHERE LOWER(p.name) = LOWER(audit.target) OR LOWER(p.slug) = LOWER(audit.target)
+                 WHERE LOWER(p.name) = LOWER(audit.target)
+                    OR LOWER(p.slug) = LOWER(audit.target)
+                    OR CAST(p.id AS TEXT) = audit.target
                  LIMIT 1
              ) WHERE project_id IS NULL AND target IS NOT NULL;",
         )

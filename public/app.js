@@ -365,7 +365,7 @@ function updateBreadcrumbs() {
     rollbacks: 'Rollbacks',
     backups: 'Backups',
     monitor: 'Monitoring',
-    audit: 'Activity & Audit',
+    audit: 'Activity',
   };
 
   if (isInsideCard && p) {
@@ -374,7 +374,6 @@ function updateBreadcrumbs() {
     const globalLabels = {
       overview: 'System Overview',
       projects: 'Hosted Websites',
-      'global-audit': 'Platform Audit Trail',
       settings: 'Platform Settings',
     };
     secEl.textContent = globalLabels[state.currentView] || state.currentView;
@@ -493,8 +492,7 @@ function renderCurrentView() {
     sec.classList.remove('active');
   });
 
-  const sectionId = state.currentView === 'global-audit' ? 'view-audit' : `view-${state.currentView}`;
-  const activeSection = document.getElementById(sectionId);
+  const activeSection = document.getElementById(`view-${state.currentView}`);
   if (activeSection) activeSection.classList.add('active');
 
   // Load relevant view data
@@ -510,10 +508,7 @@ function renderCurrentView() {
     case 'backups': loadBackupsView(); break;
     case 'monitor': loadMonitorView(); break;
     case 'settings': loadSettingsView(); break;
-    case 'audit':
-    case 'global-audit':
-      loadAuditView();
-      break;
+    case 'audit': loadAuditView(); break;
   }
 }
 
@@ -2356,29 +2351,39 @@ async function deleteUser(userId, username) {
 window.deleteUser = deleteUser;
 
 // ============================================================================
-// View 12: Activity & Audit Logs (Per-Website & Global)
+// View 12: Per-Website Activity Tab
 // ============================================================================
 const AUDIT_ACTION_META = {
   'deploy.trigger': { label: 'Deploy Triggered', cls: 'badge-info' },
+  'deploy.start': { label: 'Deploy Triggered', cls: 'badge-info' },
   'deploy.auto_initial': { label: 'Initial Deploy', cls: 'badge-info' },
   'deploy.success': { label: 'Deploy Succeeded', cls: 'badge-success' },
   'deploy.failed': { label: 'Deploy Failed', cls: 'badge-danger' },
   'rollback.trigger': { label: 'Rollback Started', cls: 'badge-warning' },
+  'rollback.start': { label: 'Rollback Started', cls: 'badge-warning' },
   'rollback.success': { label: 'Rollback Succeeded', cls: 'badge-success' },
   'rollback.failed': { label: 'Rollback Failed', cls: 'badge-danger' },
   'container.start': { label: 'Container Started', cls: 'badge-success' },
+  'project.start': { label: 'Container Started', cls: 'badge-success' },
   'container.stop': { label: 'Container Stopped', cls: 'badge-danger' },
+  'project.stop': { label: 'Container Stopped', cls: 'badge-danger' },
   'container.restart': { label: 'Container Restarted', cls: 'badge-warning' },
+  'project.restart': { label: 'Container Restarted', cls: 'badge-warning' },
   'env.set': { label: 'Env Variable Saved', cls: 'badge-info' },
+  'env.add': { label: 'Env Variable Saved', cls: 'badge-info' },
   'env.bulk_import': { label: 'Bulk .env Imported', cls: 'badge-info' },
   'env.reveal': { label: 'Secret Revealed', cls: 'badge-warning' },
   'env.delete': { label: 'Env Variable Deleted', cls: 'badge-danger' },
+  'env.remove': { label: 'Env Variable Deleted', cls: 'badge-danger' },
   'backup.create': { label: 'Snapshot Created', cls: 'badge-info' },
   'backup.restore': { label: 'Backup Restored', cls: 'badge-warning' },
   'backup.delete': { label: 'Backup Deleted', cls: 'badge-danger' },
   'website.create': { label: 'Website Created', cls: 'badge-success' },
+  'project.create': { label: 'Website Created', cls: 'badge-success' },
   'website.update': { label: 'Website Updated', cls: 'badge-info' },
+  'project.update': { label: 'Website Updated', cls: 'badge-info' },
   'website.delete': { label: 'Website Deleted', cls: 'badge-danger' },
+  'project.delete': { label: 'Website Deleted', cls: 'badge-danger' },
   'git.fetch': { label: 'Git Fetched', cls: 'badge-neutral' },
   'git.deploy_key': { label: 'SSH Key Generated', cls: 'badge-info' },
   'git.webhook_rotate': { label: 'Webhook Secret Rotated', cls: 'badge-warning' },
@@ -2396,26 +2401,29 @@ async function loadAuditView() {
   const tbody = document.getElementById('audit-table-body');
   const titleEl = document.getElementById('audit-view-title');
   const subEl = document.getElementById('audit-view-subtitle');
-  const isPerWebsite = WEBSITE_WORKSPACE_TABS.has(state.currentView);
-  const activeProject = isPerWebsite ? getSelectedProject() : null;
+  const activeProject = getSelectedProject();
 
   if (titleEl && subEl) {
     if (activeProject) {
-      titleEl.textContent = `${activeProject.name} — Activity & Audit Log`;
-      subEl.textContent = `Complete record of who deployed, started/stopped, edited .env, or took backups on ${activeProject.name}`;
+      titleEl.textContent = `${activeProject.name} — Activity`;
+      subEl.textContent = `Complete timeline of who deployed, started/stopped, edited .env, or took snapshots on ${activeProject.name}`;
     } else {
-      titleEl.textContent = 'Platform Audit Trail (All Websites)';
-      subEl.textContent = 'Tamper-evident record of who performed every action across all hosted websites and platform settings';
+      titleEl.textContent = 'Website Activity';
+      subEl.textContent = 'Select a website to view its complete activity timeline';
     }
   }
 
+  if (!activeProject) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">Select a website first.</td></tr>';
+    return;
+  }
+
   try {
-    const query = activeProject ? `?projectId=${activeProject.id}&limit=500` : '?limit=500';
-    const logs = await api(`/api/audit${query}`);
+    const logs = await api(`/api/audit?projectId=${activeProject.id}&limit=500`);
     state.auditLogs = Array.isArray(logs) ? logs : [];
     renderFilteredAuditLogs();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 window.loadAuditView = loadAuditView;
@@ -2429,14 +2437,22 @@ function renderFilteredAuditLogs() {
 
   const filtered = logs.filter((l) => {
     const action = (l.action || '').toLowerCase();
-    if (cat && !action.startsWith(cat)) return false;
+    if (cat) {
+      if (cat === 'website' && !(action.startsWith('website') || action.startsWith('project.create') || action.startsWith('project.update') || action.startsWith('project.delete'))) {
+        return false;
+      } else if (cat === 'container' && !(action.startsWith('container') || action.startsWith('project.start') || action.startsWith('project.stop') || action.startsWith('project.restart'))) {
+        return false;
+      } else if (cat !== 'website' && cat !== 'container' && !action.startsWith(cat)) {
+        return false;
+      }
+    }
     if (!q) return true;
     const hay = `${l.actor || ''} ${l.action || ''} ${l.target || ''} ${l.detail || ''} ${l.ip || ''}`.toLowerCase();
     return hay.includes(q);
   });
 
   if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 28px; color: var(--text-dim);">No activity records match the current filter.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 28px; color: var(--text-dim);">No activity records match the current filter.</td></tr>';
     const bar = document.getElementById('audit-pagination');
     if (bar) bar.innerHTML = '';
     return;
@@ -2447,10 +2463,6 @@ function renderFilteredAuditLogs() {
       const actor = l.actor || 'system';
       const initials = actor.slice(0, 2).toUpperCase();
       const meta = AUDIT_ACTION_META[l.action] || { label: l.action, cls: 'badge-neutral' };
-      const proj = l.projectId ? state.projects.find((p) => p.id === l.projectId) : null;
-      const targetHtml = proj
-        ? `<a href="javascript:void(0)" class="domain-badge" onclick="openWebsiteWorkspace(${proj.id}, 'audit')">${escapeHtml(proj.name)}</a>`
-        : `<span style="color:var(--text-main); font-weight:500;">${escapeHtml(l.target || '--')}</span>`;
 
       return `
         <tr>
@@ -2466,10 +2478,8 @@ function renderFilteredAuditLogs() {
           </td>
           <td>
             <span class="badge ${meta.cls}">${escapeHtml(meta.label)}</span>
-            <div style="font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px;">${escapeHtml(l.action)}</div>
           </td>
-          <td>${targetHtml}</td>
-          <td style="max-width: 340px; white-space: normal; line-height: 1.45; color: var(--text-muted); font-size: 12.5px;">
+          <td style="max-width: 440px; white-space: normal; line-height: 1.45; color: var(--text-muted); font-size: 12.5px;">
             ${escapeHtml(l.detail || '--')}
           </td>
           <td><code style="font-size:11px; color:var(--text-dim);">${escapeHtml(l.ip || 'local')}</code></td>
