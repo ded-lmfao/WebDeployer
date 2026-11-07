@@ -861,89 +861,320 @@ select option,
   flex-wrap: wrap;
 }
 
-/* Stage Progression Pipeline Track */
+/* Stage Progression Pipeline Track — High-Tech Fluid Water Pipeline Engine */
 .pipeline-track {
   display: flex;
   align-items: center;
-  background: var(--bg-card-elevated);
-  padding: 18px 24px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-medium);
+  background: #080d19;
+  padding: 22px 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
   margin-bottom: 24px;
   overflow-x: auto;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.25);
+  position: relative;
 }
 
-.stage-step {
+.water-pipeline-wrapper {
   display: flex;
   align-items: center;
-  gap: 8px;
+  width: 100%;
+  min-width: 860px;
   position: relative;
-  flex: 1;
 }
 
-.stage-circle {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-full);
-  background: var(--bg-input);
-  border: 2px solid var(--border-medium);
+.water-stage-unit {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  position: relative;
+  min-width: 125px;
+}
+
+.water-stage-unit:last-child {
+  flex: 0 0 auto;
+  min-width: auto;
+}
+
+/* Glass Water Vial Flask */
+.water-node-vial {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.08) 0%, rgba(12, 19, 34, 0.95) 70%);
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.1), inset 0 -2px 5px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-dim);
-  transition: all var(--transition-fast);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 2;
 }
 
-.stage-name {
-  font-size: 12px;
+.water-vial-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 50%;
+  z-index: 1;
+}
+
+/* Liquid inside the vial */
+.water-vial-liquid {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  background: linear-gradient(180deg, #38bdf8 0%, #2563eb 50%, #1e40af 100%);
+  z-index: 2;
+  transition: height 0.06s linear;
+  overflow: visible;
+}
+
+.water-node-vial.completed .water-vial-liquid {
+  background: linear-gradient(180deg, #34d399 0%, #10b981 50%, #047857 100%) !important;
+}
+
+.water-node-vial.failed .water-vial-liquid {
+  background: linear-gradient(180deg, #f87171 0%, #ef4444 50%, #991b1b 100%) !important;
+}
+
+/* Animated Water Ripple / Surface Meniscus */
+.water-wave-surface {
+  position: absolute;
+  top: -3px;
+  left: -25%;
+  width: 150%;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  filter: blur(0.5px);
+  animation: waterWaveSlosh 1.6s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.water-vial-content {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.water-vial-num {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  transition: color 0.25s ease;
+}
+
+.water-node-vial.active .water-vial-num {
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.9);
+}
+
+.water-vial-icon {
+  display: none;
+}
+
+.water-node-vial.completed .water-vial-check {
+  display: block;
+  stroke: #ffffff;
+  stroke-width: 3.2;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  animation: checkPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.water-node-vial.failed .water-vial-cross {
+  display: block;
+  stroke: #ffffff;
+  stroke-width: 3.2;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  animation: shakeCross 0.4s ease;
+}
+
+/* Vial Glow States */
+.water-node-vial.active {
+  border-color: #38bdf8;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.5), inset 0 0 8px rgba(56, 189, 248, 0.35);
+  animation: vialAuraPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.water-node-vial.completed {
+  border-color: #34d399;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4), inset 0 0 6px rgba(16, 185, 129, 0.25);
+}
+
+.water-node-vial.failed {
+  border-color: #f87171;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.5), inset 0 0 8px rgba(239, 68, 68, 0.35);
+}
+
+.water-node-vial.queued {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Stage Node Information */
+.water-node-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+
+.water-node-name {
+  font-size: 12.5px;
   font-weight: 500;
-  color: var(--text-muted);
+  color: #64748b;
   white-space: nowrap;
+  transition: color 0.25s ease;
 }
 
-.stage-line {
+.water-node-name.active {
+  color: #93c5fd;
+  font-weight: 600;
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
+}
+
+.water-node-name.completed {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.water-node-name.failed {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.water-node-sub {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #475569;
+  transition: color 0.25s ease;
+}
+
+.water-node-sub.active {
+  color: #38bdf8;
+  animation: subGlowPulse 1.6s ease-in-out infinite;
+}
+
+.water-node-sub.completed {
+  color: #34d399;
+}
+
+.water-node-sub.failed {
+  color: #f87171;
+}
+
+.water-node-sub.queued {
+  color: #475569;
+}
+
+/* Glass Tube Pipe Connecting Stages */
+.water-pipe-segment {
   flex: 1;
-  height: 2px;
-  background: var(--border-subtle);
-  margin: 0 10px;
+  margin: 0 12px;
+  position: relative;
+  height: 6px;
+  display: flex;
+  align-items: center;
 }
 
-.stage-step.completed .stage-circle {
-  background: var(--success);
-  border-color: var(--success);
-  color: #fff;
+.water-pipe-glass {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  position: relative;
+  overflow: visible;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
-.stage-step.completed .stage-name { color: var(--text-main); font-weight: 600; }
-.stage-step.completed + .stage-line,
-.stage-step.completed .stage-line { background: var(--success); }
-
-.stage-step.active .stage-circle {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 0 14px var(--accent);
-  animation: pulseActive 1.6s infinite;
+.water-pipe-liquid {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  position: relative;
+  transition: width 0.06s linear;
 }
 
-.stage-step.active .stage-name { color: var(--accent-light); font-weight: 700; }
-
-.stage-step.failed .stage-circle {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
+.water-pipe-liquid.flowing {
+  background: linear-gradient(90deg, #10b981 0%, #06b6d4 40%, #38bdf8 80%, #67e8f9 100%);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
 }
 
-.stage-step.failed .stage-name { color: var(--danger); font-weight: 700; }
+.water-pipe-liquid.filled {
+  background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.45);
+}
 
-@keyframes pulseActive {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.7); }
-  70% { transform: scale(1.05); box-shadow: 0 0 0 8px rgba(91, 140, 255, 0); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(91, 140, 255, 0); }
+.water-pipe-liquid.empty {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Glowing Meniscus Droplet at front of liquid stream */
+.water-pipe-meniscus {
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffffff 0%, #67e8f9 60%, #0284c7 100%);
+  box-shadow: 0 0 10px #38bdf8, 0 0 18px rgba(56, 189, 248, 0.85);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 3;
+  animation: meniscusGlow 1.2s ease-in-out infinite alternate;
+}
+
+/* Liquid Fluid Keyframes */
+@keyframes waterWaveSlosh {
+  0% { transform: translateX(-12%) rotate(-2deg); }
+  100% { transform: translateX(12%) rotate(2deg); }
+}
+
+@keyframes meniscusGlow {
+  0% { transform: scale(0.9); box-shadow: 0 0 6px #38bdf8; }
+  100% { transform: scale(1.2); box-shadow: 0 0 14px #67e8f9, 0 0 20px #38bdf8; }
+}
+
+@keyframes vialAuraPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6), 0 0 12px rgba(56, 189, 248, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(56, 189, 248, 0), 0 0 20px rgba(56, 189, 248, 0.7);
+  }
+}
+
+@keyframes subGlowPulse {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; text-shadow: 0 0 8px rgba(56, 189, 248, 0.8); }
+}
+
+@keyframes checkPop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes shakeCross {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
 }
 
 /* Tables */
@@ -2145,44 +2376,233 @@ input[type="checkbox"] {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-/* Website Workspace Banner & Tabs */
+/* ==========================================================================
+   Clean, Uncluttered Website Workspace Header & Navigation Tabs
+   ========================================================================== */
 .ws-banner {
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   background: var(--bg-card);
+  margin-bottom: 24px;
+  overflow: hidden;
 }
-.ws-back-btn {
-  border-radius: 4px;
-  padding: 4px 10px;
-  background: #131d31;
-  border: 1px solid var(--border-subtle);
+
+.ws-banner-header {
+  padding: 18px 24px 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
 }
-.ws-tabs-bar {
+
+.ws-banner-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 260px;
+}
+
+/* Breadcrumbs */
+.ws-breadcrumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.ws-back-crumb {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  padding: 4px 16px;
-  background: #0b1120;
-  border-top: 1px solid var(--border-subtle);
-}
-.ws-tab-item {
-  border-radius: 4px;
-  padding: 7px 14px;
-  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: none;
   font-weight: 500;
-  border: 1px solid transparent;
-  background: transparent;
+  transition: color var(--transition-fast);
+}
+
+.ws-back-crumb:hover {
+  color: #93c5fd;
+}
+
+.ws-crumb-sep {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.ws-crumb-current {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* Title & Status Badge */
+.ws-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+/* Elegant Metadata Line (No bulky clunky boxes) */
+.ws-meta-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.ws-meta-sep {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 10px;
+}
+
+.ws-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--text-muted);
 }
+
+.ws-meta-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent-light);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.ws-meta-link:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.ws-meta-link.offline {
+  color: var(--text-dim);
+  cursor: not-allowed;
+  text-decoration: none !important;
+}
+
+.ws-meta-sha {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+/* Action Toolbar (Organized & Prioritized) */
+.ws-actions-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.ws-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-btn-stop {
+  color: #f87171 !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.ws-btn-stop:hover {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+}
+
+.ws-btn-delete {
+  background: transparent !important;
+  border: 1px solid rgba(239, 68, 68, 0.25) !important;
+  color: #f87171 !important;
+  padding: 0 9px !important;
+  height: 28px !important;
+}
+
+.ws-btn-delete:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: #ef4444 !important;
+  color: #fff !important;
+}
+
+/* Clean Underline Tabs Bar */
+.ws-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 16px;
+  background: #090e1a;
+  border-top: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.ws-tab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  user-select: none;
+  outline: none;
+  border-radius: 0;
+}
+
+.ws-tab-item svg {
+  opacity: 0.65;
+  transition: opacity var(--transition-fast);
+}
+
 .ws-tab-item:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.03);
 }
+
+.ws-tab-item:hover svg {
+  opacity: 0.9;
+}
+
 .ws-tab-item.active {
-  background: #17243c;
-  border-color: #3b82f6;
-  color: #93c5fd;
+  color: #60a5fa;
+  border-bottom-color: #3b82f6;
   font-weight: 600;
+  background: rgba(59, 130, 246, 0.05);
   box-shadow: none;
+}
+
+.ws-tab-item.active svg {
+  opacity: 1;
+  stroke: #60a5fa;
 }
 
 /* Env Mode Tabs inside Env Modal */
@@ -2205,13 +2625,7 @@ input[type="checkbox"] {
   font-weight: 600 !important;
 }
 
-/* Pipeline Track & Terminal Logs */
-.pipeline-track {
-  border-radius: 8px;
-  background: #0c1322;
-  border: 1px solid var(--border-subtle);
-  padding: 16px 20px;
-}
+/* Terminal Logs */
 .log-console-wrapper {
   border-radius: 8px;
   border: 1px solid var(--border-medium);

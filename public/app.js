@@ -142,6 +142,14 @@ const PRESETS = {
     start_cmd: 'uvicorn main:app --host 127.0.0.1 --port {{PORT}}',
     health_url: 'http://127.0.0.1:8000/health',
   },
+  java: {
+    port: 8080,
+    deploy_method: 'managed',
+    install_cmd: 'mvn clean package -DskipTests',
+    build_cmd: '',
+    start_cmd: 'java -jar target/*.jar --server.port={{PORT}}',
+    health_url: 'http://127.0.0.1:8080/',
+  },
   docker: {
     port: 8080,
     deploy_method: 'docker',
@@ -550,6 +558,9 @@ function renderWebsiteWorkspaceHeader() {
   const title = document.getElementById('ws-project-title');
   if (title) title.textContent = p.name;
 
+  const breadcrumbSlug = document.getElementById('ws-breadcrumb-slug');
+  if (breadcrumbSlug) breadcrumbSlug.textContent = p.name;
+
   const badge = document.getElementById('ws-status-badge');
   if (badge) {
     badge.className = `badge ${isOnline ? 'badge-success' : 'badge-neutral'}`;
@@ -562,37 +573,82 @@ function renderWebsiteWorkspaceHeader() {
     const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
     links.innerHTML = `
       ${url ? (isOnline
-        ? `<a class="domain-badge" href="${url}" target="_blank">${url} &nearr;</a>`
-        : `<span class="domain-badge" style="opacity:0.55; cursor:not-allowed;" title="Container is stopped">${url} (Offline)</span>`
+        ? `<a class="ws-meta-link active" href="${url}" target="_blank" title="Open live website in new tab">
+             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+             <span>${url}</span>
+           </a>`
+        : `<span class="ws-meta-link offline" title="Container is stopped">
+             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+             <span>${url} (Offline)</span>
+           </span>`
       ) : ''}
-      <span class="ws-meta-chip">Branch: <strong style="color:var(--text-main);">${escapeHtml(p.branch || 'main')}</strong></span>
-      <span class="ws-meta-chip">SHA: <code style="color:var(--accent-light);">${escapeHtml(sha)}</code></span>
-      ${p.port ? `<span class="ws-meta-chip">Port: <strong style="color:var(--text-main);">${p.port}</strong></span>` : ''}
-      <span class="ws-meta-chip" title="Isolated container & database">Container: <code>ctr-${escapeHtml(p.slug)}</code></span>
+      <span class="ws-meta-sep">&bull;</span>
+      <span class="ws-meta-item" title="Git Branch">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        <span style="color:var(--text-main); font-weight:600;">${escapeHtml(p.branch || 'main')}</span>
+      </span>
+      <span class="ws-meta-sep">&bull;</span>
+      <span class="ws-meta-item" title="Deployed Commit SHA">
+        <code class="ws-meta-sha">${escapeHtml(sha)}</code>
+      </span>
+      ${p.port ? `
+        <span class="ws-meta-sep">&bull;</span>
+        <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
+      ` : ''}
+      <span class="ws-meta-sep">&bull;</span>
+      <span class="ws-meta-item" style="color:var(--text-dim);" title="Container ID">ctr-${escapeHtml(p.slug)}</span>
     `;
   }
 
   const actions = document.getElementById('ws-project-actions');
   if (actions) {
     actions.innerHTML = `
-      ${hasPower('deploy') ? `
-        <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
-        <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})">Fetch</button>
-      ` : ''}
-      ${hasPower('process') ? `
-        ${isOnline
-          ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-          : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
-        }
-        <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})">Restart</button>
-      ` : ''}
-      ${hasPower('domains') ? `
-        <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">Domains / SSL</button>
-      ` : ''}
-      ${hasPower('projects_manage') ? `
-        <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">Settings</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">Delete</button>
-      ` : ''}
+      <div class="ws-actions-group">
+        ${hasPower('deploy') ? `
+          <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="13 2 13 9 20 9"></polyline><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+            <span>Deploy</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})" title="Fetch updates from GitHub">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            <span>Fetch</span>
+          </button>
+        ` : ''}
+        ${hasPower('process') ? `
+          ${isOnline
+            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})">
+                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                 <span>Stop</span>
+               </button>`
+            : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
+                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                 <span>Start</span>
+               </button>`
+          }
+          <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
+            <span>Restart</span>
+          </button>
+        ` : ''}
+      </div>
+
+      <div class="ws-actions-group">
+        ${hasPower('domains') ? `
+          <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            <span>Domains &amp; SSL</span>
+          </button>
+        ` : ''}
+        ${hasPower('projects_manage') ? `
+          <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <span>Settings</span>
+          </button>
+          <button class="btn btn-sm ws-btn-delete" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+        ` : ''}
+      </div>
     `;
   }
 
@@ -726,11 +782,16 @@ async function loadOverview() {
     // Active deployment box
     const active = data.projects.find((x) => x.active);
     const actBox = document.getElementById('overview-active-deployment-box');
+    const pOverview = waterPipelines['overview-pipeline-track'];
     if (active && active.active) {
       actBox.style.display = 'block';
       document.getElementById('active-dep-project-name').textContent = active.project.name;
       document.getElementById('active-dep-kind').textContent = active.active.kind.toUpperCase();
-      renderPipelineStages('overview-pipeline-track', active.active.stage, active.active.status);
+      renderPipelineStages('overview-pipeline-track', active.active.stage, active.active.status, active.active.id);
+    } else if (pOverview && pOverview.isLooping && pOverview.currentProgress < 6.95) {
+      actBox.style.display = 'block';
+      document.getElementById('active-dep-kind').textContent = 'DEPLOYED';
+      renderPipelineStages('overview-pipeline-track', 'health_checking', 'success', pOverview.lastDeploymentId);
     } else {
       actBox.style.display = 'none';
     }
@@ -1325,12 +1386,35 @@ async function loadDeploymentsView() {
     const active = deployments.find((d) => d.status === 'running' || d.status === 'pending');
     state.activeDeployment = active || null;
     const badge = document.getElementById('pipeline-status-badge');
+    const latest = deployments.length ? deployments[0] : null;
+
     if (active) {
       badge.textContent = `${active.kind.toUpperCase()} (${active.stage.toUpperCase()})`;
       badge.className = 'badge badge-warning';
-      renderPipelineStages('main-pipeline-track', active.stage, active.status);
+      renderPipelineStages('main-pipeline-track', active.stage, active.status, active.id);
+    } else if (latest) {
+      const p = waterPipelines['main-pipeline-track'];
+      if (latest.status === 'success') {
+        if (p && p.currentProgress < 6.95 && p.lastDeploymentId === latest.id) {
+          badge.textContent = 'FINALIZING DEPLOYMENT...';
+          badge.className = 'badge badge-warning';
+          renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
+        } else {
+          badge.textContent = 'DEPLOYED (LIVE)';
+          badge.className = 'badge badge-success';
+          renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
+        }
+      } else if (latest.status === 'failed') {
+        badge.textContent = `FAILED (${latest.stage.toUpperCase()})`;
+        badge.className = 'badge badge-danger';
+        renderPipelineStages('main-pipeline-track', latest.stage, 'failed', latest.id);
+      } else {
+        badge.textContent = 'IDLE';
+        badge.className = 'badge badge-neutral';
+        renderPipelineStages('main-pipeline-track', 'idle', 'idle');
+      }
     } else {
-      badge.textContent = 'Idle';
+      badge.textContent = 'IDLE';
       badge.className = 'badge badge-neutral';
       renderPipelineStages('main-pipeline-track', 'idle', 'idle');
     }
@@ -1343,33 +1427,319 @@ async function loadDeploymentsView() {
   }
 }
 
-function renderPipelineStages(containerId, currentStage, currentStatus) {
+// ============================================================================
+// Organic Fluid Water Pipeline Engine
+// ============================================================================
+const waterPipelines = {};
+
+function initWaterPipelineDOM(container, containerId) {
+  container.innerHTML = `
+    <div class="water-pipeline-wrapper" id="water-wrapper-${containerId}">
+      ${PIPELINE_STAGES.map((s, idx) => `
+        <div class="water-stage-unit" data-unit-idx="${idx}">
+          <div class="water-node-vial" data-vial-idx="${idx}">
+            <div class="water-vial-bg"></div>
+            <div class="water-vial-liquid" style="height: 0%;">
+              <div class="water-wave-surface"></div>
+            </div>
+            <div class="water-vial-content">
+              <span class="water-vial-num">${idx + 1}</span>
+              <svg class="water-vial-icon water-vial-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <svg class="water-vial-icon water-vial-cross" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="water-node-info">
+            <div class="water-node-name">${s.label}</div>
+            <div class="water-node-sub">Queued</div>
+          </div>
+          ${idx < PIPELINE_STAGES.length - 1 ? `
+            <div class="water-pipe-segment" data-pipe-idx="${idx}">
+              <div class="water-pipe-glass">
+                <div class="water-pipe-liquid" style="width: 0%;">
+                  <div class="water-pipe-meniscus"></div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function updateWaterDOM(pipeline) {
+  const container = document.getElementById(pipeline.containerId);
+  if (!container) return;
+
+  const P = pipeline.currentProgress;
+  const isFailed = pipeline.status === 'failed';
+  const isSuccess = pipeline.status === 'success';
+  const activeIdx = pipeline.activeStageIdx ?? -1;
+  const failedIdx = isFailed ? pipeline.failedStageIdx : -1;
+
+  PIPELINE_STAGES.forEach((s, idx) => {
+    const unit = container.querySelector(`.water-stage-unit[data-unit-idx="${idx}"]`);
+    if (!unit) return;
+
+    const vial = unit.querySelector('.water-node-vial');
+    const liquid = unit.querySelector('.water-vial-liquid');
+    const num = unit.querySelector('.water-vial-num');
+    const check = unit.querySelector('.water-vial-check');
+    const cross = unit.querySelector('.water-vial-cross');
+    const name = unit.querySelector('.water-node-name');
+    const sub = unit.querySelector('.water-node-sub');
+
+    // Stage fill level: fills between P = idx and P = idx + 0.6
+    let vialHeight = 0;
+    if (P >= idx + 0.6) {
+      vialHeight = 100;
+    } else if (P > idx) {
+      vialHeight = Math.min(100, Math.max(0, ((P - idx) / 0.6) * 100));
+    }
+
+    if (liquid) liquid.style.height = `${vialHeight.toFixed(1)}%`;
+
+    // 1. Failed Stage
+    if (isFailed && idx === failedIdx && P >= idx + 0.5) {
+      if (vial) vial.className = 'water-node-vial failed';
+      if (num) num.style.display = 'none';
+      if (check) check.style.display = 'none';
+      if (cross) cross.style.display = 'block';
+      if (sub) { sub.textContent = 'Failed'; sub.className = 'water-node-sub failed'; }
+      if (name) name.className = 'water-node-name failed';
+    }
+    // 2. Completed Stage:
+    // Past stage already completed by backend AND water has poured through it,
+    // OR entire pipeline is successful and water reached this stage!
+    else if ((idx < activeIdx && P >= idx + 0.6) || (isSuccess && P >= idx + 0.6)) {
+      if (vial) vial.className = 'water-node-vial completed';
+      if (num) num.style.display = 'none';
+      if (check) check.style.display = 'block';
+      if (cross) cross.style.display = 'none';
+      if (sub) { sub.textContent = 'Done'; sub.className = 'water-node-sub completed'; }
+      if (name) name.className = 'water-node-name completed';
+    }
+    // 3. Active Stage: currently filling or holding water while running
+    else if (P > idx) {
+      if (vial) vial.className = 'water-node-vial active';
+      if (num) num.style.display = 'block';
+      if (check) check.style.display = 'none';
+      if (cross) cross.style.display = 'none';
+      if (sub) {
+        if (vialHeight >= 99) {
+          sub.textContent = `${s.label}...`;
+        } else {
+          sub.textContent = 'Filling...';
+        }
+        sub.className = 'water-node-sub active';
+      }
+      if (name) name.className = 'water-node-name active';
+    }
+    // 4. Queued / Idle Stage
+    else {
+      if (vial) vial.className = 'water-node-vial queued';
+      if (num) num.style.display = 'block';
+      if (check) check.style.display = 'none';
+      if (cross) cross.style.display = 'none';
+      if (sub) {
+        sub.textContent = pipeline.status === 'idle' ? 'Idle' : 'Queued';
+        sub.className = 'water-node-sub queued';
+      }
+      if (name) name.className = 'water-node-name queued';
+    }
+
+    // Pipe fill level (pipe idx connects stage idx to stage idx + 1):
+    // Pipe idx fills between P = idx + 0.6 and P = idx + 1.0
+    if (idx < PIPELINE_STAGES.length - 1) {
+      const pipeLiquid = unit.querySelector('.water-pipe-liquid');
+      const meniscus = unit.querySelector('.water-pipe-meniscus');
+      if (pipeLiquid) {
+        let pipeWidth = 0;
+        if (P >= idx + 1.0) {
+          pipeWidth = 100;
+          pipeLiquid.className = 'water-pipe-liquid filled';
+          if (meniscus) meniscus.style.opacity = '0';
+        } else if (P > idx + 0.6) {
+          pipeWidth = Math.min(100, Math.max(0, ((P - (idx + 0.6)) / 0.4) * 100));
+          pipeLiquid.className = 'water-pipe-liquid flowing';
+          if (meniscus) meniscus.style.opacity = '1';
+        } else {
+          pipeWidth = 0;
+          pipeLiquid.className = 'water-pipe-liquid empty';
+          if (meniscus) meniscus.style.opacity = '0';
+        }
+        pipeLiquid.style.width = `${pipeWidth.toFixed(1)}%`;
+      }
+    }
+  });
+
+  // When all 7 stages are filled and deployment succeeded, mark service deployed!
+  if (isSuccess && P >= 6.95) {
+    const badge = document.getElementById('pipeline-status-badge');
+    if (badge && !badge.textContent.includes('DEPLOYED')) {
+      badge.textContent = 'DEPLOYED (LIVE)';
+      badge.className = 'badge badge-success';
+    }
+    const overviewBadge = document.getElementById('active-dep-kind');
+    if (overviewBadge && !overviewBadge.textContent.includes('LIVE')) {
+      overviewBadge.textContent = 'DEPLOYED';
+      overviewBadge.className = 'badge badge-success';
+    }
+    const wsBadge = document.getElementById('ws-status-badge');
+    if (wsBadge) {
+      wsBadge.textContent = 'ONLINE';
+      wsBadge.className = 'badge badge-success';
+    }
+  }
+}
+
+function startWaterLoop(pipeline) {
+  if (pipeline.isLooping) return;
+  pipeline.isLooping = true;
+
+  function step() {
+    const container = document.getElementById(pipeline.containerId);
+    if (!container) {
+      pipeline.isLooping = false;
+      return;
+    }
+
+    const diff = pipeline.targetProgress - pipeline.currentProgress;
+
+    // Organic, steady water pouring pace (~2.3s per stage at 60fps)
+    const speed = 0.007;
+
+    if (Math.abs(diff) > 0.0005) {
+      if (diff > 0) {
+        pipeline.currentProgress = Math.min(pipeline.targetProgress, pipeline.currentProgress + speed);
+      } else {
+        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed * 3);
+      }
+      updateWaterDOM(pipeline);
+      requestAnimationFrame(step);
+    } else {
+      pipeline.currentProgress = pipeline.targetProgress;
+      updateWaterDOM(pipeline);
+      pipeline.isLooping = false;
+    }
+  }
+
+  requestAnimationFrame(step);
+}
+
+function renderPipelineStages(containerId, currentStage, currentStatus, depId = null) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
+  // Initialize persistent DOM structure once (never destroy innerHTML on polling ticks!)
+  if (!container.querySelector('.water-pipeline-wrapper')) {
+    initWaterPipelineDOM(container, containerId);
+    waterPipelines[containerId] = {
+      containerId,
+      currentProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+      targetProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+      status: currentStatus,
+      activeStageIdx: -1,
+      failedStageIdx: -1,
+      lastDeploymentId: depId,
+      isLooping: false,
+    };
+  }
+
+  let pipeline = waterPipelines[containerId];
+  if (!pipeline) {
+    pipeline = {
+      containerId,
+      currentProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+      targetProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+      status: currentStatus,
+      activeStageIdx: -1,
+      failedStageIdx: -1,
+      lastDeploymentId: depId,
+      isLooping: false,
+    };
+    waterPipelines[containerId] = pipeline;
+  }
+
+  // If a new deployment started with different depId, reset water to start
+  if (depId && pipeline.lastDeploymentId && pipeline.lastDeploymentId !== depId && (currentStatus === 'running' || currentStatus === 'pending')) {
+    pipeline.currentProgress = 0.0;
+    pipeline.lastDeploymentId = depId;
+  } else if (depId && !pipeline.lastDeploymentId) {
+    pipeline.lastDeploymentId = depId;
+  }
+
+  pipeline.status = currentStatus;
   const currentIndex = PIPELINE_STAGES.findIndex((s) => s.id === currentStage);
 
-  container.innerHTML = PIPELINE_STAGES.map((s, idx) => {
-    let cls = '';
-    if (currentStatus === 'idle') {
-      cls = '';
-    } else if (currentStatus === 'failed' && idx === currentIndex) {
-      cls = 'failed';
-    } else if (idx < currentIndex || currentStatus === 'success') {
-      cls = 'completed';
-    } else if (idx === currentIndex) {
-      cls = 'active';
-    }
+  if (currentStatus === 'idle') {
+    pipeline.targetProgress = 0.0;
+    pipeline.activeStageIdx = -1;
+    pipeline.failedStageIdx = -1;
+  } else if (currentStatus === 'failed') {
+    pipeline.failedStageIdx = currentIndex >= 0 ? currentIndex : 0;
+    pipeline.activeStageIdx = pipeline.failedStageIdx;
+    pipeline.targetProgress = pipeline.failedStageIdx + 0.6;
+  } else if (currentStatus === 'success') {
+    pipeline.activeStageIdx = PIPELINE_STAGES.length - 1;
+    pipeline.failedStageIdx = -1;
+    pipeline.targetProgress = 7.0;
+  } else {
+    // Stage in progress: water flows smoothly up to this stage and holds firmly in its vial!
+    pipeline.activeStageIdx = currentIndex >= 0 ? currentIndex : 0;
+    pipeline.failedStageIdx = -1;
+    pipeline.targetProgress = pipeline.activeStageIdx + 0.6;
+  }
 
-    return `
-      <div class="stage-step ${cls}">
-        <div class="stage-circle">${idx + 1}</div>
-        <div class="stage-name">${s.label}</div>
-        ${idx < PIPELINE_STAGES.length - 1 ? '<div class="stage-line"></div>' : ''}
-      </div>
-    `;
-  }).join('');
+  startWaterLoop(pipeline);
 }
+
+function resetWaterPipeline(containerId) {
+  const p = waterPipelines[containerId];
+  if (p) {
+    p.currentProgress = 0.0;
+    p.targetProgress = 0.6;
+    p.status = 'running';
+    p.activeStageIdx = 0;
+    p.failedStageIdx = -1;
+    p.lastDeploymentId = null;
+    updateWaterDOM(p);
+    startWaterLoop(p);
+  }
+}
+window.resetWaterPipeline = resetWaterPipeline;
+
+window.simulateWaterDeploy = function() {
+  const stages = ['pending', 'fetching', 'pulling', 'installing', 'building', 'deploying', 'health_checking'];
+  let sIdx = 0;
+  const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
+  const badge = document.getElementById('pipeline-status-badge');
+  if (badge) {
+    badge.textContent = `DEPLOY (${stages[0].toUpperCase()})`;
+    badge.className = 'badge badge-warning';
+  }
+  if (waterPipelines[track]) {
+    waterPipelines[track].currentProgress = 0;
+  }
+  renderPipelineStages(track, stages[0], 'running', Date.now());
+
+  const interval = setInterval(() => {
+    sIdx++;
+    if (sIdx < stages.length) {
+      if (badge) badge.textContent = `DEPLOY (${stages[sIdx].toUpperCase()})`;
+      renderPipelineStages(track, stages[sIdx], 'running', Date.now());
+    } else {
+      clearInterval(interval);
+      if (badge) badge.textContent = 'FINALIZING DEPLOYMENT...';
+      renderPipelineStages(track, 'health_checking', 'success', Date.now());
+    }
+  }, 2600);
+};
 
 function renderDeploymentRow(d) {
   let badgeClass = 'badge-neutral';
@@ -1403,6 +1773,8 @@ async function deployProject(projectId, sha = null) {
   if (!p) return;
 
   try {
+    resetWaterPipeline('main-pipeline-track');
+    resetWaterPipeline('overview-pipeline-track');
     const res = await api(`/api/projects/${p.id}/deploy`, { method: 'POST', body: sha ? { sha } : {} });
     toast(`Deployment #${res.deploymentId} started for ${p.name}!`, 'success');
     navigateTo('deployments', p.id);

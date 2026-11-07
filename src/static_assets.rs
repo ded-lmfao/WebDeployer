@@ -5,6 +5,7 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 #[derive(RustEmbed)]
@@ -47,6 +48,32 @@ fn get_mime(path: &str) -> &'static str {
     }
 }
 
+/// Locate a static asset directly on the local filesystem if available.
+/// Prevents directory traversal and supports both current directory and exe directory.
+fn find_disk_file(clean_path: &str) -> Option<PathBuf> {
+    if clean_path.contains("..") || clean_path.starts_with('/') || clean_path.starts_with('\\') {
+        return None;
+    }
+
+    // 1. Check local ./public/ folder in current working directory
+    let local = Path::new("public").join(clean_path);
+    if local.is_file() {
+        return Some(local);
+    }
+
+    // 2. Check ./public/ next to the executable binary
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let exe_local = parent.join("public").join(clean_path);
+            if exe_local.is_file() {
+                return Some(exe_local);
+            }
+        }
+    }
+
+    None
+}
+
 pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&str>) -> Response {
     let clean_path = if path.is_empty() || path == "/" {
         "index.html"
@@ -54,6 +81,26 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
         path.trim_start_matches('/')
     };
 
+    // FAST-PATH: If the file exists directly on disk in ./public, serve it LIVE!
+    // This provides instant hot-reloading: you edit HTML/CSS/JS and just hit F5 in browser.
+    // No rebuild, no server restart, and no deleting `target/` needed!
+    if let Some(disk_path) = find_disk_file(clean_path) {
+        if let Ok(data) = tokio::fs::read(&disk_path).await {
+            let mime = get_mime(clean_path);
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
+                .header(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+                )
+                .header("x-cache", HeaderValue::from_static("DISK-LIVE"))
+                .body(Body::from(data))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+    }
+
+    // FALLBACK: When running as a standalone binary where ./public is not present on disk
     let is_html = clean_path.ends_with(".html");
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
     let cache_control = if is_html {
