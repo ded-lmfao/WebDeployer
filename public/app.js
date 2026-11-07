@@ -181,7 +181,12 @@ const PRESETS = {
 // ============================================================================
 const clientCache = new Map();
 const inflightGets = new Map();
-const SESSION_CACHE_KEY = 'webdep_fast_cache_v1';
+const SESSION_CACHE_KEY = 'webdep_fast_cache_v3';
+
+try {
+  sessionStorage.removeItem('webdep_fast_cache_v1');
+  sessionStorage.removeItem('webdep_fast_cache_v2');
+} catch (_) {}
 
 // Hydrate warm cache from sessionStorage on startup
 try {
@@ -551,9 +556,10 @@ function renderWebsiteWorkspaceHeader() {
 
   banner.style.display = 'block';
   const isOnline = p.app_status === 'running';
+  const isMaintenance = p.app_status === 'maintenance';
 
   const dot = document.getElementById('ws-status-dot');
-  if (dot) dot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
+  if (dot) dot.className = `status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}`;
 
   const title = document.getElementById('ws-project-title');
   if (title) title.textContent = p.name;
@@ -563,24 +569,47 @@ function renderWebsiteWorkspaceHeader() {
 
   const badge = document.getElementById('ws-status-badge');
   if (badge) {
-    badge.className = `badge ${isOnline ? 'badge-success' : 'badge-neutral'}`;
-    badge.textContent = isOnline ? 'RUNNING' : 'STOPPED';
+    if (isOnline) {
+      badge.className = 'badge badge-success';
+      badge.textContent = 'ONLINE';
+    } else if (isMaintenance) {
+      badge.className = 'badge badge-warning';
+      badge.textContent = 'MAINTENANCE';
+    } else {
+      badge.className = 'badge badge-danger';
+      badge.textContent = 'OFFLINE';
+    }
   }
 
   const links = document.getElementById('ws-project-links');
   if (links) {
     const url = p.port ? `http://127.0.0.1:${p.port}` : null;
     const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
+    const customDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
+    const domainLinksHtml = customDomains.map((d) => `
+      <a class="ws-meta-link active" href="https://${escapeHtml(d)}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Open custom domain https://${escapeHtml(d)}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+        <span>${escapeHtml(d)}</span>
+      </a>
+      <span class="ws-meta-sep">&bull;</span>
+    `).join('');
+
     links.innerHTML = `
+      ${domainLinksHtml}
       ${url ? (isOnline
         ? `<a class="ws-meta-link active" href="${url}" target="_blank" title="Open live website in new tab">
              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-             <span>${url}</span>
+             <span>${url} (Online)</span>
            </a>`
-        : `<span class="ws-meta-link offline" title="Container is stopped">
-             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-             <span>${url} (Offline)</span>
-           </span>`
+        : isMaintenance
+          ? `<a class="ws-meta-link active" href="${url}" target="_blank" style="color:#fbbf24;" title="Open live Maintenance Page in new tab">
+               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+               <span>${url} (Maintenance)</span>
+             </a>`
+          : `<span class="ws-meta-link offline" title="Website is offline">
+               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+               <span>${url} (Offline)</span>
+             </span>`
       ) : ''}
       <span class="ws-meta-sep">&bull;</span>
       <span class="ws-meta-item" title="Git Branch">
@@ -615,19 +644,27 @@ function renderWebsiteWorkspaceHeader() {
           </button>
         ` : ''}
         ${hasPower('process') ? `
-          ${isOnline
-            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})">
-                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                 <span>Stop</span>
-               </button>`
-            : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
+          ${!isOnline
+            ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                  <span>Start</span>
                </button>`
+            : ''
+          }
+          ${isOnline || isMaintenance
+            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop website and release port">
+                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                 <span>Stop</span>
+               </button>`
+            : ''
           }
           <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
             <span>Restart</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode (serves Maintenance Page on IP & domain)'}" style="${isMaintenance ? 'background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+            <span>${isMaintenance ? 'Exit Maintenance' : 'Maintenance'}</span>
           </button>
         ` : ''}
       </div>
@@ -723,7 +760,7 @@ function renderCurrentView() {
 // ============================================================================
 async function loadProjects() {
   try {
-    state.projects = await api('/api/projects');
+    state.projects = await api('/api/projects', { noCache: true });
     const badgeEl = document.getElementById('badge-projects-count');
     if (badgeEl) badgeEl.textContent = state.projects.length;
 
@@ -797,7 +834,7 @@ async function loadOverview() {
     }
 
     // Websites Table & Recent Deployments with change-detection cache
-    const sig = `${data.projects.map((x) => `${x.project.id}:${x.project.updated_at}:${x.app?.running}:${x.behind}:${x.project.deployed_sha}`).join('|')}_${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}`;
+    const sig = `${data.projects.map((x) => `${x.project.id}:${x.project.updated_at}:${x.project.app_status}:${x.app?.running}:${x.behind}:${x.project.deployed_sha}`).join('|')}_${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}`;
     if (state.lastOverviewSig !== sig) {
       state.lastOverviewSig = sig;
 
@@ -808,7 +845,8 @@ async function loadOverview() {
       } else {
         tbody.innerHTML = data.projects.map((item) => {
           const p = item.project;
-          const isOnline = item.app?.running;
+          const isOnline = p.app_status === 'running';
+          const isMaintenance = p.app_status === 'maintenance';
           const domains = p.domains && p.domains.length ? p.domains : [];
           const domainLinks = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
             (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>');
@@ -829,8 +867,8 @@ async function loadOverview() {
               </td>
               <td onclick="event.stopPropagation()">${domainLinks}</td>
               <td>
-                <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
-                <span style="font-weight: 500; font-size: 12px; margin-left: 6px;">${isOnline ? 'Online' : 'Stopped'}</span>
+                <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
+                <span style="font-weight: 600; font-size: 12px; margin-left: 6px; color: ${isOnline ? 'var(--success)' : isMaintenance ? 'var(--warning)' : 'var(--text-muted)'};">${isOnline ? 'Online' : isMaintenance ? 'Maintenance' : 'Offline'}</span>
               </td>
               <td>${sha}</td>
               <td>${behindAhead}</td>
@@ -909,6 +947,7 @@ function renderProjectsList() {
 
   container.innerHTML = filtered.map((p) => {
     const isOnline = p.app_status === 'running';
+    const isMaintenance = p.app_status === 'maintenance';
     const domains = p.domains && p.domains.length ? p.domains : [];
     const domainBadges = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank" onclick="event.stopPropagation()">${escapeHtml(d)} &nearr;</a>`).join(' ') ||
       (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank" onclick="event.stopPropagation()">http://127.0.0.1:${p.port} &nearr;</a>` : '<span style="color:var(--text-dim); font-size:11px;">No domain assigned</span>');
@@ -920,14 +959,14 @@ function renderProjectsList() {
         <div class="project-card-header">
           <div>
             <div class="project-info-title">
-              <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+              <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
               <span>${escapeHtml(p.name)}</span>
             </div>
             <div class="project-info-domains">
               ${domainBadges}
             </div>
           </div>
-          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}">${isOnline ? 'Running' : 'Stopped'}</span>
+          <span class="badge ${isOnline ? 'badge-success' : isMaintenance ? 'badge-warning' : 'badge-danger'}">${isOnline ? 'ONLINE' : isMaintenance ? 'MAINTENANCE' : 'OFFLINE'}</span>
         </div>
 
         <div class="project-meta-row">
@@ -1143,7 +1182,7 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
 
   const id = document.getElementById('website-form-id').value;
   const domainsStr = document.getElementById('website-domains').value;
-  const domains = domainsStr.split(/[\n,]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const domains = cleanDomainList(domainsStr);
 
   const payload = {
     name: document.getElementById('website-name').value.trim(),
@@ -1426,6 +1465,7 @@ async function loadDeploymentsView() {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
+window.loadDeploymentsView = loadDeploymentsView;
 
 // ============================================================================
 // Organic Fluid Water Pipeline Engine
@@ -1578,7 +1618,7 @@ function updateWaterDOM(pipeline) {
     }
   });
 
-  // When all 7 stages are filled and deployment succeeded, mark service deployed!
+  // When all 7 stages are filled and deployment succeeded, mark pipeline status deployed!
   if (isSuccess && P >= 6.95) {
     const badge = document.getElementById('pipeline-status-badge');
     if (badge && !badge.textContent.includes('DEPLOYED')) {
@@ -1590,11 +1630,7 @@ function updateWaterDOM(pipeline) {
       overviewBadge.textContent = 'DEPLOYED';
       overviewBadge.className = 'badge badge-success';
     }
-    const wsBadge = document.getElementById('ws-status-badge');
-    if (wsBadge) {
-      wsBadge.textContent = 'ONLINE';
-      wsBadge.className = 'badge badge-success';
-    }
+    renderWebsiteWorkspaceHeader();
   }
 }
 
@@ -1838,7 +1874,7 @@ async function loadReleasesView() {
   if (!p) return;
 
   try {
-    const releases = await api(`/api/projects/${p.id}/releases`);
+    const releases = await api(`/api/projects/${p.id}/releases`, { noCache: true });
     if (!releases.length) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 24px;">No releases created yet.</td></tr>';
       const bar = document.getElementById('releases-pagination');
@@ -1863,6 +1899,7 @@ async function loadReleasesView() {
               <div style="display: flex; gap: 6px;">
                 ${!isLive && r.status === 'succeeded' ? `<button class="btn btn-primary btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Rollback</button>` : ''}
                 ${r.deployment_id ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${r.deployment_id})">Logs</button>` : ''}
+                ${!isLive ? `<button class="btn btn-danger btn-sm" onclick="deleteRelease(${p.id}, ${r.id})">Delete</button>` : ''}
               </div>
             </td>
           </tr>
@@ -1873,6 +1910,7 @@ async function loadReleasesView() {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
+window.loadReleasesView = loadReleasesView;
 
 // ============================================================================
 // View 6: Instant Rollback Cockpit
@@ -1885,7 +1923,7 @@ async function loadRollbacksView() {
   const tbody = document.getElementById('rollbacks-table-body');
 
   try {
-    const releases = await api(`/api/projects/${p.id}/releases`);
+    const releases = await api(`/api/projects/${p.id}/releases`, { noCache: true });
     const live = releases.find((r) => r.live);
 
     if (live) {
@@ -1922,6 +1960,7 @@ async function loadRollbacksView() {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
+window.loadRollbacksView = loadRollbacksView;
 
 async function rollbackToRelease(projectId, releaseId) {
   const ok = await showConfirmDialog({
@@ -1941,6 +1980,25 @@ async function rollbackToRelease(projectId, releaseId) {
   }
 }
 window.rollbackToRelease = rollbackToRelease;
+
+async function deleteRelease(projectId, releaseId) {
+  const ok = await showConfirmDialog({
+    title: `Delete Release #${releaseId}`,
+    message: `Permanently delete Release #${releaseId} from disk and SQLite?\n\nThis release artifact and rollback point will be removed.`,
+    confirmText: 'Delete Release',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await api(`/api/projects/${projectId}/releases/${releaseId}`, { method: 'DELETE' });
+    toast(`Release #${releaseId} deleted.`, 'info');
+    loadReleasesView();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+window.deleteRelease = deleteRelease;
 
 // ============================================================================
 // View 7: Real-Time Live Logs
@@ -2424,7 +2482,7 @@ async function loadBackupsView() {
   }
 
   try {
-    const backups = await api(`/api/projects/${p.id}/backups`);
+    const backups = await api(`/api/projects/${p.id}/backups`, { noCache: true });
     if (!backups.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No backups taken yet. Click "Create Backup" above to snapshot your website & .env.</td></tr>';
       const bar = document.getElementById('backups-pagination');
@@ -2447,9 +2505,7 @@ async function loadBackupsView() {
             <td>
               <div style="display:flex; gap:6px;">
                 <button class="btn btn-primary btn-sm" onclick="restoreBackup(${p.id}, ${b.id})">Restore</button>
-                ${b.kind !== 'release-snapshot' ? `
-                  <button class="btn btn-danger btn-sm" onclick="deleteBackup(${p.id}, ${b.id})">Delete</button>
-                ` : ''}
+                <button class="btn btn-danger btn-sm" onclick="deleteBackup(${p.id}, ${b.id})">Delete</button>
               </div>
             </td>
           </tr>
@@ -2486,8 +2542,8 @@ document.getElementById('confirm-create-backup-btn')?.addEventListener('click', 
   }
 
   try {
-    await api(`/api/projects/${p.id}/backup`, { method: 'POST', body: { note, kind }, timeoutMs: 30000 });
-    toast(`Backup snapshot "${note}" created and saved in SQLite!`, 'success');
+    const res = await api(`/api/projects/${p.id}/backup`, { method: 'POST', body: { note, kind }, timeoutMs: 30000 });
+    toast(`Backup snapshot & Release #${res.releaseId || res.backupId} created successfully!`, 'success');
     closeModal('modal-create-backup');
     loadBackupsView();
   } catch (err) {
@@ -2499,6 +2555,109 @@ document.getElementById('confirm-create-backup-btn')?.addEventListener('click', 
     }
   }
 });
+
+// Create Release Modal & Triggers
+function openCreateReleaseModal() {
+  let p = getSelectedProject();
+  if (!p && state.projects && state.projects.length > 0) {
+    p = state.projects[0];
+    state.selectedProjectId = p.id;
+  }
+  if (!p) {
+    toast('Please create a website first before creating a release.', 'warning');
+    if (typeof window.openAddWebsiteModal === 'function') {
+      window.openAddWebsiteModal();
+    }
+    return;
+  }
+
+  const targetLabel = document.getElementById('release-modal-target-project');
+  const projSelect = document.getElementById('release-project-select');
+  const projGroup = document.getElementById('release-project-select-group');
+
+  if (state.projects && state.projects.length > 1) {
+    if (projGroup) projGroup.style.display = 'block';
+    if (targetLabel) targetLabel.style.display = 'none';
+    if (projSelect) {
+      projSelect.innerHTML = state.projects.map((proj) => 
+        `<option value="${proj.id}" ${p && p.id === proj.id ? 'selected' : ''}>${escapeHtml(proj.name)} (${escapeHtml(proj.slug)})</option>`
+      ).join('');
+      projSelect.onchange = (e) => {
+        const sel = state.projects.find((item) => item.id === Number(e.target.value));
+        if (sel) {
+          const noteInput = document.getElementById('release-note-input');
+          if (noteInput) {
+            const d = new Date();
+            const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            noteInput.value = `Release ${sel.name} - ${dateStr}`;
+          }
+        }
+      };
+    }
+  } else {
+    if (projGroup) projGroup.style.display = 'none';
+    if (targetLabel) {
+      targetLabel.style.display = 'block';
+      targetLabel.innerHTML = `Target Website: <strong style="color: var(--text-normal);">${escapeHtml(p.name)}</strong> <span style="font-size: 11px; opacity: 0.7;">(${escapeHtml(p.slug)})</span>`;
+    }
+  }
+
+  const noteInput = document.getElementById('release-note-input');
+  if (noteInput && p) {
+    const d = new Date();
+    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    noteInput.value = `Release ${p.name} - ${dateStr}`;
+  }
+
+  openModal('modal-create-release');
+}
+window.openCreateReleaseModal = openCreateReleaseModal;
+
+async function confirmCreateRelease(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  let p = getSelectedProject();
+  const projSelect = document.getElementById('release-project-select');
+  if (projSelect && projSelect.value) {
+    const found = state.projects.find((item) => item.id === Number(projSelect.value));
+    if (found) p = found;
+  }
+  if (!p) {
+    toast('Please select a website first.', 'warning');
+    return;
+  }
+
+  const source = document.getElementById('release-source-select')?.value || 'deploy';
+  const note = (document.getElementById('release-note-input')?.value || '').trim() || `Manual release for ${p.name}`;
+  const btn = document.getElementById('confirm-create-release-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = source === 'deploy' ? 'Deploying Release...' : 'Creating Snapshot...';
+  }
+
+  try {
+    const res = await api(`/api/projects/${p.id}/releases`, { method: 'POST', body: { source, note } });
+    if (source === 'deploy') {
+      toast(`Release deployment #${res.deploymentId} started for ${p.name}!`, 'success');
+      closeModal('modal-create-release');
+      navigateTo('deployments', p.id);
+    } else {
+      toast(`Release #${res.releaseId} created successfully!`, 'success');
+      closeModal('modal-create-release');
+      loadReleasesView();
+    }
+  } catch (err) {
+    toast(`Create release failed: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Build & Create Release';
+    }
+  }
+}
+window.confirmCreateRelease = confirmCreateRelease;
+
+document.getElementById('create-release-btn')?.addEventListener('click', openCreateReleaseModal);
+document.getElementById('confirm-create-release-btn')?.addEventListener('click', confirmCreateRelease);
 
 async function restoreBackup(projectId, backupId) {
   const ok = await showConfirmDialog({
@@ -2565,19 +2724,24 @@ async function loadMonitorView() {
       ? (data.projects || []).filter((p) => p.id === activeProject.id)
       : (data.projects || []);
     const tbody = document.getElementById('monitor-projects-table');
-    tbody.innerHTML = monProjects.map((p) => `
+    tbody.innerHTML = monProjects.map((p) => {
+      const appSt = p.status?.appStatus || (p.status?.running ? 'running' : 'stopped');
+      const isOnline = appSt === 'running';
+      const isMaint = appSt === 'maintenance';
+      return `
       <tr>
         <td><strong>${escapeHtml(p.name)}</strong></td>
         <td>
-          <span class="status-dot ${p.status?.running ? 'online' : 'offline'}"></span>
-          <span style="font-size:12px; font-weight:600; margin-left:6px;">${p.status?.running ? 'Running' : 'Stopped'}</span>
+          <span class="status-dot ${isOnline ? 'online' : isMaint ? 'maintenance' : 'offline'}"></span>
+          <span style="font-size:12px; font-weight:600; margin-left:6px; color:${isOnline ? 'var(--success)' : isMaint ? 'var(--warning)' : 'var(--text-muted)'};">${isOnline ? 'Online' : isMaint ? 'Maintenance' : 'Offline'}</span>
         </td>
         <td>${p.status?.uptimeMs ? formatDuration(p.status.uptimeMs / 1000) : '--'}</td>
         <td>${p.deployedSha ? `<span class="sha-pill">${p.deployedSha.slice(0, 7)}</span>` : '--'}</td>
         <td>${p.disk ? `${(p.disk.used / 1048576).toFixed(1)} MB` : '--'}</td>
         <td><span class="badge ${p.deployStatus?.status === 'success' ? 'badge-success' : 'badge-neutral'}">${p.deployStatus?.status || 'idle'}</span></td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   } catch (err) {
     console.error('Monitor view error:', err);
   }
@@ -3075,44 +3239,139 @@ document.getElementById('audit-category-filter')?.addEventListener('change', () 
 // ============================================================================
 let activeNginxProjectId = null;
 
+function renderCaddyModalBanner(p) {
+  const banner = document.getElementById('nginx-modal-status-banner');
+  if (!banner || !p) return;
+  const activeDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
+  const domainsHtml = activeDomains.length
+    ? activeDomains.map((d) => `
+        <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(37,99,235,0.16); border:1px solid rgba(59,130,246,0.4); border-radius:5px; padding:2px 8px; margin-right:4px;">
+          <a href="https://${escapeHtml(d)}" target="_blank" style="color:#60a5fa; font-family:monospace; font-weight:600; text-decoration:none;">${escapeHtml(d)} &nearr;</a>
+          <button type="button" onclick="removeSingleCaddyDomain('${escapeHtml(d)}')" title="Remove domain" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:13px; line-height:1; padding:0 2px;">&times;</button>
+        </span>
+      `).join('')
+    : '<code style="color:var(--text-muted); font-weight:600;">Local only (127.0.0.1:' + (p.port || 3000) + ')</code>';
+
+  banner.innerHTML = `
+    <div style="background: var(--bg-card); padding: 12px; border-radius: var(--radius-md); font-size: 13px; border: 1px solid var(--border-subtle);">
+      <div><strong>Reverse Proxy:</strong> <span class="badge badge-success">Caddy</span> &bull; <code>Port ${p.port || 3000}</code></div>
+      <div style="margin-top: 6px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;"><strong>Domains:</strong> ${domainsHtml}</div>
+      <div style="margin-top: 6px;"><strong>Automatic HTTPS:</strong> <span class="badge badge-success">Let's Encrypt / ZeroSSL (Active)</span></div>
+    </div>
+  `;
+}
+
 async function openNginxModal(projectId) {
   activeNginxProjectId = projectId;
   const p = state.projects.find((x) => x.id === projectId);
   if (!p) return;
 
+  const domainInput = document.getElementById('caddy-domains-input');
+  if (domainInput) {
+    domainInput.value = (p.domains || []).join(', ');
+    domainInput.onkeydown = (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        saveCaddyDomains();
+      }
+    };
+  }
+
   const preview = document.getElementById('nginx-config-preview');
-  const banner = document.getElementById('nginx-modal-status-banner');
-  preview.value = 'Generating Caddyfile configuration...';
+  renderCaddyModalBanner(p);
+  if (preview) preview.value = 'Generating Caddyfile configuration...';
   openModal('modal-nginx');
 
   try {
-    const data = await api(`/api/projects/${projectId}/caddy`);
-    preview.value = data.config;
-
-    const domains = p.domains && p.domains.length ? p.domains : ['Local only'];
-    banner.innerHTML = `
-      <div style="background: var(--bg-card); padding: 12px; border-radius: var(--radius-md); font-size: 13px; border: 1px solid var(--border-subtle);">
-        <div><strong>Reverse Proxy:</strong> <span class="badge badge-success">Caddy</span> &bull; <code>Port ${p.port || 3000}</code></div>
-        <div style="margin-top: 4px;"><strong>Domains:</strong> ${domains.join(', ')}</div>
-        <div style="margin-top: 4px;"><strong>Automatic HTTPS:</strong> <span class="badge badge-success">Let's Encrypt / ZeroSSL (Active)</span></div>
-      </div>
-    `;
+    const data = await api(`/api/projects/${projectId}/caddy`, { noCache: true });
+    if (preview && data.config) preview.value = data.config;
+    if (Array.isArray(data.domains)) {
+      p.domains = data.domains;
+      if (domainInput) domainInput.value = data.domains.join(', ');
+    }
+    renderCaddyModalBanner(p);
   } catch (err) {
-    preview.value = `Failed to generate configuration: ${err.message}`;
+    if (preview) preview.value = `Failed to generate configuration: ${err.message}`;
   }
 }
 window.openNginxModal = openNginxModal;
 
-document.getElementById('nginx-apply-btn')?.addEventListener('click', async () => {
+function cleanDomainList(rawStr) {
+  if (!rawStr) return [];
+  return rawStr
+    .split(/[\n,;]+/)
+    .map((s) => s.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function removeSingleCaddyDomain(domainToRemove) {
+  const p = state.projects.find((x) => x.id === activeNginxProjectId);
+  if (!p) return;
+  const remaining = (p.domains || []).filter((d) => d !== domainToRemove);
+  const input = document.getElementById('caddy-domains-input');
+  if (input) input.value = remaining.join(', ');
+  await saveCaddyDomains();
+}
+window.removeSingleCaddyDomain = removeSingleCaddyDomain;
+
+async function saveCaddyDomains() {
   if (!activeNginxProjectId) return;
-  try {
-    await api(`/api/projects/${activeNginxProjectId}/caddy/apply`, { method: 'POST' });
-    toast('Caddy configuration written and reloaded!', 'success');
-    closeModal('modal-nginx');
-  } catch (err) {
-    toast(`Caddy apply: ${err.message}`, 'error');
+  const input = document.getElementById('caddy-domains-input');
+  const domains = cleanDomainList(input?.value || '');
+  if (input) input.value = domains.join(', ');
+
+  const btn = document.getElementById('caddy-save-domains-btn');
+  const applyBtn = document.getElementById('nginx-apply-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
   }
-});
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Applying Caddy...';
+  }
+
+  try {
+    const res = await api(`/api/projects/${activeNginxProjectId}/caddy/apply`, {
+      method: 'POST',
+      body: { domains },
+    });
+    const savedDomains = (res && Array.isArray(res.domains)) ? res.domains : domains;
+    const p = state.projects.find((x) => x.id === activeNginxProjectId);
+    if (p) {
+      p.domains = savedDomains;
+      renderCaddyModalBanner(p);
+    }
+    const preview = document.getElementById('nginx-config-preview');
+    if (preview && res && res.config) {
+      preview.value = res.config;
+    }
+
+    toast(
+      savedDomains.length
+        ? `Custom domain(s) saved & applied: ${savedDomains.join(', ')}`
+        : 'Cleared custom domains (Local-only mode).',
+      'success'
+    );
+
+    await loadProjects();
+    renderWebsiteWorkspaceHeader();
+    if (state.currentView === 'projects') renderProjectsList();
+    if (state.currentView === 'overview') loadOverview();
+  } catch (err) {
+    toast(`Failed to update domains: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save & Apply';
+    }
+    if (applyBtn) {
+      applyBtn.disabled = false;
+      applyBtn.textContent = 'Apply & Reload Caddy';
+    }
+  }
+}
+window.saveCaddyDomains = saveCaddyDomains;
 
 document.getElementById('nginx-certbot-btn')?.addEventListener('click', async () => {
   if (!activeNginxProjectId) return;
@@ -3162,6 +3421,24 @@ async function stopProject(projectId) {
 }
 window.stopProject = stopProject;
 
+async function toggleMaintenanceMode(projectId) {
+  try {
+    const res = await api(`/api/projects/${projectId}/maintenance`, { method: 'POST', body: {} });
+    if (res && res.maintenance) {
+      toast('Maintenance Mode enabled — visitors now see the Under Maintenance page.', 'warning');
+    } else {
+      toast('Maintenance Mode disabled — live website resumed!', 'success');
+    }
+    await loadProjects();
+    if (state.currentView === 'projects') renderProjectsList();
+    if (state.currentView === 'overview') loadOverview();
+    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+  } catch (err) {
+    toast(`Maintenance toggle failed: ${err.message}`, 'error');
+  }
+}
+window.toggleMaintenanceMode = toggleMaintenanceMode;
+
 async function restartProject(projectId) {
   try {
     const res = await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
@@ -3202,6 +3479,18 @@ function startPolling() {
         await loadProjects();
         renderWebsiteWorkspaceHeader();
         await loadMonitorView();
+      } else if (state.currentView === 'releases') {
+        await loadProjects();
+        renderWebsiteWorkspaceHeader();
+        await loadReleasesView();
+      } else if (state.currentView === 'rollbacks') {
+        await loadProjects();
+        renderWebsiteWorkspaceHeader();
+        await loadRollbacksView();
+      } else if (state.currentView === 'backups') {
+        await loadProjects();
+        renderWebsiteWorkspaceHeader();
+        await loadBackupsView();
       } else if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
         await loadProjects();
         renderWebsiteWorkspaceHeader();
@@ -3340,10 +3629,12 @@ if (mobileToggle && sidebarEl && backdropEl) {
 function openModal(modalId) {
   document.getElementById(modalId)?.classList.add('active');
 }
+window.openModal = openModal;
 
 function closeModal(modalId) {
   document.getElementById(modalId)?.classList.remove('active');
 }
+window.closeModal = closeModal;
 
 function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {

@@ -307,10 +307,16 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             CREATE TABLE IF NOT EXISTS backups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                path TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                note TEXT,
-                created_at INTEGER NOT NULL
+                ts INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                dir TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL DEFAULT '',
+                size INTEGER NOT NULL DEFAULT 0,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'full-snapshot',
+                note TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'ok',
+                release_id INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS jobs (
@@ -391,20 +397,32 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         if !b_cols.contains(&"path".to_string()) {
             conn.execute_batch("ALTER TABLE backups ADD COLUMN path TEXT NOT NULL DEFAULT '';").ok();
         }
+        if !b_cols.contains(&"dir".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN dir TEXT NOT NULL DEFAULT '';").ok();
+        }
         if !b_cols.contains(&"size_bytes".to_string()) {
             conn.execute_batch("ALTER TABLE backups ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;").ok();
             if b_cols.contains(&"size".to_string()) {
                 conn.execute_batch("UPDATE backups SET size_bytes = COALESCE(size, 0);").ok();
             }
         }
+        if !b_cols.contains(&"size".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN size INTEGER NOT NULL DEFAULT 0;").ok();
+        }
         if !b_cols.contains(&"note".to_string()) {
             conn.execute_batch("ALTER TABLE backups ADD COLUMN note TEXT DEFAULT '';").ok();
+        }
+        if !b_cols.contains(&"status".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN status TEXT NOT NULL DEFAULT 'ok';").ok();
         }
         if !b_cols.contains(&"created_at".to_string()) {
             conn.execute_batch("ALTER TABLE backups ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;").ok();
             if b_cols.contains(&"ts".to_string()) {
                 conn.execute_batch("UPDATE backups SET created_at = COALESCE(ts, 0);").ok();
             }
+        }
+        if !b_cols.contains(&"ts".to_string()) {
+            conn.execute_batch("ALTER TABLE backups ADD COLUMN ts INTEGER NOT NULL DEFAULT 0;").ok();
         }
     }
 

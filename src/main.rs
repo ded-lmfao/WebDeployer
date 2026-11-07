@@ -107,6 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 );
                             }
                         }
+                    } else if p.app_status == "maintenance" {
+                        let _ = resume_runtime.set_maintenance_mode(&p, true).await;
                     } else {
                         let _ = resume_runtime.stop_project(&p).await;
                     }
@@ -168,15 +170,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
+    // Background binary hot-reload watcher: if target/release/webdep.exe is rebuilt on disk,
+    // automatically hand off to the new binary so changes take effect without manual restarts.
+    tokio::spawn(async move {
+        let exe_path = std::path::PathBuf::from("target")
+            .join("release")
+            .join(if cfg!(windows) { "webdep.exe" } else { "webdep" });
+        let initial_mtime = std::fs::metadata(&exe_path)
+            .and_then(|m| m.modified())
+            .ok();
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+        loop {
+            interval.tick().await;
+            if let (Some(init_t), Ok(meta)) = (initial_mtime, std::fs::metadata(&exe_path)) {
+                if let Ok(cur_t) = meta.modified() {
+                    if cur_t > init_t && meta.len() > 1_000_000 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+                        let mut cmd = std::process::Command::new(&exe_path);
+                        cmd.env("WEBDEP_RESTARTED", "1")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null());
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::process::CommandExt;
+                            cmd.creation_flags(0x00000008 | 0x00000200);
+                        }
+                        if cmd.spawn().is_ok() {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                            std::process::exit(0);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
     let addr: SocketAddr = format!("{}:{}", config.host, config.port)
         .parse()
         .expect("Invalid HOST or PORT");
 
     info!("WebDep listening on http://{}", addr);
 
-    // After a self-restart the previous instance may still hold the port for a moment: retry binding.
-    let restarting = std::env::var("WEBDEP_RESTARTED").is_ok();
-    let max_attempts = if restarting { 60 } else { 1 };
+    // Retry binding up to 30s if a previous instance is shutting down
+    let max_attempts = 60;
     let mut attempt = 0;
     let listener = loop {
         match tokio::net::TcpListener::bind(addr).await {

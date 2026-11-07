@@ -88,7 +88,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects/:id/start", post(start_project_handler))
         .route("/api/projects/:id/stop", post(stop_project_handler))
         .route("/api/projects/:id/restart", post(restart_project_handler))
-        .route("/api/projects/:id/releases", get(list_releases_handler))
+        .route("/api/projects/:id/maintenance", post(toggle_maintenance_handler))
+        .route("/api/projects/:id/releases", get(list_releases_handler).post(create_release_handler))
+        .route("/api/projects/:id/releases/:release_id", delete(delete_release_handler))
         .route("/api/projects/:id/caddy", get(get_caddy_handler))
         .route("/api/projects/:id/caddy/apply", post(apply_caddy_handler))
         .route("/api/projects/:id/nginx", get(get_caddy_handler))
@@ -912,6 +914,12 @@ async fn create_project_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
+    if let Ok(all) = state.projects.list() {
+        let _ = state.caddy.write_config(&created, &all);
+        let _ = state.caddy.reload();
+    }
+    state.cache.invalidate_all();
+
     Ok(Json(created))
 }
 
@@ -919,9 +927,23 @@ async fn update_project_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-    Json(p): Json<Project>,
+    Json(mut p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
+    p.domains = p
+        .domains
+        .into_iter()
+        .map(|d| {
+            d.trim()
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/')
+                .trim()
+                .to_lowercase()
+        })
+        .filter(|d| !d.is_empty())
+        .collect();
+
     state
         .projects
         .update(id, &p)
@@ -933,7 +955,12 @@ async fn update_project_handler(
         &actor.username,
         "website.update",
         Some(&p.name),
-        Some(&format!("Updated website settings (Port {}, Branch '{}')", p.port.unwrap_or(3000), p.branch)),
+        Some(&format!(
+            "Updated website settings (Port {}, Branch '{}', Domains {:?})",
+            p.port.unwrap_or(3000),
+            p.branch,
+            p.domains
+        )),
     );
 
     let updated = state
@@ -941,6 +968,12 @@ async fn update_project_handler(
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    if let Ok(all) = state.projects.list() {
+        let _ = state.caddy.write_config(&updated, &all);
+        let _ = state.caddy.reload();
+    }
+    state.cache.invalidate_all();
 
     Ok(Json(updated))
 }
@@ -961,6 +994,7 @@ async fn delete_project_handler(
             Some(&format!("Deleted website '{}' ({})", p.name, p.slug)),
         );
         let _ = state.runtime.stop_project(&p).await;
+        state.runtime.stop_maintenance_server(id);
     }
     state
         .projects
@@ -1215,6 +1249,7 @@ async fn start_project_handler(
     let env = state.projects.get_env_map(id);
     match state.runtime.start_project(&p, env, None).await {
         Ok(pid) => {
+            state.cache.invalidate_all();
             log_audit_project(
                 &state,
                 Some(p.id),
@@ -1278,6 +1313,7 @@ async fn stop_project_handler(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
+    state.cache.invalidate_all();
     log_audit_project(
         &state,
         Some(p.id),
@@ -1306,6 +1342,7 @@ async fn restart_project_handler(
     let env = state.projects.get_env_map(id);
     match state.runtime.start_project(&p, env, None).await {
         Ok(pid) => {
+            state.cache.invalidate_all();
             log_audit_project(
                 &state,
                 Some(p.id),
@@ -1328,6 +1365,105 @@ async fn restart_project_handler(
     }
 }
 
+#[derive(Deserialize, Default)]
+struct MaintenancePayload {
+    enabled: Option<bool>,
+}
+
+async fn toggle_maintenance_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    payload: Option<Json<MaintenancePayload>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "process", Some(id))?;
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let target_enabled = payload
+        .and_then(|Json(b)| b.enabled)
+        .unwrap_or(p.app_status != "maintenance");
+
+    if target_enabled {
+        state
+            .runtime
+            .set_maintenance_mode(&p, true)
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+        if let Ok(all) = state.projects.list() {
+            if let Ok(Some(updated_p)) = state.projects.get(id) {
+                let _ = state.caddy.write_config(&updated_p, &all);
+                let _ = state.caddy.reload();
+            }
+        }
+
+        log_audit_project(
+            &state,
+            Some(p.id),
+            &actor.username,
+            "website.maintenance_on",
+            Some(&p.name),
+            Some(&format!(
+                "Enabled Maintenance Mode on port {} (Maintenance page active)",
+                p.port.unwrap_or(3000)
+            )),
+        );
+        state.cache.invalidate_all();
+
+        Ok(Json(serde_json::json!({
+            "ok": true,
+            "maintenance": true,
+            "app_status": "maintenance"
+        })))
+    } else {
+        let _ = state.runtime.set_maintenance_mode(&p, false).await;
+        let env = state.projects.get_env_map(id);
+        match state.runtime.start_project(&p, env, None).await {
+            Ok(pid) => {
+                if let Ok(all) = state.projects.list() {
+                    if let Ok(Some(updated_p)) = state.projects.get(id) {
+                        let _ = state.caddy.write_config(&updated_p, &all);
+                        let _ = state.caddy.reload();
+                    }
+                }
+                log_audit_project(
+                    &state,
+                    Some(p.id),
+                    &actor.username,
+                    "website.maintenance_off",
+                    Some(&p.name),
+                    Some(&format!(
+                        "Disabled Maintenance Mode and resumed website (PID {}, Port {})",
+                        pid,
+                        p.port.unwrap_or(3000)
+                    )),
+                );
+                state.cache.invalidate_all();
+                Ok(Json(serde_json::json!({
+                    "ok": true,
+                    "maintenance": false,
+                    "app_status": "running",
+                    "pid": pid
+                })))
+            }
+            Err(e) if e == "NOT_DEPLOYED_YET" => {
+                let _ = state.runtime.stop_project(&p).await;
+                state.cache.invalidate_all();
+                Ok(Json(serde_json::json!({
+                    "ok": true,
+                    "maintenance": false,
+                    "app_status": "stopped"
+                })))
+            }
+            Err(e) => Err((StatusCode::BAD_REQUEST, e)),
+        }
+    }
+}
+
 async fn list_releases_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
@@ -1336,9 +1472,106 @@ async fn list_releases_handler(
     Ok(Json(list))
 }
 
+#[derive(Deserialize)]
+struct CreateReleasePayload {
+    source: Option<String>,
+    note: Option<String>,
+}
+
+async fn create_release_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<CreateReleasePayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Website not found".to_string()))?;
+
+    let source = payload.source.unwrap_or_else(|| "deploy".to_string());
+    let note = payload.note.unwrap_or_else(|| "Manual Release".to_string());
+
+    if source == "snapshot" {
+        let ts = now();
+        let base_dir = std::path::PathBuf::from(&p.deploy_dir);
+        let rel_dir = base_dir.join("releases").join(format!("rel-snap-{}", ts));
+        std::fs::create_dir_all(&rel_dir).ok();
+
+        let src_dir = if base_dir.join("current").exists() {
+            base_dir.join("current")
+        } else {
+            base_dir.clone()
+        };
+
+        if src_dir.exists() {
+            copy_backup_files(&src_dir, &rel_dir);
+        }
+
+        let sha = p.deployed_sha.clone().unwrap_or_else(|| format!("{:x}", ts));
+        let short_sha = sha[..7.min(sha.len())].to_string();
+
+        let rel_id = {
+            let conn = state.db.lock().unwrap();
+            conn.execute(
+                "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, build_status, health_status, created_at, deployed_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, 'succeeded', 'success', 'ok', ?, ?)",
+                rusqlite::params![
+                    id,
+                    sha,
+                    short_sha,
+                    format!("Release: {}", note),
+                    actor.username,
+                    ts,
+                    rel_dir.to_str().unwrap_or(""),
+                    ts,
+                    ts
+                ],
+            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            conn.last_insert_rowid()
+        };
+
+        // Also record in backups so it appears in Backups tab
+        {
+            let conn = state.db.lock().unwrap();
+            let p_str = rel_dir.to_string_lossy().to_string();
+            conn.execute(
+                "INSERT INTO backups(project_id, release_id, kind, path, dir, size, size_bytes, note, status, ts, created_at)
+                 VALUES(?, ?, 'release-snapshot', ?, ?, 5242880, 5242880, ?, 'ok', ?, ?)",
+                rusqlite::params![id, rel_id, &p_str, &p_str, format!("Release #{} ({})", rel_id, note), ts, ts],
+            ).ok();
+        }
+
+        state.cache.invalidate_project(id);
+        log_audit_project(&state, Some(id), &actor.username, "release.create", Some(&p.name), Some(&note));
+
+        Ok(Json(serde_json::json!({
+            "ok": true,
+            "releaseId": rel_id,
+            "message": format!("Release #{} created successfully from current files", rel_id)
+        })))
+    } else {
+        // Trigger a new deployment which builds and creates a live release
+        let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "manual");
+        let deployer = state.deployer.clone();
+        tokio::spawn(async move {
+            deployer.run_deploy(p.id, dep_id).await;
+        });
+
+        Ok(Json(serde_json::json!({
+            "ok": true,
+            "deploymentId": dep_id,
+            "message": format!("Release deployment #{} initiated", dep_id)
+        })))
+    }
+}
+
 #[derive(Serialize)]
 struct CaddyResponse {
     config: String,
+    domains: Vec<String>,
 }
 
 async fn get_caddy_handler(
@@ -1352,20 +1585,65 @@ async fn get_caddy_handler(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let conf = state.caddy.generate_config(&p);
-    Ok(Json(CaddyResponse { config: conf }))
+    Ok(Json(CaddyResponse {
+        config: conf,
+        domains: p.domains,
+    }))
+}
+
+#[derive(Deserialize, Default)]
+struct ApplyCaddyPayload {
+    domains: Option<Vec<String>>,
 }
 
 async fn apply_caddy_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<StatusCode, (StatusCode, String)> {
+    body_bytes: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "domains", Some(id))?;
-    let p = state
+    let mut p = state
         .projects
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    if !body_bytes.is_empty() {
+        if let Ok(parsed) = serde_json::from_slice::<ApplyCaddyPayload>(&body_bytes) {
+            if let Some(raw_domains) = parsed.domains {
+                let cleaned: Vec<String> = raw_domains
+                    .into_iter()
+                    .flat_map(|s| {
+                        s.split(|c| c == ',' || c == '\n' || c == ';')
+                            .map(|part| part.to_string())
+                            .collect::<Vec<String>>()
+                    })
+                    .map(|d| {
+                        d.trim()
+                            .trim_start_matches("https://")
+                            .trim_start_matches("http://")
+                            .trim_end_matches('/')
+                            .trim()
+                            .to_lowercase()
+                    })
+                    .filter(|d| !d.is_empty())
+                    .collect();
+
+                p.domains = cleaned;
+                let domains_json = serde_json::to_string(&p.domains).unwrap_or_else(|_| "[]".to_string());
+                let ts = crate::db::now();
+                {
+                    let conn = state.db.lock().unwrap();
+                    conn.execute(
+                        "UPDATE projects SET domains = ?, updated_at = ? WHERE id = ?",
+                        rusqlite::params![domains_json, ts, id],
+                    )
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                }
+            }
+        }
+    }
 
     let all_projects = state.projects.list().unwrap_or_default();
 
@@ -1375,16 +1653,23 @@ async fn apply_caddy_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let _ = state.caddy.reload();
+    state.cache.invalidate_all();
+
     log_audit_project(
         &state,
         Some(p.id),
         &actor.username,
         "domains.caddy_apply",
         Some(&p.name),
-        Some("Applied Caddy reverse proxy & SSL configuration"),
+        Some(&format!("Configured domains: {:?}", p.domains)),
     );
 
-    Ok(StatusCode::OK)
+    let conf = state.caddy.generate_config(&p);
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "domains": p.domains,
+        "config": conf
+    })))
 }
 
 async fn certbot_caddy_handler(
@@ -1763,6 +2048,7 @@ async fn monitor_handler(
                 "deployedSha": p.deployed_sha,
                 "status": {
                     "running": running,
+                    "appStatus": p.app_status,
                     "pid": p.app_pid,
                     "uptimeMs": uptime_ms,
                 },
@@ -3001,11 +3287,53 @@ async fn create_backup_handler(
     }
 
     let backup_path_str = backup_dir.to_string_lossy().to_string();
+
+    // Also register an immutable release in `releases` so it appears in Releases & Rollbacks tabs!
+    let rel_id = {
+        let conn = state.db.lock().unwrap();
+        let sha = p.deployed_sha.clone().unwrap_or_else(|| format!("{:x}", ts));
+        let short_sha = sha[..7.min(sha.len())].to_string();
+        let release_files_dir = if backup_dir.join("files").exists() {
+            backup_dir.join("files").to_string_lossy().to_string()
+        } else {
+            backup_path_str.clone()
+        };
+
+        conn.execute(
+            "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, build_status, health_status, created_at, deployed_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, 'succeeded', 'success', 'ok', ?, ?)",
+            rusqlite::params![
+                id,
+                sha,
+                short_sha,
+                format!("Snapshot: {}", note),
+                actor.username,
+                ts,
+                release_files_dir,
+                ts,
+                ts
+            ],
+        ).ok();
+        conn.last_insert_rowid()
+    };
+
     let backup_id = {
         let conn = state.db.lock().unwrap();
         conn.execute(
-            "INSERT INTO backups(project_id, release_id, kind, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![id, p.current_release_id, kind, backup_path_str, total_size as i64, note, ts],
+            "INSERT INTO backups(project_id, release_id, kind, path, dir, size, size_bytes, note, status, ts, created_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
+            rusqlite::params![
+                id,
+                rel_id,
+                kind,
+                &backup_path_str,
+                &backup_path_str,
+                total_size as i64,
+                total_size as i64,
+                note,
+                ts,
+                ts
+            ],
         )
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         conn.last_insert_rowid()
@@ -3017,12 +3345,13 @@ async fn create_backup_handler(
         None,
         "backup",
         "info",
-        &format!("Created {} backup #{} ({}) in SQLite & disk", kind, backup_id, note),
+        &format!("Created {} backup #{} / Release #{} ({}) in SQLite & disk", kind, backup_id, rel_id, note),
     );
 
     Ok(Json(serde_json::json!({
         "ok": true,
         "backupId": backup_id,
+        "releaseId": rel_id,
         "size": total_size
     })))
 }
@@ -3120,8 +3449,9 @@ async fn delete_backup_handler(
     };
 
     if let Some(p_str) = b_path {
-        if p_str.contains("backups") && std::path::Path::new(&p_str).exists() {
-            let _ = std::fs::remove_dir_all(&p_str);
+        let path = std::path::Path::new(&p_str);
+        if (p_str.contains("backups") || p_str.contains("rel-snap-")) && path.exists() {
+            let _ = std::fs::remove_dir_all(path);
         }
     }
 
@@ -3143,6 +3473,71 @@ async fn delete_backup_handler(
         Some(&p_name),
         Some(&format!("Deleted backup #{}", backup_id)),
     );
+    state.cache.invalidate_project(id);
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn delete_release_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath((id, release_id)): AxPath<(i64, i64)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Website not found".to_string()))?;
+
+    if p.current_release_id == Some(release_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Cannot delete the active live release. Roll back to or deploy another release first.".to_string(),
+        ));
+    }
+
+    let rel_dir: Option<String> = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT dir FROM releases WHERE id = ? AND project_id = ?",
+            rusqlite::params![release_id, id],
+            |r| r.get(0),
+        )
+        .ok()
+    };
+
+    if let Some(d_str) = rel_dir {
+        let path = std::path::Path::new(&d_str);
+        if path.exists() && (d_str.contains("releases") || d_str.contains("rel-")) {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "DELETE FROM releases WHERE id = ? AND project_id = ?",
+            rusqlite::params![release_id, id],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Also clean up any associated backup records
+        conn.execute(
+            "DELETE FROM backups WHERE release_id = ? AND project_id = ?",
+            rusqlite::params![release_id, id],
+        ).ok();
+    }
+
+    state.cache.invalidate_project(id);
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "release.delete",
+        Some(&p.name),
+        Some(&format!("Deleted release #{}", release_id)),
+    );
+
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

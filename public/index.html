@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebDep — Multi-Website Deployment & Hosting Platform</title>
-  <link rel="stylesheet" href="/style.css?v=2.4.5">
+  <link rel="stylesheet" href="/style.css?v=2.5.6">
 </head>
 <body>
 
@@ -82,18 +82,23 @@
         </a>
       </nav>
 
-      <div class="sidebar-footer">
-        <div class="user-snippet" id="user-profile-snippet" style="cursor: pointer;" title="Open Account Security (Password & 2FA)">
-          <div class="user-avatar" id="current-user-avatar">AD</div>
-          <div class="user-info">
-            <span class="user-name" id="current-user-name">Admin</span>
-            <span class="user-role" id="current-user-role">admin</span>
+      <div class="sidebar-footer" style="flex-direction: column; align-items: stretch; gap: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div class="user-snippet" id="user-profile-snippet" style="cursor: pointer;" title="Open Account Security (Password & 2FA)">
+            <div class="user-avatar" id="current-user-avatar">AD</div>
+            <div class="user-info">
+              <span class="user-name" id="current-user-name">Admin</span>
+              <span class="user-role" id="current-user-role">admin</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-secondary btn-sm" id="logout-btn" title="Sign Out">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
           </div>
         </div>
-        <div style="display: flex; gap: 6px;">
-          <button class="btn btn-secondary btn-sm" id="logout-btn" title="Sign Out">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-          </button>
+        <div style="text-align: center; font-size: 11px; color: var(--text-dim); padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.04);">
+          Made with <span style="color: #ef4444;">&hearts;</span> by <strong style="color: var(--text-muted);">Just nixx</strong>
         </div>
       </div>
     </aside>
@@ -464,6 +469,12 @@
             <div class="view-title-group">
               <h1>Release Retention History</h1>
               <p>Immutable releases, build artifacts, and instant rollback targets</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="create-release-btn" onclick="openCreateReleaseModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" width="16" height="16" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 8 8 12 12 16"></polyline><line x1="16" y1="12" x2="8" y2="12"></line></svg>
+                <span>Create Release</span>
+              </button>
             </div>
           </div>
 
@@ -1077,20 +1088,38 @@
   <div class="modal-overlay" id="modal-nginx">
     <div class="modal-container" style="max-width: 650px;">
       <div class="modal-header">
-        <h3 class="modal-title">Caddy Reverse Proxy & Automatic SSL</h3>
+        <h3 class="modal-title">Domains &amp; SSL (Caddy Reverse Proxy)</h3>
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
         <div id="nginx-modal-status-banner" style="margin-bottom: 16px;"></div>
+
+        <!-- DOMAINS CONFIGURATION CARD -->
+        <div class="card" style="padding: 16px; margin-bottom: 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="caddy-domains-input" style="font-weight: 600; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <span>Custom Domain(s)</span>
+              <span style="font-size: 11px; font-weight: 400; color: var(--text-muted);">Separate multiple with commas</span>
+            </label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="caddy-domains-input" class="form-control" placeholder="e.g. portal.example.com, app.example.com">
+              <button class="btn btn-primary" id="caddy-save-domains-btn" onclick="saveCaddyDomains()" style="white-space: nowrap;">Save &amp; Apply</button>
+            </div>
+            <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+              <span style="color: var(--accent); font-weight: 600;">DNS Setup:</span> Point your domain's <strong>A</strong> or <strong>CNAME</strong> record to this server's public IP. Caddy will automatically provision and renew a free Let's Encrypt / ZeroSSL TLS certificate.
+            </div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Auto-Generated Caddyfile</label>
           <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Caddy automatically provisions, verifies, and renews Let's Encrypt / ZeroSSL certificates out-of-the-box with zero certbot setup.</p>
-          <textarea id="nginx-config-preview" class="form-control" rows="10" readonly style="font-family: monospace; font-size: 13px;"></textarea>
+          <textarea id="nginx-config-preview" class="form-control" rows="8" readonly style="font-family: monospace; font-size: 13px;"></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close-modal>Close</button>
-        <button class="btn btn-primary" id="nginx-apply-btn">Apply & Reload Caddy</button>
+        <button class="btn btn-primary" id="nginx-apply-btn" onclick="saveCaddyDomains()">Apply &amp; Reload Caddy</button>
       </div>
     </div>
   </div>
@@ -1498,6 +1527,41 @@
     </div>
   </div>
 
+  <!-- CREATE RELEASE MODAL -->
+  <div class="modal-overlay" id="modal-create-release">
+    <div class="modal-container" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Create Website Release</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="release-modal-target-project" style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px; padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm);"></div>
+        <form id="create-release-form" onsubmit="confirmCreateRelease(event)">
+          <div class="form-group" id="release-project-select-group" style="display: none;">
+            <label class="form-label" for="release-project-select">Target Website</label>
+            <select id="release-project-select" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="release-source-select">Release Source</label>
+            <select id="release-source-select" class="form-control">
+              <option value="deploy">Build & Deploy Latest Git Commit (Full Pipeline)</option>
+              <option value="snapshot">Snapshot Current Live Website as New Immutable Release</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="release-note-input">Release Note / Version Tag</label>
+            <input type="text" id="release-note-input" class="form-control" placeholder="e.g. Release v2.0 - Production">
+            <span class="form-hint">Recorded in SQLite and retained as an immutable instant rollback target.</span>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="confirm-create-release-btn" onclick="confirmCreateRelease(event)">Build & Create Release</button>
+      </div>
+    </div>
+  </div>
+
   <!-- UNIVERSAL THEMED DIALOG MODAL (CONFIRM / PROMPT / COPY) -->
   <div class="modal-overlay" id="modal-dialog">
     <div class="modal-container" style="max-width: 460px;">
@@ -1522,7 +1586,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=2.4.5"></script>
+  <script type="module" src="/app.js?v=2.5.6"></script>
 </body>
 </html>
 

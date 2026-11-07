@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::projects::Project;
+use crate::runtime::Runtime;
 
 pub struct Caddy {
     caddy_dir: PathBuf,
@@ -26,10 +27,17 @@ impl Caddy {
         };
         let domain_str = domains.join(", ");
 
+        let status_note = if p.app_status == "maintenance" {
+            "# Status: Maintenance Page Responder active on upstream port"
+        } else {
+            "# Status: Live application upstream"
+        };
+
         let mut config = format!(
-            "# WebDep Auto-Generated Caddyfile\n# Project: {name} ({slug})\n# Automatic HTTPS, HTTP/3, and reverse proxy\n\n{domains} {{\n    reverse_proxy 127.0.0.1:{port}\n",
+            "# WebDep Auto-Generated Caddyfile\n# Project: {name} ({slug})\n# Automatic HTTPS, HTTP/3, and reverse proxy\n{status_note}\n\n{domains} {{\n    reverse_proxy 127.0.0.1:{port}\n",
             name = p.name,
             slug = p.slug,
+            status_note = status_note,
             domains = domain_str,
             port = port
         );
@@ -57,6 +65,15 @@ impl Caddy {
     }
 
     pub fn write_config(&self, p: &Project, all_projects: &[Project]) -> Result<PathBuf, std::io::Error> {
+        // Write static maintenance HTML snapshot for reference/fallback
+        let maint_html = Runtime::render_maintenance_html(
+            &p.name,
+            &p.slug,
+            "Scheduled Maintenance • Developers Working",
+        );
+        let maint_path = self.caddy_dir.join(format!("{}-maintenance.html", p.slug));
+        let _ = fs::write(&maint_path, maint_html);
+
         let conf = self.generate_config(p);
         let path = self.caddy_dir.join(format!("{}.caddy", p.slug));
         fs::write(&path, conf)?;

@@ -157,12 +157,17 @@ impl Deployer {
 
         let conn = self.db.lock().unwrap();
         let mut stmt = match conn.prepare(
-            "SELECT r.id, r.project_id, r.sha, r.short_sha, r.message, r.author, r.committed_at, r.dir, r.status, r.error, r.created_at, r.deployed_at,
-                    (SELECT id FROM deployments WHERE release_id = r.id ORDER BY id DESC LIMIT 1) as dep_id
+            "SELECT r.id, r.project_id, r.sha, r.short_sha, r.message, r.author, r.committed_at, r.dir, r.status,
+                    r.created_at, r.deployed_at,
+                    COALESCE(r.deployment_id, (SELECT id FROM deployments WHERE release_id = r.id ORDER BY id DESC LIMIT 1)) as dep_id,
+                    r.build_status, r.health_status
              FROM releases r WHERE r.project_id = ? ORDER BY r.id DESC",
         ) {
             Ok(s) => s,
-            Err(_) => return Vec::new(),
+            Err(e) => {
+                tracing::error!("Failed to prepare releases query: {}", e);
+                return Vec::new();
+            }
         };
 
         let rows = stmt.query_map(params![project_id], |r| {
@@ -171,33 +176,55 @@ impl Deployer {
             let status: String = r.get(8)?;
             let is_live = p.current_release_id == Some(id);
             let available = Path::new(&dir).exists();
-            let build_status = if status == "succeeded" || status == "pulled" {
+            let db_build_status: Option<String> = r.get::<_, Option<String>>(12).ok().flatten();
+            let db_health_status: Option<String> = r.get::<_, Option<String>>(13).ok().flatten();
+
+            let build_status = if let Some(bs) = db_build_status {
+                if bs == "pending" && (status == "succeeded" || status == "pulled") {
+                    "success".to_string()
+                } else {
+                    bs
+                }
+            } else if status == "succeeded" || status == "pulled" {
                 "success".to_string()
             } else {
                 status.clone()
             };
-            let health_status = if status == "succeeded" {
+
+            let health_status = if let Some(hs) = db_health_status {
+                if hs == "unknown" && status == "succeeded" {
+                    "ok".to_string()
+                } else {
+                    hs
+                }
+            } else if status == "succeeded" {
                 "ok".to_string()
             } else {
                 "pending".to_string()
             };
+
+            let committed_at: Option<i64> = r.get::<_, Option<i64>>(6).ok().flatten()
+                .or_else(|| {
+                    r.get::<_, Option<String>>(6).ok().flatten()
+                        .and_then(|s| s.parse::<i64>().ok())
+                });
 
             Ok(Release {
                 id,
                 project_id: r.get(1)?,
                 sha: r.get(2)?,
                 short_sha: r.get(3)?,
-                message: r.get(4)?,
-                author: r.get(5)?,
-                committed_at: r.get(6)?,
+                message: r.get::<_, Option<String>>(4).ok().flatten(),
+                author: r.get::<_, Option<String>>(5).ok().flatten(),
+                committed_at,
                 dir,
                 status,
                 build_status,
                 health_status,
-                deployment_id: r.get(12)?,
-                error: r.get(9)?,
-                created_at: r.get(10)?,
-                deployed_at: r.get(11)?,
+                deployment_id: r.get::<_, Option<i64>>(11).ok().flatten(),
+                error: None,
+                created_at: r.get(9)?,
+                deployed_at: r.get::<_, Option<i64>>(10).ok().flatten(),
                 live: is_live,
                 available,
             })
@@ -205,7 +232,10 @@ impl Deployer {
 
         match rows {
             Ok(r) => r.flatten().collect(),
-            Err(_) => Vec::new(),
+            Err(e) => {
+                tracing::error!("Failed to query releases: {}", e);
+                Vec::new()
+            }
         }
     }
 
@@ -241,6 +271,13 @@ impl Deployer {
             "UPDATE deployments SET status=?, stage=?, error=?, finished_at=? WHERE id=?",
             params![status, status, error, ts, dep_id],
         ).ok();
+
+        if status == "failed" {
+            conn.execute(
+                "UPDATE releases SET status='failed', build_status='failed' WHERE id=(SELECT release_id FROM deployments WHERE id=?)",
+                params![dep_id],
+            ).ok();
+        }
 
         let mut pid_opt = None;
         if let Ok((proj_id, kind, actor, sha, proj_name)) = conn.query_row(
@@ -427,7 +464,7 @@ impl Deployer {
             let ts = now();
             {
                 let conn = self.db.lock().unwrap();
-                conn.execute("UPDATE releases SET status='succeeded', deployed_at=? WHERE id=?", params![ts, release_id]).ok();
+                conn.execute("UPDATE releases SET status='succeeded', build_status='success', health_status='ok', deployed_at=? WHERE id=?", params![ts, release_id]).ok();
                 conn.execute("UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?", params![release_id, head, ts, p.id]).ok();
             }
             self.finish_deployment(dep_id, "success", None);
@@ -463,7 +500,7 @@ impl Deployer {
         {
             let conn = self.db.lock().unwrap();
             conn.execute(
-                "UPDATE releases SET status='succeeded', deployed_at=? WHERE id=?",
+                "UPDATE releases SET status='succeeded', build_status='success', health_status='ok', deployed_at=? WHERE id=?",
                 params![ts, release_id],
             ).ok();
             conn.execute(
@@ -471,12 +508,16 @@ impl Deployer {
                 params![release_id, head, ts, p.id],
             ).ok();
             conn.execute(
-                "INSERT INTO backups(project_id, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?)",
+                "INSERT INTO backups(project_id, release_id, path, dir, size, size_bytes, note, status, ts, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
                 params![
                     p.id,
+                    release_id,
+                    release_dir.to_str().unwrap_or(""),
                     release_dir.to_str().unwrap_or(""),
                     5 * 1024 * 1024i64,
+                    5 * 1024 * 1024i64,
                     format!("Auto-snapshot for Release #{} ({})", release_id, commit_info.short_sha),
+                    ts,
                     ts
                 ],
             ).ok();

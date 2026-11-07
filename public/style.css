@@ -479,6 +479,10 @@ select option,
 }
 
 .status-dot.offline { background: var(--danger); }
+.status-dot.maintenance {
+  background: var(--warning);
+  box-shadow: 0 0 10px var(--warning);
+}
 .status-dot.building { background: var(--warning); animation: pulseDot 1.2s infinite; }
 
 @keyframes pulseDot {
