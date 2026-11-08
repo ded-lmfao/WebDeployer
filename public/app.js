@@ -3983,8 +3983,9 @@ function copy2faSecret() {
 window.copy2faSecret = copy2faSecret;
 
 async function confirmEnable2fa() {
-  const code = (document.getElementById('tfa-verify-code')?.value || '').trim();
-  if (code.length < 6) {
+  const raw = (document.getElementById('tfa-verify-code')?.value || '').trim();
+  const code = raw.replace(/\D/g, '');
+  if (code.length !== 6) {
     toast('Please enter the 6-digit code from your authenticator app.', 'warning');
     return;
   }
@@ -3993,6 +3994,7 @@ async function confirmEnable2fa() {
     state.user.totpEnabled = true;
     state.lastRecoveryCodes = res.backupCodes || [];
     renderSecurityStatusSummary();
+    if (state.currentView === 'settings') loadSettingsView();
 
     const grid = document.getElementById('tfa-recovery-codes-grid');
     if (grid) {
@@ -4006,6 +4008,27 @@ async function confirmEnable2fa() {
   }
 }
 window.confirmEnable2fa = confirmEnable2fa;
+
+document.getElementById('tfa-setup-password')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    start2faSetup();
+  }
+});
+
+document.getElementById('tfa-verify-code')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmEnable2fa();
+  }
+});
+
+document.getElementById('tfa-disable-code')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    disable2fa();
+  }
+});
 
 function copyRecoveryCodes() {
   const codes = (state.lastRecoveryCodes || []).join('\n');
@@ -4072,7 +4095,7 @@ function renderTotpQrSvg(text) {
   try {
     const matrix = generateQrMatrix(text);
     const n = matrix.length;
-    const quiet = 2;
+    const quiet = 4;
     const total = n + quiet * 2;
     let paths = '';
     for (let r = 0; r < n; r++) {
@@ -4082,7 +4105,7 @@ function renderTotpQrSvg(text) {
         }
       }
     }
-    return `<svg viewBox="0 0 ${total} ${total}" width="140" height="140" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="${total}" height="${total}" fill="#ffffff"/><path d="${paths}" fill="#0f172a"/></svg>`;
+    return `<svg viewBox="0 0 ${total} ${total}" width="144" height="144" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="${total}" height="${total}" fill="#ffffff"/><path d="${paths}" fill="#0f172a"/></svg>`;
   } catch {
     return `<div style="font-size:11px; color:#0f172a; text-align:center; padding:8px;">Use Setup Key</div>`;
   }
@@ -4221,13 +4244,6 @@ function generateQrMatrix(text) {
   setFinder(0, size - 7);
   setFinder(size - 7, 0);
 
-  for (let i = 8; i < size - 8; i++) {
-    grid[6][i] = i % 2 === 0 ? 1 : 0;
-    reserved[6][i] = 1;
-    grid[i][6] = i % 2 === 0 ? 1 : 0;
-    reserved[i][6] = 1;
-  }
-
   const ALIGN_POS = [
     [],
     [],
@@ -4252,6 +4268,17 @@ function generateQrMatrix(text) {
           reserved[ar + r][ac + c] = 1;
         }
       }
+    }
+  }
+
+  for (let i = 8; i < size - 8; i++) {
+    if (!reserved[6][i]) {
+      grid[6][i] = i % 2 === 0 ? 1 : 0;
+      reserved[6][i] = 1;
+    }
+    if (!reserved[i][6]) {
+      grid[i][6] = i % 2 === 0 ? 1 : 0;
+      reserved[i][6] = 1;
     }
   }
 
@@ -4304,14 +4331,14 @@ function generateQrMatrix(text) {
     upward = !upward;
   }
 
-  // Format info for ECC Level L (01) + Mask 0 (000) -> 0x77c4
+  // Format info for ECC Level L (01) + Mask 0 (000) -> 0x77c4 (MSB bit 14 down to LSB bit 0)
   const fmtBits = 0x77c4;
   const fPos1 = [
     [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
     [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8],
   ];
   for (let i = 0; i < 15; i++) {
-    const bit = (fmtBits >>> i) & 1;
+    const bit = (fmtBits >>> (14 - i)) & 1;
     const [r1, c1] = fPos1[i];
     grid[r1][c1] = bit;
     if (i < 7) grid[size - 1 - i][8] = bit;

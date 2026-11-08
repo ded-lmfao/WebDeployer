@@ -308,18 +308,147 @@ pub fn compute_totp_at(secret_b32: &str, counter: u64) -> Option<String> {
     Some(format!("{:06}", otp))
 }
 
+static REAL_TIME_OFFSET_SECS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static REAL_TIME_SYNCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn query_ntp_unix_secs(host: &str) -> Option<u64> {
+    use std::net::{ToSocketAddrs, UdpSocket};
+    let addr = (host, 123).to_socket_addrs().ok()?.next()?;
+    let bind_addr = if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+    let sock = UdpSocket::bind(bind_addr).ok()?;
+    let timeout = std::time::Duration::from_millis(650);
+    sock.set_read_timeout(Some(timeout)).ok()?;
+    sock.set_write_timeout(Some(timeout)).ok()?;
+    let mut req = [0u8; 48];
+    req[0] = 0x1B; // LI=0, VN=3, Mode=3 (Client)
+    sock.send_to(&req, addr).ok()?;
+    let mut resp = [0u8; 48];
+    let (n, _) = sock.recv_from(&mut resp).ok()?;
+    if n < 48 {
+        return None;
+    }
+    let secs_1900 = u32::from_be_bytes([resp[40], resp[41], resp[42], resp[43]]) as u64;
+    if secs_1900 < 2_208_988_800 {
+        return None;
+    }
+    Some(secs_1900 - 2_208_988_800)
+}
+
+fn parse_http_date_secs(line: &str) -> Option<u64> {
+    // Format: "Date: Sun, 08 Nov 2026 06:58:12 GMT"
+    let val = line.splitn(2, ':').nth(1)?.trim();
+    let parts: Vec<&str> = val.split_whitespace().collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    let day: i64 = parts[1].parse().ok()?;
+    let month: i64 = match parts[2] {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: i64 = parts[3].parse().ok()?;
+    let mut hms = parts[4].split(':');
+    let hour: i64 = hms.next()?.parse().ok()?;
+    let min: i64 = hms.next()?.parse().ok()?;
+    let sec: i64 = hms.next()?.parse().ok()?;
+
+    // Howard Hinnant civil-to-days since 1970-01-01
+    let y = year - if month <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = month + if month > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    if days < 0 {
+        return None;
+    }
+    Some((days as u64) * 86400 + (hour as u64) * 3600 + (min as u64) * 60 + (sec as u64))
+}
+
+fn query_http_date_unix_secs(host: &str) -> Option<u64> {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+    let addr = (host, 80).to_socket_addrs().ok()?.next()?;
+    let timeout = std::time::Duration::from_millis(750);
+    let mut stream = TcpStream::connect_timeout(&addr, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let req = format!("HEAD / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", host);
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut buf = [0u8; 1024];
+    let n = stream.read(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf[..n]);
+    for line in text.lines() {
+        if line.len() > 6 && line[..5].eq_ignore_ascii_case("date:") {
+            if let Some(ts) = parse_http_date_secs(line) {
+                return Some(ts);
+            }
+        }
+    }
+    None
+}
+
+pub fn sync_real_utc_offset() {
+    use std::sync::atomic::Ordering;
+    let real_opt = query_ntp_unix_secs("time.google.com")
+        .or_else(|| query_ntp_unix_secs("time.cloudflare.com"))
+        .or_else(|| query_ntp_unix_secs("time.windows.com"))
+        .or_else(|| query_http_date_unix_secs("1.1.1.1"))
+        .or_else(|| query_http_date_unix_secs("www.google.com"));
+
+    if let Some(real_s) = real_opt {
+        let local_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let offset = (real_s as i64) - (local_s as i64);
+        REAL_TIME_OFFSET_SECS.store(offset, Ordering::Relaxed);
+        REAL_TIME_SYNCED.store(true, Ordering::Relaxed);
+    }
+}
+
 pub fn verify_totp_code(secret_b32: &str, code: &str) -> bool {
+    use std::sync::atomic::Ordering;
     let clean: String = code.chars().filter(|c| c.is_ascii_digit()).collect();
     if clean.len() != 6 {
         return false;
     }
-    let now_s = SystemTime::now()
+    if !REAL_TIME_SYNCED.load(Ordering::Relaxed) {
+        sync_real_utc_offset();
+    }
+    let local_now_s = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let step = now_s / 30;
-    for offset in [-1i64, 0, 1] {
-        let counter = (step as i64 + offset) as u64;
+
+    let offset_s = REAL_TIME_OFFSET_SECS.load(Ordering::Relaxed);
+    let real_now_s = (local_now_s as i64).saturating_add(offset_s).max(0) as u64;
+
+    // Check both real-world UTC time (synced via NTP/HTTP for phones on network time)
+    // and local machine clock (with ±2 steps = ±60s drift window)
+    let mut candidate_steps = Vec::with_capacity(12);
+    let real_step = (real_now_s / 30) as i64;
+    let local_step = (local_now_s / 30) as i64;
+    for delta in [-2i64, -1, 0, 1, 2] {
+        candidate_steps.push((real_step + delta) as u64);
+        if (real_step - local_step).abs() > 2 {
+            candidate_steps.push((local_step + delta) as u64);
+        }
+    }
+
+    for counter in candidate_steps {
         if let Some(expected) = compute_totp_at(secret_b32, counter) {
             if constant_time_eq(&expected, &clean) {
                 return true;
@@ -368,6 +497,9 @@ impl Auth {
             session_cache: Mutex::new(HashMap::new()),
         };
         auth.ensure_admin();
+        std::thread::spawn(|| {
+            sync_real_utc_offset();
+        });
         auth
     }
 
@@ -588,7 +720,7 @@ impl Auth {
     pub fn get_user_by_username(&self, username: &str) -> Option<(User, String)> {
         let conn = self.db.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at, password_hash FROM users WHERE username = ?",
+            "SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at, password_hash FROM users WHERE LOWER(username) = LOWER(?)",
             params![username],
             |r| {
                 Ok((

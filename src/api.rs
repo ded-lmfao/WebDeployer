@@ -634,9 +634,20 @@ async fn setup_2fa_handler(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save pending 2FA secret".to_string()))?;
     }
 
+    // Refresh real-world UTC offset in background so verification works even if local system clock is shifted
+    std::thread::spawn(|| {
+        crate::auth::sync_real_utc_offset();
+    });
+
+    let safe_label: String = user
+        .username
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+        .collect();
+    let label = if safe_label.is_empty() { "admin" } else { &safe_label };
     let otpauth_url = format!(
-        "otpauth://totp/WebDep:{}?secret={}&issuer=WebDep&algorithm=SHA1&digits=6&period=30",
-        user.username, secret
+        "otpauth://totp/WebDep:{}?secret={}&issuer=WebDep",
+        label, secret
     );
 
     Ok(Json(serde_json::json!({
@@ -697,6 +708,9 @@ async fn enable_2fa_handler(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to enable 2FA".to_string()))?;
     }
 
+    state.auth.invalidate_sessions();
+    state.cache.invalidate_all();
+
     log_audit(
         &state,
         &user.username,
@@ -749,6 +763,9 @@ async fn disable_2fa_handler(
         )
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to disable 2FA".to_string()))?;
     }
+
+    state.auth.invalidate_sessions();
+    state.cache.invalidate_all();
 
     log_audit(
         &state,
@@ -810,6 +827,9 @@ async fn admin_reset_user_2fa_handler(
         )
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
     }
+
+    state.auth.invalidate_sessions();
+    state.cache.invalidate_all();
 
     log_audit(
         &state,
