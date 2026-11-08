@@ -18,7 +18,7 @@ ADMIN_RESET_2FA=false
 # ============================================================================
 # Platform Server Settings
 # ============================================================================
-HOST=127.0.0.1
+HOST=0.0.0.0
 PORT=4600
 DATA_DIR=./data
 SESSION_TTL_S=604800
@@ -194,7 +194,7 @@ impl Config {
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(4600);
-        let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let data_dir = std::env::var("DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./data"));
