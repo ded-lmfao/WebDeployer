@@ -426,6 +426,23 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
+    // Dynamically ensure releases table has deployment_id, build_status, and health_status columns
+    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(releases)") {
+        let r_cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        if !r_cols.contains(&"deployment_id".to_string()) {
+            conn.execute_batch("ALTER TABLE releases ADD COLUMN deployment_id INTEGER;").ok();
+        }
+        if !r_cols.contains(&"build_status".to_string()) {
+            conn.execute_batch("ALTER TABLE releases ADD COLUMN build_status TEXT DEFAULT 'success';").ok();
+        }
+        if !r_cols.contains(&"health_status".to_string()) {
+            conn.execute_batch("ALTER TABLE releases ADD COLUMN health_status TEXT DEFAULT 'healthy';").ok();
+        }
+    }
+
     // Dynamically ensure audit table has project_id for per-website activity logs
     if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(audit)") {
         let a_cols: Vec<String> = stmt
@@ -485,7 +502,14 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             let mut norm_dir = deploy_dir.clone();
             if let Some(rel) = deploy_dir.strip_prefix("./").or_else(|| deploy_dir.strip_prefix(".\\")) {
                 let abs = cwd.join(rel);
-                norm_dir = abs.to_string_lossy().replace('/', "\\");
+                #[cfg(windows)]
+                {
+                    norm_dir = abs.to_string_lossy().replace('/', "\\");
+                }
+                #[cfg(not(windows))]
+                {
+                    norm_dir = abs.to_string_lossy().replace('\\', "/");
+                }
                 let _ = std::fs::create_dir_all(&norm_dir);
                 conn.execute(
                     "UPDATE projects SET deploy_dir = ? WHERE id = ?",

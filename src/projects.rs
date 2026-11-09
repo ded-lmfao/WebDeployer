@@ -620,7 +620,7 @@ mod tests {
         let sample = r#"
         # Comment line
         PORT=3000
-        DATABASE_URL="postgres://user:pass@localhost:5432/mydb?sslmode=disable"
+        APP_URL="http://localhost:3000"
         export JWT_SECRET='super-secret-key-123'
         DEBUG=true # inline comment
         SPACED_KEY = value with spaces
@@ -630,7 +630,7 @@ mod tests {
         let parsed = parse_dotenv(sample);
         assert_eq!(parsed.len(), 6);
         assert_eq!(parsed[0], ("PORT".into(), "3000".into()));
-        assert_eq!(parsed[1], ("DATABASE_URL".into(), "postgres://user:pass@localhost:5432/mydb?sslmode=disable".into()));
+        assert_eq!(parsed[1], ("APP_URL".into(), "http://localhost:3000".into()));
         assert_eq!(parsed[2], ("JWT_SECRET".into(), "super-secret-key-123".into()));
         assert_eq!(parsed[3], ("DEBUG".into(), "true".into()));
         assert_eq!(parsed[4], ("SPACED_KEY".into(), "value with spaces".into()));

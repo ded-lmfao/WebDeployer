@@ -477,8 +477,10 @@ a { color: var(--accent-light); }
   border: 1px solid var(--border-subtle);
   margin-bottom: 20px;
   overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
-.card .pipeline-track { border: none; margin-bottom: 0; padding: 4px 0; }
+.card .pipeline-track { border: none; margin-bottom: 0; padding: 8px 0 12px; }
 
 .water-pipeline-wrapper { display: flex; align-items: center; width: 100%; min-width: 820px; position: relative; }
 .water-stage-unit { display: flex; align-items: center; flex: 1; position: relative; min-width: 120px; }
@@ -538,7 +540,13 @@ a { color: var(--accent-light); }
 .water-pipe-meniscus { display: none; }
 
 /* ---------- Tables ---------- */
-.table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 6px;
+}
 .table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
 .table th {
   padding: 10px 16px;
@@ -801,28 +809,43 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .ws-btn-delete { background: transparent !important; border: 1px solid var(--danger-border) !important; color: var(--danger-light) !important; padding: 0 9px !important; }
 .ws-btn-delete:hover { background: var(--danger) !important; border-color: var(--danger) !important; color: #fff !important; }
 
-.ws-tabs-bar { display: flex; align-items: center; gap: 0; padding: 0 12px; border-top: 1px solid var(--border-subtle); overflow-x: auto; }
+.ws-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .ws-tab-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 7px 12px;
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
   background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  margin: 0;
   cursor: pointer;
   white-space: nowrap;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
+  flex-shrink: 0;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
   user-select: none;
 }
-.ws-tab-item svg { opacity: 0.6; }
-.ws-tab-item:hover { color: var(--text-main); }
-.ws-tab-item.active { color: var(--text-main); border-bottom-color: var(--text-main); }
+.ws-tab-item svg { opacity: 0.6; flex-shrink: 0; }
+.ws-tab-item:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.04); }
+.ws-tab-item.active {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-medium);
+}
 .ws-tab-item.active svg { opacity: 1; stroke: var(--text-main); }
 
 /* ---------- Pagination ---------- */
@@ -950,11 +973,17 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   .env-quick-submit .env-quick-label { display: none; }
   .gh-token-row { grid-template-columns: 1fr auto auto !important; }
   .gh-token-row .gh-token-label-input { grid-column: 1 / -1; }
-  .ws-banner-header { padding: 14px 16px 12px; gap: 12px; }
+  .ws-banner-header { padding: 14px 16px 14px; gap: 12px; }
   .ws-banner-identity { min-width: 0; width: 100%; }
-  .ws-actions-toolbar { width: 100%; justify-content: flex-start; gap: 6px; }
-  .ws-tabs-bar { padding: 0 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  .ws-tabs-bar::-webkit-scrollbar { display: none; }
+  .ws-actions-toolbar { width: 100%; justify-content: flex-start; gap: 8px; }
+  .ws-tabs-bar {
+    padding: 10px 12px 14px;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+  }
 
   /* Clean Bottom Navigation Bar (Overview, Websites, Add Site, Settings, Log Out) */
   .mobile-bottom-nav {
@@ -1030,15 +1059,40 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   .view-title-group h1 { font-size: 18px; }
   .view-title-group p { font-size: 12px; }
   .view-actions { width: 100%; gap: 6px; }
-  .filter-pills { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .filter-pills .pill { white-space: nowrap; }
+  .filter-pills {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px;
+  }
+  .filter-pills .pill { white-space: nowrap; flex-shrink: 0; }
 
   /* Hide non-essential container slug metadata in workspace banner on small screens */
   .ws-meta-optional { display: none; }
   .ws-banner { margin-bottom: 16px; }
   .ws-title { font-size: 17px; }
   .ws-meta-line { font-size: 12px; gap: 6px; }
-  .ws-tab-item { padding: 9px 11px; font-size: 12.5px; }
+  .ws-tabs-bar {
+    padding: 10px 12px 14px;
+    gap: 8px;
+  }
+  .ws-tab-item {
+    padding: 8px 12px;
+    font-size: 12.5px;
+    margin: 0;
+  }
+
+  /* Ensure all horizontal scrollers on mobile never scroll vertically and have space above scrollbar */
+  .table-responsive,
+  .pipeline-track,
+  .modal-tabs {
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    padding-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
 
   /* Flexible search and filter inputs on mobile */
   #projects-search-input,
@@ -1100,7 +1154,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 
 @media (max-width: 440px) {
   .top-header { padding: 0 12px; height: 50px; }
-  .content-area { padding: 14px 12px 26px; }
+  .content-area { padding: 14px 12px 78px; }
   .server-pill span#server-status-text { display: none; }
   .server-pill { padding: 5px; }
   .project-card { padding: 14px; }

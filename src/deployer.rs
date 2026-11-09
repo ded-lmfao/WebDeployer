@@ -617,7 +617,9 @@ fn switch_current(current_link: &Path, target_dir: &Path) {
         }
     });
     // Strip Windows \\?\ extended-length prefix if canonicalize added it, as cmd mklink /J prefers standard paths
+    #[cfg(windows)]
     let target_str = abs_target.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    #[cfg(windows)]
     let link_str = abs_link.to_string_lossy().trim_start_matches(r"\\?\").to_string();
 
     if abs_link.exists() || fs::symlink_metadata(&abs_link).is_ok() {

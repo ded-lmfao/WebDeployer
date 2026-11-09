@@ -16,7 +16,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.1.0">
+  <link rel="stylesheet" href="/style.css?v=3.3.0">
 </head>
 <body>
 
@@ -276,7 +276,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-overview-projects">
                   <thead>
                     <tr>
                       <th>Project</th>
@@ -304,7 +304,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-overview-recent">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -395,7 +395,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-commits">
                   <thead>
                     <tr>
                       <th>Commit</th>
@@ -451,7 +451,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-deployments">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -496,7 +496,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-releases">
                   <thead>
                     <tr>
                       <th>Release ID</th>
@@ -547,7 +547,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-rollbacks">
                   <thead>
                     <tr>
                       <th>Release ID</th>
@@ -656,11 +656,11 @@
             <form id="env-inline-add-form" class="env-quick-add-bar" onsubmit="handleInlineQuickAddEnv(event); return false;">
               <div class="env-quick-field env-quick-key">
                 <label class="env-quick-label" for="env-quick-key-input">Key</label>
-                <input type="text" id="env-quick-key-input" class="form-control env-mono-input" placeholder="e.g. DATABASE_URL (or paste KEY=VALUE)" autocomplete="off">
+                <input type="text" id="env-quick-key-input" class="form-control env-mono-input" placeholder="e.g. API_SECRET (or paste KEY=VALUE)" autocomplete="off">
               </div>
               <div class="env-quick-field env-quick-val">
                 <label class="env-quick-label" for="env-quick-val-input">Value</label>
-                <input type="text" id="env-quick-val-input" class="form-control env-mono-input" placeholder="e.g. postgres://user:pass@localhost:5432/db" autocomplete="off">
+                <input type="text" id="env-quick-val-input" class="form-control env-mono-input" placeholder="e.g. your-secret-value" autocomplete="off">
               </div>
               <div class="env-quick-field env-quick-type">
                 <label class="env-quick-label">Visibility</label>
@@ -796,7 +796,7 @@
                   </label>
                 </div>
               </div>
-              <textarea id="env-raw-editor-textarea" class="form-control env-raw-textarea" rows="16" spellcheck="false" placeholder="# Paste or edit your .env variables here&#10;PORT=3000&#10;NODE_ENV=production&#10;DATABASE_URL=postgres://user:pass@localhost:5432/mydb&#10;JWT_SECRET=your-secret-key"></textarea>
+              <textarea id="env-raw-editor-textarea" class="form-control env-raw-textarea" rows="16" spellcheck="false" placeholder="# Paste or edit your .env variables here&#10;PORT=3000&#10;NODE_ENV=production&#10;JWT_SECRET=your-secret-key"></textarea>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 10px;">
                 <span id="env-raw-line-stats" style="font-size: 12px; color: var(--text-dim);">0 variables detected</span>
                 <div style="display: flex; gap: 8px;">
@@ -830,7 +830,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-backups">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -887,7 +887,7 @@
             <div class="card-header"><span class="card-title">Per-Project Resource Usage</span></div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-monitor">
                   <thead>
                     <tr>
                       <th>Project</th>
@@ -1024,7 +1024,7 @@
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-users">
                   <thead>
                     <tr>
                       <th>Username</th>
@@ -1073,7 +1073,7 @@
           <div class="card">
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
-                <table class="table">
+                <table class="table tbl-audit">
                   <thead>
                     <tr>
                       <th>Time</th>
@@ -1326,11 +1326,11 @@
           <form id="add-env-form" onsubmit="handleSaveEnv(event); return false;">
             <div class="form-group">
               <label class="form-label" for="env-key-input">Variable Key *</label>
-              <input type="text" id="env-key-input" class="form-control" placeholder="DATABASE_URL">
+              <input type="text" id="env-key-input" class="form-control" placeholder="API_SECRET">
             </div>
             <div class="form-group">
               <label class="form-label" for="env-value-input">Value *</label>
-              <textarea id="env-value-input" class="form-control" rows="3" placeholder="postgres://user:pass@localhost/db"></textarea>
+              <textarea id="env-value-input" class="form-control" rows="3" placeholder="your-secret-value"></textarea>
             </div>
             <div class="form-group">
               <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
@@ -1350,7 +1350,7 @@
             </button>
           </div>
           <div class="form-group">
-            <textarea id="env-bulk-input" class="form-control" rows="11" placeholder="# Paste your .env file here&#10;PORT=3000&#10;DATABASE_URL=postgres://user:pass@localhost:5432/mydb&#10;JWT_SECRET=supersecret123&#10;NODE_ENV=production" style="font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre;"></textarea>
+            <textarea id="env-bulk-input" class="form-control" rows="11" placeholder="# Paste your .env file here&#10;PORT=3000&#10;JWT_SECRET=supersecret123&#10;NODE_ENV=production" style="font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre;"></textarea>
             <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Supports KEY=VALUE, comments (#), optional "export", and quoted strings.</p>
           </div>
           <div class="form-group" style="display: flex; flex-direction: column; gap: 8px;">
@@ -1759,7 +1759,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.1.0"></script>
+  <script type="module" src="/app.js?v=3.3.0"></script>
 </body>
 </html>
 
