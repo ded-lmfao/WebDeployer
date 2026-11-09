@@ -36,6 +36,13 @@ const state = {
   pageRenderers: {},
 };
 
+function setHtmlIfChanged(el, html) {
+  if (!el) return;
+  if (el._lastHtml === html) return;
+  el._lastHtml = html;
+  el.innerHTML = html;
+}
+
 function paginateAndRender(items, pageKey, paginationElId, renderPageFn) {
   const list = Array.isArray(items) ? items : [];
   const total = list.length;
@@ -67,7 +74,7 @@ function paginateAndRender(items, pageKey, paginationElId, renderPageFn) {
     pagesToShow.push(p);
   }
 
-  bar.innerHTML = `
+  const nextBarHtml = `
     <div class="pagination-info">
       Showing <strong>${startIdx + 1}&ndash;${endIdx}</strong> of <strong>${total}</strong> <span style="opacity:0.65;">(${PAGE_SIZE} per page)</span>
     </div>
@@ -79,6 +86,10 @@ function paginateAndRender(items, pageKey, paginationElId, renderPageFn) {
       <button type="button" class="page-btn" ${curPage >= totalPages ? 'disabled' : ''} onclick="goToTablePage('${pageKey}', ${curPage + 1})">Next &rsaquo;</button>
     </div>
   `;
+  if (bar.getAttribute('data-sig') !== `${startIdx}:${endIdx}:${total}:${curPage}`) {
+    bar.setAttribute('data-sig', `${startIdx}:${endIdx}:${total}:${curPage}`);
+    bar.innerHTML = nextBarHtml;
+  }
 }
 
 function goToTablePage(pageKey, pageNum) {
@@ -674,112 +685,117 @@ function renderWebsiteWorkspaceHeader() {
     }
   }
 
-  const links = document.getElementById('ws-project-links');
-  if (links) {
-    const url = p.port ? `http://127.0.0.1:${p.port}` : null;
-    const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
-    const customDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
-    const domainLinksHtml = customDomains.map((d) => `
-      <a class="ws-meta-link active" href="https://${escapeHtml(d)}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Open custom domain https://${escapeHtml(d)}">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-        <span>${escapeHtml(d)}</span>
-      </a>
-      <span class="ws-meta-sep">&bull;</span>
-    `).join('');
+  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}`;
+  if (state.lastWsBannerSig !== bannerSig) {
+    state.lastWsBannerSig = bannerSig;
 
-    links.innerHTML = `
-      ${domainLinksHtml}
-      ${url ? (isOnline
-        ? `<a class="ws-meta-link active" href="${url}" target="_blank" title="Open live website in new tab">
-             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-             <span>${url} (Online)</span>
-           </a>`
-        : isMaintenance
-          ? `<a class="ws-meta-link active" href="${url}" target="_blank" style="color:#fbbf24;" title="Open live Maintenance Page in new tab">
-               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-               <span>${url} (Maintenance)</span>
-             </a>`
-          : `<span class="ws-meta-link offline" title="Website is offline">
-               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-               <span>${url} (Offline)</span>
-             </span>`
-      ) : ''}
-      <span class="ws-meta-sep">&bull;</span>
-      <span class="ws-meta-item" title="Git Branch">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
-        <span style="color:var(--text-main); font-weight:600;">${escapeHtml(p.branch || 'main')}</span>
-      </span>
-      <span class="ws-meta-sep">&bull;</span>
-      <span class="ws-meta-item" title="Deployed Commit SHA">
-        <code class="ws-meta-sha">${escapeHtml(sha)}</code>
-      </span>
-      ${p.port ? `
+    const links = document.getElementById('ws-project-links');
+    if (links) {
+      const url = p.port ? `http://127.0.0.1:${p.port}` : null;
+      const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
+      const customDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
+      const domainLinksHtml = customDomains.map((d) => `
+        <a class="ws-meta-link active" href="https://${escapeHtml(d)}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Open custom domain https://${escapeHtml(d)}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <span>${escapeHtml(d)}</span>
+        </a>
         <span class="ws-meta-sep">&bull;</span>
-        <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
-      ` : ''}
-      <span class="ws-meta-sep">&bull;</span>
-      <span class="ws-meta-item" style="color:var(--text-dim);" title="Container ID">ctr-${escapeHtml(p.slug)}</span>
-    `;
-  }
+      `).join('');
 
-  const actions = document.getElementById('ws-project-actions');
-  if (actions) {
-    actions.innerHTML = `
-      <div class="ws-actions-group">
-        ${hasPower('deploy') ? `
-          <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="13 2 13 9 20 9"></polyline><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
-            <span>Deploy</span>
-          </button>
-          <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})" title="Fetch updates from GitHub">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-            <span>Fetch</span>
-          </button>
+      links.innerHTML = `
+        ${domainLinksHtml}
+        ${url ? (isOnline
+          ? `<a class="ws-meta-link active" href="${url}" target="_blank" title="Open live website in new tab">
+               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+               <span>${url} (Online)</span>
+             </a>`
+          : isMaintenance
+            ? `<a class="ws-meta-link active" href="${url}" target="_blank" style="color:#fbbf24;" title="Open live Maintenance Page in new tab">
+                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                 <span>${url} (Maintenance)</span>
+               </a>`
+            : `<span class="ws-meta-link offline" title="Website is offline">
+                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                 <span>${url} (Offline)</span>
+               </span>`
+        ) : ''}
+        <span class="ws-meta-sep">&bull;</span>
+        <span class="ws-meta-item" title="Git Branch">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+          <span style="color:var(--text-main); font-weight:600;">${escapeHtml(p.branch || 'main')}</span>
+        </span>
+        <span class="ws-meta-sep">&bull;</span>
+        <span class="ws-meta-item" title="Deployed Commit SHA">
+          <code class="ws-meta-sha">${escapeHtml(sha)}</code>
+        </span>
+        ${p.port ? `
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
         ` : ''}
-        ${hasPower('process') ? `
-          ${!isOnline
-            ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
-                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                 <span>Start</span>
-               </button>`
-            : ''
-          }
-          ${isOnline || isMaintenance
-            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop website and release port">
-                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                 <span>Stop</span>
-               </button>`
-            : ''
-          }
-          <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
-            <span>Restart</span>
-          </button>
-          <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode (serves Maintenance Page on IP & domain)'}" style="${isMaintenance ? 'background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-            <span>${isMaintenance ? 'Exit Maintenance' : 'Maintenance'}</span>
-          </button>
-        ` : ''}
-      </div>
+        <span class="ws-meta-sep ws-meta-optional">&bull;</span>
+        <span class="ws-meta-item ws-meta-optional" style="color:var(--text-dim);" title="Container ID">ctr-${escapeHtml(p.slug)}</span>
+      `;
+    }
 
-      <div class="ws-actions-group">
-        ${hasPower('domains') ? `
-          <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-            <span>Domains &amp; SSL</span>
-          </button>
-        ` : ''}
-        ${hasPower('projects_manage') ? `
-          <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-            <span>Settings</span>
-          </button>
-          <button class="btn btn-sm ws-btn-delete" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          </button>
-        ` : ''}
-      </div>
-    `;
+    const actions = document.getElementById('ws-project-actions');
+    if (actions) {
+      actions.innerHTML = `
+        <div class="ws-actions-group">
+          ${hasPower('deploy') ? `
+            <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="13 2 13 9 20 9"></polyline><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+              <span>Deploy</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="fetchProjectUpdates(${p.id})" title="Fetch updates from GitHub">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              <span>Fetch</span>
+            </button>
+          ` : ''}
+          ${hasPower('process') ? `
+            ${!isOnline
+              ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
+                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                   <span>Start</span>
+                 </button>`
+              : ''
+            }
+            ${isOnline || isMaintenance
+              ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop website and release port">
+                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                   <span>Stop</span>
+                 </button>`
+              : ''
+            }
+            <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
+              <span>Restart</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode (serves Maintenance Page on IP & domain)'}" style="${isMaintenance ? 'background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              <span>${isMaintenance ? 'Exit Maintenance' : 'Maintenance'}</span>
+            </button>
+          ` : ''}
+        </div>
+
+        <div class="ws-actions-group">
+          ${hasPower('domains') ? `
+            <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+              <span>Domains &amp; SSL</span>
+            </button>
+          ` : ''}
+          ${hasPower('projects_manage') ? `
+            <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              <span>Settings</span>
+            </button>
+            <button class="btn btn-sm ws-btn-delete" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }
   }
 
   const tabPowerMap = {
@@ -821,6 +837,9 @@ function renderCurrentView() {
   const activeSidebarView = WEBSITE_WORKSPACE_TABS.has(state.currentView) ? 'projects' : state.currentView;
   document.querySelectorAll('.nav-item').forEach((item) => {
     item.classList.toggle('active', item.getAttribute('data-view') === activeSidebarView);
+  });
+  document.querySelectorAll('#mobile-bottom-nav .mobile-nav-item[data-mobile-view]').forEach((item) => {
+    item.classList.toggle('active', item.getAttribute('data-mobile-view') === activeSidebarView);
   });
 
   // Switch view section visibility
@@ -1555,7 +1574,7 @@ async function loadDeploymentsView() {
     }
 
     paginateAndRender(deployments, 'deployments', 'deployments-pagination', (slice) => {
-      tbody.innerHTML = slice.map((d) => renderDeploymentRow(d)).join('');
+      setHtmlIfChanged(tbody, slice.map((d) => renderDeploymentRow(d)).join(''));
     });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
@@ -1938,7 +1957,7 @@ async function openDeploymentDetails(depId) {
     const dur = d.finished_at ? `${Math.round((d.finished_at - d.started_at) / 1000)} seconds` : 'Still running...';
 
     meta.innerHTML = `
-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 13px; margin-bottom: 12px; background: var(--bg-card); padding: 12px; border-radius: var(--radius-md);">
+      <div class="modal-grid-3" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 13px; margin-bottom: 12px; background: var(--bg-card); padding: 12px; border-radius: var(--radius-md);">
         <div><strong>Status:</strong> <span class="badge ${d.status === 'success' ? 'badge-success' : d.status === 'failed' ? 'badge-danger' : 'badge-warning'}">${d.status}</span></div>
         <div><strong>Kind:</strong> ${d.kind}</div>
         <div><strong>Trigger:</strong> ${d.trigger} (${d.actor})</div>
@@ -1979,7 +1998,7 @@ async function loadReleasesView() {
     }
 
     paginateAndRender(releases, 'releases', 'releases-pagination', (slice) => {
-      tbody.innerHTML = slice.map((r) => {
+      setHtmlIfChanged(tbody, slice.map((r) => {
         const isLive = r.live;
         return `
           <tr>
@@ -2000,7 +2019,7 @@ async function loadReleasesView() {
             </td>
           </tr>
         `;
-      }).join('');
+      }).join(''));
     });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
@@ -2038,7 +2057,7 @@ async function loadRollbacksView() {
     }
 
     paginateAndRender(eligible, 'rollbacks', 'rollbacks-pagination', (slice) => {
-      tbody.innerHTML = slice.map((r) => `
+      setHtmlIfChanged(tbody, slice.map((r) => `
         <tr>
           <td><strong>Release #${r.id}</strong></td>
           <td><span class="sha-pill">${r.sha.slice(0, 7)}</span></td>
@@ -2050,7 +2069,7 @@ async function loadRollbacksView() {
             <button class="btn btn-danger btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Instant Rollback</button>
           </td>
         </tr>
-      `).join('');
+      `).join(''));
     });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
@@ -3162,7 +3181,7 @@ async function loadBackupsView() {
     }
 
     paginateAndRender(backups, 'backups', 'backups-pagination', (slice) => {
-      tbody.innerHTML = slice.map((b) => {
+      setHtmlIfChanged(tbody, slice.map((b) => {
         const sizeStr = b.size >= 1048576
           ? `${(b.size / 1048576).toFixed(2)} MB`
           : `${Math.max(1, Math.round((b.size || 4096) / 1024))} KB`;
@@ -3181,7 +3200,7 @@ async function loadBackupsView() {
             </td>
           </tr>
         `;
-      }).join('');
+      }).join(''));
     });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
@@ -3395,7 +3414,7 @@ async function loadMonitorView() {
       ? (data.projects || []).filter((p) => p.id === activeProject.id)
       : (data.projects || []);
     const tbody = document.getElementById('monitor-projects-table');
-    tbody.innerHTML = monProjects.map((p) => {
+    setHtmlIfChanged(tbody, monProjects.map((p) => {
       const appSt = p.status?.appStatus || (p.status?.running ? 'running' : 'stopped');
       const isOnline = appSt === 'running';
       const isMaint = appSt === 'maintenance';
@@ -3412,7 +3431,7 @@ async function loadMonitorView() {
         <td><span class="badge ${p.deployStatus?.status === 'success' ? 'badge-success' : 'badge-neutral'}">${p.deployStatus?.status || 'idle'}</span></td>
       </tr>
     `;
-    }).join('');
+    }).join(''));
   } catch (err) {
     console.error('Monitor view error:', err);
   }

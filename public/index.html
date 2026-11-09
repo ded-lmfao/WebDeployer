@@ -16,7 +16,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=2.7.0">
+  <link rel="stylesheet" href="/style.css?v=3.1.0">
 </head>
 <body>
 
@@ -1094,6 +1094,32 @@
         </section>
 
       </main>
+
+      <!-- MOBILE BOTTOM NAVIGATION BAR -->
+      <nav class="mobile-bottom-nav" id="mobile-bottom-nav" aria-label="Mobile Navigation">
+        <button type="button" class="mobile-nav-item active" data-mobile-view="overview" onclick="navigateTo('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>Overview</span>
+        </button>
+        <button type="button" class="mobile-nav-item" data-mobile-view="projects" onclick="navigateTo('projects')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <span>Websites</span>
+        </button>
+        <button type="button" class="mobile-nav-item mobile-nav-add" onclick="openAddWebsiteModal()">
+          <div class="mobile-nav-add-circle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </div>
+          <span>Add Site</span>
+        </button>
+        <button type="button" class="mobile-nav-item" data-mobile-view="settings" onclick="navigateTo('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
+        </button>
+        <button type="button" class="mobile-nav-item mobile-nav-logout" onclick="document.getElementById('logout-btn')?.click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          <span>Log Out</span>
+        </button>
+      </nav>
     </div>
   </div>
 
@@ -1130,7 +1156,7 @@
           <input type="hidden" id="website-form-id">
           
           <!-- Row 1: Name, Port, Branch -->
-          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div class="modal-grid-3" style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="website-name">Website Name *</label>
               <input type="text" id="website-name" class="form-control" placeholder="e.g. LSMD Portal" required>
@@ -1146,7 +1172,7 @@
           </div>
 
           <!-- Row 2: GitHub Repository & Optional Domain -->
-          <div style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div class="modal-grid-2" style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <label class="form-label" for="website-repo">GitHub Repository URL *</label>
@@ -1162,7 +1188,7 @@
           </div>
 
           <!-- Row 3: Commands (Install, Build, Start in 1 clean row) -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; margin-bottom: 14px;">
+          <div class="modal-grid-3" style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; margin-bottom: 14px;">
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="website-install-cmd">Install Command</label>
               <input type="text" id="website-install-cmd" class="form-control" placeholder="npm ci">
@@ -1193,7 +1219,7 @@
           <details class="minimal-details">
             <summary>Advanced Container &amp; Health Settings</summary>
             <div class="minimal-details-body">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
                 <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label" for="website-slug">Container Slug *</label>
                   <input type="text" id="website-slug" class="form-control" placeholder="my-saas-api" required>
@@ -1209,7 +1235,7 @@
                   </select>
                 </div>
               </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label" for="website-deploy-dir">Isolated Site Directory *</label>
                   <input type="text" id="website-deploy-dir" class="form-control" placeholder="./data/sites/my-saas-api" required>
@@ -1419,7 +1445,7 @@
 
           <div class="form-group">
             <label class="form-label">Granular Powers (Permissions)</label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+            <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
               <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
                 <input type="checkbox" class="user-power-check" value="deploy" checked>
                 <span>Deploy, Fetch & Rollback</span>
@@ -1456,14 +1482,14 @@
           </div>
 
           <div class="form-group">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
               <label class="form-label" style="margin-bottom: 0;">Website Access</label>
               <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--accent);">
                 <input type="checkbox" id="user-all-projects-check" checked>
                 <span>Allow Access to All Websites (*)</span>
               </label>
             </div>
-            <div id="user-projects-checklist" style="max-height: 150px; overflow-y: auto; background: var(--bg-input); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div id="user-projects-checklist" class="modal-grid-2" style="max-height: 150px; overflow-y: auto; background: var(--bg-input); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
             </div>
             <span class="form-hint">Uncheck "Allow Access to All Websites" to restrict this user to specific websites only.</span>
           </div>
@@ -1560,7 +1586,7 @@
 
             <!-- Step 2: Scan QR + Verify 6-digit code -->
             <div id="sec-2fa-step2-verify" style="display: none;">
-              <div style="display: grid; grid-template-columns: 168px 1fr; gap: 16px; align-items: center; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px; margin-bottom: 14px;">
+              <div class="tfa-qr-grid" style="display: grid; grid-template-columns: 168px 1fr; gap: 16px; align-items: center; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px; margin-bottom: 14px;">
                 <div id="tfa-qr-container" style="width: 156px; height: 156px; background: #fff; padding: 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center;"></div>
                 <div>
                   <div style="font-size: 12.5px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">1. Scan with Authenticator App</div>
@@ -1733,7 +1759,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=2.6.0"></script>
+  <script type="module" src="/app.js?v=3.1.0"></script>
 </body>
 </html>
 
