@@ -287,7 +287,12 @@ async function networkFetch(path, options = {}) {
     clearTimeout(timeoutId);
   }
 
-  if (res.status === 401 && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/2fa/verify-login')) {
+  if (
+    res.status === 401
+    && !path.startsWith('/api/auth/login')
+    && !path.startsWith('/api/auth/2fa/verify-login')
+    && !path.startsWith('/api/auth/passkeys/login/')
+  ) {
     invalidateClientCache();
     showLogin();
     throw new Error('Session expired. Please log in again.');
@@ -1526,9 +1531,7 @@ document.getElementById('github-check-btn')?.addEventListener('click', async () 
   try {
     const res = await api(`/api/projects/${p.id}/check`, { method: 'POST' });
     if (res.needsFetch) {
-      toast(`New commits detected on remote (${res.remote_sha.slice(0, 7)})! Fetching...`, 'info');
-      await api(`/api/projects/${p.id}/fetch`, { method: 'POST' });
-      await loadGithubView();
+      toast(`New commits available on remote (${res.remote_sha.slice(0, 7)})! Click "Fetch Updates" to pull them.`, 'info');
     } else {
       toast('Repository is up to date with remote.', 'success');
     }
@@ -4768,8 +4771,17 @@ async function loadPasskeysList() {
 window.loadPasskeysList = loadPasskeysList;
 
 async function registerNewPasskey() {
-  if (!window.PublicKeyCredential || !navigator.credentials?.create) {
-    toast('Passkeys / WebAuthn require HTTPS (your domain SSL) or localhost in a modern browser.', 'warning');
+  if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials?.create) {
+    const origin = window.location.origin;
+    toast(
+      `Passkeys / Biometrics require HTTPS (https://your-domain.com) or localhost. Current URL (${origin}) is plain HTTP.`,
+      'warning'
+    );
+    await showCopyDialog({
+      title: 'HTTPS Required for Face ID / Fingerprint (WebAuthn)',
+      message: `Browsers block Face ID, Touch ID, and Fingerprint on plain HTTP IP URLs (${origin}).\n\n• On iPhone / Android: Open this panel via your HTTPS domain (https://...).\n• On Desktop Chrome / Brave / Edge (for testing over HTTP IP): Open chrome://flags/#unsafely-treat-insecure-origin-as-secure and paste this origin:`,
+      value: origin,
+    });
     return;
   }
   const nameInput = document.getElementById('passkey-device-name');
@@ -4781,47 +4793,68 @@ async function registerNewPasskey() {
   }
   try {
     const start = await api('/api/auth/passkeys/register/start', { method: 'POST', body: {} });
-    const publicKey = {
-      challenge: base64UrlToUint8Array(start.challenge),
-      rp: {
-        name: 'WebDep Deployment Platform',
-        id: window.location.hostname,
-      },
-      user: {
-        id: base64UrlToUint8Array(start.user.id),
-        name: start.user.name,
-        displayName: start.user.displayName,
-      },
-      pubKeyCredParams: [
-        { type: 'public-key', alg: -7 }, // ES256 (NIST P-256)
-      ],
-      authenticatorSelection: {
+    const buildOptions = (usePlatformAttachment) => {
+      const authenticatorSelection = {
         userVerification: 'preferred',
         residentKey: 'preferred',
-      },
-      timeout: 60000,
-      attestation: 'none',
-      excludeCredentials: (start.excludeCredentials || []).map((cid) => ({
-        type: 'public-key',
-        id: base64UrlToUint8Array(cid),
-      })),
+      };
+      if (usePlatformAttachment) {
+        authenticatorSelection.authenticatorAttachment = 'platform';
+      }
+      return {
+        challenge: base64UrlToUint8Array(start.challenge),
+        rp: {
+          name: 'WebDep Deployment Platform',
+        },
+        user: {
+          id: base64UrlToUint8Array(start.user.id),
+          name: start.user.name,
+          displayName: start.user.displayName,
+        },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 },   // ES256 (NIST P-256)
+          { type: 'public-key', alg: -257 }, // RS256 fallback for spec compliance
+        ],
+        authenticatorSelection,
+        timeout: 60000,
+        attestation: 'none',
+        excludeCredentials: (start.excludeCredentials || []).map((cid) => ({
+          type: 'public-key',
+          id: base64UrlToUint8Array(cid),
+        })),
+      };
     };
 
-    const cred = await navigator.credentials.create({ publicKey });
+    let cred;
+    try {
+      cred = await navigator.credentials.create({ publicKey: buildOptions(true) });
+    } catch (platformErr) {
+      if (platformErr && (platformErr.name === 'NotSupportedError' || platformErr.name === 'InvalidStateError')) {
+        cred = await navigator.credentials.create({ publicKey: buildOptions(false) });
+      } else {
+        throw platformErr;
+      }
+    }
+
     if (!cred || !cred.response) {
       throw new Error('Passkey registration was cancelled.');
     }
 
     let publicKeySpki = null;
-    if (typeof cred.response.getPublicKey === 'function') {
-      const spkiBuf = cred.response.getPublicKey();
-      if (spkiBuf) publicKeySpki = bufferToBase64Url(spkiBuf);
-    }
+    try {
+      if (typeof cred.response.getPublicKey === 'function') {
+        const spkiBuf = cred.response.getPublicKey();
+        if (spkiBuf) publicKeySpki = bufferToBase64Url(spkiBuf);
+      }
+    } catch (_) {}
+
     let authenticatorData = null;
-    if (typeof cred.response.getAuthenticatorData === 'function') {
-      const adBuf = cred.response.getAuthenticatorData();
-      if (adBuf) authenticatorData = bufferToBase64Url(adBuf);
-    }
+    try {
+      if (typeof cred.response.getAuthenticatorData === 'function') {
+        const adBuf = cred.response.getAuthenticatorData();
+        if (adBuf) authenticatorData = bufferToBase64Url(adBuf);
+      }
+    } catch (_) {}
 
     const finishRes = await api('/api/auth/passkeys/register/finish', {
       method: 'POST',
@@ -4883,8 +4916,11 @@ async function deletePasskey(id, name) {
 window.deletePasskey = deletePasskey;
 
 async function loginWithPasskey() {
-  if (!window.PublicKeyCredential || !navigator.credentials?.get) {
-    toast('Passkeys / Biometrics require HTTPS (domain SSL) or localhost in a modern browser.', 'warning');
+  if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials?.get) {
+    toast(
+      `Passkeys / Biometrics require HTTPS (https://your-domain.com) or localhost. Current URL (${window.location.origin}) is plain HTTP.`,
+      'warning'
+    );
     return;
   }
   const username = (document.getElementById('login-username')?.value || '').trim();
@@ -4904,7 +4940,6 @@ async function loginWithPasskey() {
     }));
     const publicKey = {
       challenge: base64UrlToUint8Array(start.challenge),
-      rpId: window.location.hostname,
       userVerification: 'preferred',
       timeout: 60000,
     };

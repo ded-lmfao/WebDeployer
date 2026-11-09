@@ -1,8 +1,10 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Semaphore;
 use tokio::time::{sleep, Duration};
 
 use crate::cache::AppCache;
@@ -59,6 +61,12 @@ pub struct Deployer {
     runtime: Arc<Runtime>,
     cache: Arc<AppCache>,
     data_dir: PathBuf,
+    /// Global FIFO concurrency limit: allows only 1 deployment/rollback at a time to protect 1 GB VPS RAM
+    queue_semaphore: Arc<Semaphore>,
+    /// Tracks active or queued deployment ID per project_id to prevent duplicate concurrent deployments for the same website
+    active_projects: Arc<Mutex<HashMap<i64, i64>>>,
+    /// Tracks deployment IDs that already have a worker task spawned
+    spawned_deployments: Arc<Mutex<HashSet<i64>>>,
 }
 
 impl Deployer {
@@ -70,6 +78,14 @@ impl Deployer {
         cache: Arc<AppCache>,
         data_dir: PathBuf,
     ) -> Self {
+        // Clean up any stale deployments left in 'pending' or 'running' from a previous server restart/crash
+        if let Ok(conn) = db.lock() {
+            let _ = conn.execute(
+                "UPDATE deployments SET status='failed', stage='failed', error='Interrupted by server restart', finished_at=? WHERE status IN ('pending', 'running')",
+                params![now()],
+            );
+        }
+
         Self {
             db,
             logs,
@@ -77,7 +93,39 @@ impl Deployer {
             runtime,
             cache,
             data_dir,
+            queue_semaphore: Arc::new(Semaphore::new(1)),
+            active_projects: Arc::new(Mutex::new(HashMap::new())),
+            spawned_deployments: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    pub fn has_active_deployment(&self, project_id: i64) -> bool {
+        if let Ok(map) = self.active_projects.lock() {
+            if map.contains_key(&project_id) {
+                return true;
+            }
+        }
+        if let Ok(conn) = self.db.lock() {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM deployments WHERE project_id = ? AND status IN ('pending', 'running')",
+                    params![project_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            return count > 0;
+        }
+        false
+    }
+
+    pub fn last_attempted_sha(&self, project_id: i64) -> Option<String> {
+        let conn = self.db.lock().ok()?;
+        conn.query_row(
+            "SELECT sha FROM deployments WHERE project_id = ? AND sha IS NOT NULL AND sha != '' ORDER BY id DESC LIMIT 1",
+            params![project_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
     }
 
     pub fn list_deployments(&self, project_id: Option<i64>, limit: usize) -> Vec<Deployment> {
@@ -240,15 +288,54 @@ impl Deployer {
     }
 
     pub fn create_deployment(&self, p: &Project, kind: &str, actor: &str, trigger: &str) -> i64 {
+        let mut active_map = self.active_projects.lock().unwrap();
+        if let Some(&existing_id) = active_map.get(&p.id) {
+            let still_active = {
+                let conn = self.db.lock().unwrap();
+                conn.query_row(
+                    "SELECT COUNT(*) FROM deployments WHERE id = ? AND status IN ('pending', 'running')",
+                    params![existing_id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                    > 0
+            };
+            if still_active {
+                self.logs.add(
+                    Some(p.id),
+                    Some(existing_id),
+                    "deployment",
+                    "info",
+                    &format!(
+                        "Skipping duplicate {} request (trigger: {}) — deployment #{} is already active or queued for {}",
+                        kind, trigger, existing_id, p.name
+                    ),
+                );
+                return existing_id;
+            }
+            active_map.remove(&p.id);
+        }
+
         let ts = now();
         let id = {
             let conn = self.db.lock().unwrap();
+            if let Ok(existing_db_id) = conn.query_row(
+                "SELECT id FROM deployments WHERE project_id = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1",
+                params![p.id],
+                |r| r.get::<_, i64>(0),
+            ) {
+                active_map.insert(p.id, existing_db_id);
+                return existing_db_id;
+            }
+
             conn.execute(
                 "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) VALUES(?, ?, 'pending', 'pending', ?, ?, ?)",
                 params![p.id, kind, trigger, actor, ts],
             ).ok();
             conn.last_insert_rowid()
         };
+        active_map.insert(p.id, id);
+        drop(active_map);
         self.cache.invalidate_project(p.id);
         id
     }
@@ -300,13 +387,57 @@ impl Deployer {
         }
         drop(conn);
         if let Some(pid) = pid_opt {
+            if let Ok(mut active_map) = self.active_projects.lock() {
+                if active_map.get(&pid) == Some(&dep_id) {
+                    active_map.remove(&pid);
+                }
+            }
             self.cache.invalidate_project(pid);
         } else {
             self.cache.invalidate_all();
         }
+        if let Ok(mut spawned) = self.spawned_deployments.lock() {
+            spawned.remove(&dep_id);
+        }
     }
 
     pub async fn run_deploy(self: Arc<Self>, project_id: i64, dep_id: i64) {
+        {
+            let mut spawned = self.spawned_deployments.lock().unwrap();
+            if !spawned.insert(dep_id) {
+                // Worker already running or queued for this deployment ID
+                return;
+            }
+        }
+
+        let permit = match self.queue_semaphore.clone().try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => {
+                self.logs.add(
+                    Some(project_id),
+                    Some(dep_id),
+                    "deployment",
+                    "info",
+                    &format!(
+                        "Deployment #{} queued — waiting for current active deployment to finish (1-at-a-time concurrency limit)",
+                        dep_id
+                    ),
+                );
+                match self.queue_semaphore.clone().acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        self.finish_deployment(dep_id, "failed", Some("Deployment queue closed"));
+                        return;
+                    }
+                }
+            }
+        };
+
+        self.execute_deploy_inner(project_id, dep_id).await;
+        drop(permit);
+    }
+
+    async fn execute_deploy_inner(&self, project_id: i64, dep_id: i64) {
         let p = match self.projects.get(project_id) {
             Ok(Some(p)) => p,
             _ => {
@@ -551,10 +682,41 @@ impl Deployer {
     }
 
     pub async fn run_rollback(self: Arc<Self>, project_id: i64, dep_id: i64, target_release_id: i64) {
+        {
+            let mut spawned = self.spawned_deployments.lock().unwrap();
+            if !spawned.insert(dep_id) {
+                return;
+            }
+        }
+
+        let permit = match self.queue_semaphore.clone().try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => {
+                self.logs.add(
+                    Some(project_id),
+                    Some(dep_id),
+                    "rollback",
+                    "info",
+                    &format!(
+                        "Rollback #{} queued — waiting for current active deployment to finish (1-at-a-time concurrency limit)",
+                        dep_id
+                    ),
+                );
+                match self.queue_semaphore.clone().acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        self.finish_deployment(dep_id, "failed", Some("Deployment queue closed"));
+                        return;
+                    }
+                }
+            }
+        };
+
         let p = match self.projects.get(project_id) {
             Ok(Some(p)) => p,
             _ => {
                 self.finish_deployment(dep_id, "failed", Some("Project not found"));
+                drop(permit);
                 return;
             }
         };
@@ -568,7 +730,8 @@ impl Deployer {
         let target = match target {
             Some(r) => r,
             None => {
-                self.run_deploy(project_id, dep_id).await;
+                self.execute_deploy_inner(project_id, dep_id).await;
+                drop(permit);
                 return;
             }
         };
@@ -592,7 +755,8 @@ impl Deployer {
         self.update_stage(dep_id, "deploying");
         let release_dir = PathBuf::from(&target.dir);
         if !release_dir.exists() {
-            self.run_deploy(project_id, dep_id).await;
+            self.execute_deploy_inner(project_id, dep_id).await;
+            drop(permit);
             return;
         }
 
@@ -604,6 +768,7 @@ impl Deployer {
         if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
             self.logs.add(Some(p.id), Some(dep_id), "rollback", "error", &format!("Start failed: {}", e));
             self.finish_deployment(dep_id, "failed", Some(&e));
+            drop(permit);
             return;
         }
 
@@ -618,6 +783,7 @@ impl Deployer {
 
         self.logs.add(Some(p.id), Some(dep_id), "rollback", "info", &format!("Rollback to Release #{} succeeded!", target.id));
         self.finish_deployment(dep_id, "success", None);
+        drop(permit);
     }
 }
 
@@ -685,7 +851,15 @@ async fn run_shell_cmd(
     #[cfg(unix)]
     cmd.args(["-c", cmd_str]);
 
-    cmd.current_dir(cwd);
+    cmd.current_dir(cwd)
+        .env("CI", "true")
+        .env("npm_config_jobs", "1")
+        .env("npm_config_audit", "false")
+        .env("npm_config_fund", "false")
+        .env("npm_config_progress", "false");
+    if std::env::var("NODE_OPTIONS").is_err() {
+        cmd.env("NODE_OPTIONS", "--max-old-space-size=448");
+    }
     let out = cmd.output().await.map_err(|e| e.to_string())?;
 
     let stdout_str = String::from_utf8_lossy(&out.stdout);

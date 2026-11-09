@@ -1614,34 +1614,10 @@ async fn start_project_handler(
                 "pid": pid
             })))
         }
-        Err(e) if e == "NOT_DEPLOYED_YET" => {
-            // Website has never been deployed yet — automatically trigger initial deployment!
-            state.logs.add(
-                Some(p.id),
-                None,
-                "deployment",
-                "info",
-                &format!("Website '{}' has no release built yet — triggering initial deployment automatically", p.name),
-            );
-            let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "auto-initial-start");
-            log_audit_project(
-                &state,
-                Some(p.id),
-                &actor.username,
-                "deploy.auto_initial",
-                Some(&p.name),
-                Some(&format!("Started initial deployment #{}", dep_id)),
-            );
-            let deployer = state.deployer.clone();
-            tokio::spawn(async move {
-                deployer.run_deploy(p.id, dep_id).await;
-            });
-            Ok(Json(serde_json::json!({
-                "started": false,
-                "autoDeployed": true,
-                "deploymentId": dep_id
-            })))
-        }
+        Err(e) if e == "NOT_DEPLOYED_YET" => Err((
+            StatusCode::BAD_REQUEST,
+            format!("Website '{}' has not been deployed yet. Please click 'Deploy' to build and deploy it first.", p.name),
+        )),
         Err(e) => Err((StatusCode::BAD_REQUEST, e)),
     }
 }
@@ -1704,14 +1680,10 @@ async fn restart_project_handler(
             );
             Ok(Json(serde_json::json!({ "started": true, "pid": pid })))
         }
-        Err(e) if e == "NOT_DEPLOYED_YET" => {
-            let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "auto-initial-restart");
-            let deployer = state.deployer.clone();
-            tokio::spawn(async move {
-                deployer.run_deploy(p.id, dep_id).await;
-            });
-            Ok(Json(serde_json::json!({ "started": false, "autoDeployed": true, "deploymentId": dep_id })))
-        }
+        Err(e) if e == "NOT_DEPLOYED_YET" => Err((
+            StatusCode::BAD_REQUEST,
+            format!("Website '{}' has not been deployed yet. Please click 'Deploy' to build and deploy it first.", p.name),
+        )),
         Err(e) => Err((StatusCode::BAD_REQUEST, e)),
     }
 }
@@ -2199,6 +2171,21 @@ async fn github_webhook_handler(
         .into_iter()
         .find(|x| x.slug == slug)
         .ok_or((StatusCode::NOT_FOUND, "Project not found for this slug".to_string()))?;
+
+    if !p.auto_deploy {
+        state.logs.add(
+            Some(p.id),
+            None,
+            "github",
+            "info",
+            &format!("GitHub webhook received for {} (ignored — manual deploy mode active)", p.name),
+        );
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "ignored": true,
+            "message": "Auto-deploy is disabled for this website; use the Deploy button in the panel."
+        })));
+    }
 
     state.logs.add(
         Some(p.id),
@@ -3129,15 +3116,9 @@ struct CommitView {
     deployed_before: bool,
 }
 
-#[derive(Deserialize, Default)]
-struct CommitsQuery {
-    refresh: Option<bool>,
-}
-
 async fn project_commits_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
-    Query(q): Query<CommitsQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let p = state
         .projects
@@ -3145,60 +3126,31 @@ async fn project_commits_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
-    let force_refresh = q.refresh.unwrap_or(false);
-    let stale_poll = now().saturating_sub(p.last_poll_at.unwrap_or(0)) > 15_000;
-    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
-    let needs_sync = force_refresh || stale_poll || !repo_dir.join(".git").exists();
-
     let cache_key = format!(
         "commits:p{}:{}:{}",
         id,
         p.deployed_sha.as_deref().unwrap_or("none"),
         p.last_poll_at.unwrap_or(0)
     );
-    if !needs_sync {
-        if let Some(cached_val) = state.cache.get(&cache_key) {
-            let mut res = Json(cached_val).into_response();
-            res.headers_mut()
-                .insert("x-cache", HeaderValue::from_static("HIT"));
-            return Ok(res);
-        }
+    if let Some(cached_val) = state.cache.get(&cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut()
+            .insert("x-cache", HeaderValue::from_static("HIT"));
+        return Ok(res);
     }
 
-    let repo_url = p.repo_url.clone();
+    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     let branch = p.branch.clone();
     let repo_dir_clone = repo_dir.clone();
 
-    let (raw_commits, synced_ok) = tokio::task::spawn_blocking(move || {
-        let mut synced = false;
-        if needs_sync {
-            synced = crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch).is_ok();
+    let raw_commits = tokio::task::spawn_blocking(move || {
+        if !repo_dir_clone.exists() {
+            return Vec::new();
         }
-        let commits = crate::git::Git::list_commits(&repo_dir_clone, &branch, 200);
-        (commits, synced)
+        crate::git::Git::list_commits(&repo_dir_clone, &branch, 200)
     })
     .await
     .unwrap_or_default();
-
-    let poll_ts = if synced_ok {
-        let ts = now();
-        if let Ok(conn) = state.db.lock() {
-            let _ = conn.execute(
-                "UPDATE projects SET last_poll_at = ? WHERE id = ?",
-                rusqlite::params![ts, p.id],
-            );
-        }
-        ts
-    } else {
-        p.last_poll_at.unwrap_or(0)
-    };
-
-    let final_cache_key = format!(
-        "commits:p{}:{}:{}",
-        id,
-        p.deployed_sha.as_deref().unwrap_or("none"),
-        poll_ts
-    );
 
     let releases = state.deployer.list_releases(id);
 
@@ -3222,7 +3174,7 @@ async fn project_commits_handler(
     if let Ok(json_val) = serde_json::to_value(&views) {
         state
             .cache
-            .set(final_cache_key, json_val, std::time::Duration::from_secs(15));
+            .set(cache_key, json_val, std::time::Duration::from_secs(30));
     }
 
     let mut res = Json(views).into_response();
@@ -3922,11 +3874,13 @@ async fn delete_backup_handler(
 
     {
         let conn = state.db.lock().unwrap();
-        conn.execute(
+        let _ = conn.execute_batch("PRAGMA foreign_keys = OFF;");
+        let del_res = conn.execute(
             "DELETE FROM backups WHERE id = ? AND project_id = ?",
             rusqlite::params![backup_id, id],
-        )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        );
+        let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        del_res.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
     let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
@@ -3980,17 +3934,33 @@ async fn delete_release_handler(
 
     {
         let conn = state.db.lock().unwrap();
-        conn.execute(
-            "DELETE FROM releases WHERE id = ? AND project_id = ?",
-            rusqlite::params![release_id, id],
-        )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        // Also clean up any associated backup records
-        conn.execute(
+        let _ = conn.execute_batch("PRAGMA foreign_keys = OFF;");
+        let _ = conn.execute(
+            "UPDATE deployments SET release_id = NULL WHERE release_id = ?",
+            rusqlite::params![release_id],
+        );
+        let _ = conn.execute(
+            "UPDATE deployments SET from_release_id = NULL WHERE from_release_id = ?",
+            rusqlite::params![release_id],
+        );
+        let _ = conn.execute(
             "DELETE FROM backups WHERE release_id = ? AND project_id = ?",
             rusqlite::params![release_id, id],
-        ).ok();
+        );
+        let _ = conn.execute(
+            "UPDATE backups SET release_id = NULL WHERE release_id = ?",
+            rusqlite::params![release_id],
+        );
+        let _ = conn.execute(
+            "UPDATE projects SET current_release_id = NULL WHERE current_release_id = ?",
+            rusqlite::params![release_id],
+        );
+        let del_res = conn.execute(
+            "DELETE FROM releases WHERE id = ? AND project_id = ?",
+            rusqlite::params![release_id, id],
+        );
+        let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        del_res.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
     state.cache.invalidate_project(id);

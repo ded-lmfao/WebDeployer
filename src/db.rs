@@ -262,8 +262,8 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             CREATE TABLE IF NOT EXISTS deployments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                release_id INTEGER REFERENCES releases(id),
-                from_release_id INTEGER REFERENCES releases(id),
+                release_id INTEGER REFERENCES releases(id) ON DELETE SET NULL,
+                from_release_id INTEGER REFERENCES releases(id) ON DELETE SET NULL,
                 kind TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 stage TEXT NOT NULL DEFAULT 'pending',

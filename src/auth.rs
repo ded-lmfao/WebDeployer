@@ -1230,18 +1230,42 @@ pub fn extract_p256_pubkey(raw: &[u8]) -> Option<[u8; 65]> {
                 return Some(out);
             }
         }
+        // Scan for DER SubjectPublicKeyInfo BIT STRING header (03 42 00 04 + 64 bytes)
+        for i in 0..=raw.len().saturating_sub(68) {
+            if raw[i] == 0x03 && raw[i + 1] == 0x42 && raw[i + 2] == 0x00 && raw[i + 3] == 0x04 {
+                let mut out = [0u8; 65];
+                out.copy_from_slice(&raw[i + 3..i + 68]);
+                if is_valid_p256_point(&out) {
+                    return Some(out);
+                }
+            }
+        }
     }
+
+    // If `raw` is WebAuthn authenticatorData (flags bit 0x40 set at byte 32),
+    // slice directly to the attested credentialPublicKey CBOR map at offset 55 + cred_id_len
+    let search_slice = if raw.len() > 55 && (raw[32] & 0x40) != 0 {
+        let cred_len = u16::from_be_bytes([raw[53], raw[54]]) as usize;
+        if raw.len() > 55 + cred_len {
+            &raw[55 + cred_len..]
+        } else {
+            raw
+        }
+    } else {
+        raw
+    };
+
     let mut x_opt: Option<[u8; 32]> = None;
     let mut y_opt: Option<[u8; 32]> = None;
-    if raw.len() >= 70 {
-        for i in 0..raw.len().saturating_sub(35) {
-            if raw[i] == 0x21 && raw[i + 1] == 0x58 && raw[i + 2] == 0x20 {
+    if search_slice.len() >= 70 {
+        for i in 0..=search_slice.len().saturating_sub(35) {
+            if search_slice[i] == 0x21 && search_slice[i + 1] == 0x58 && search_slice[i + 2] == 0x20 {
                 let mut x = [0u8; 32];
-                x.copy_from_slice(&raw[i + 3..i + 35]);
+                x.copy_from_slice(&search_slice[i + 3..i + 35]);
                 x_opt = Some(x);
-            } else if raw[i] == 0x22 && raw[i + 1] == 0x58 && raw[i + 2] == 0x20 {
+            } else if search_slice[i] == 0x22 && search_slice[i + 1] == 0x58 && search_slice[i + 2] == 0x20 {
                 let mut y = [0u8; 32];
-                y.copy_from_slice(&raw[i + 3..i + 35]);
+                y.copy_from_slice(&search_slice[i + 3..i + 35]);
                 y_opt = Some(y);
             }
             if let (Some(x), Some(y)) = (x_opt, y_opt) {
@@ -1426,89 +1450,127 @@ impl U256 {
 struct P256Point {
     x: U256,
     y: U256,
-    infinity: bool,
+    z: U256,
 }
 
 impl P256Point {
     fn infinity() -> Self {
         Self {
             x: P256_ZERO,
-            y: P256_ZERO,
-            infinity: true,
+            y: P256_ONE,
+            z: P256_ZERO,
         }
+    }
+
+    fn is_infinity(&self) -> bool {
+        self.z.is_zero()
+    }
+
+    fn from_affine(x: U256, y: U256) -> Self {
+        Self { x, y, z: P256_ONE }
     }
 
     fn generator() -> Self {
-        Self {
-            x: P256_GX,
-            y: P256_GY,
-            infinity: false,
+        Self::from_affine(P256_GX, P256_GY)
+    }
+
+    fn double(&self) -> Self {
+        if self.is_infinity() || self.y.is_zero() {
+            return Self::infinity();
         }
+        let p = &P256_P;
+        let delta = self.z.mul_mod(&self.z, p);
+        let gamma = self.y.mul_mod(&self.y, p);
+        let beta = self.x.mul_mod(&gamma, p);
+
+        let x_minus_delta = self.x.sub_mod(&delta, p);
+        let x_plus_delta = self.x.add_mod(&delta, p);
+        let prod = x_minus_delta.mul_mod(&x_plus_delta, p);
+        let alpha = prod.add_mod(&prod, p).add_mod(&prod, p);
+
+        let two_beta = beta.add_mod(&beta, p);
+        let four_beta = two_beta.add_mod(&two_beta, p);
+        let eight_beta = four_beta.add_mod(&four_beta, p);
+
+        let x3 = alpha.mul_mod(&alpha, p).sub_mod(&eight_beta, p);
+
+        let y_plus_z = self.y.add_mod(&self.z, p);
+        let z3 = y_plus_z
+            .mul_mod(&y_plus_z, p)
+            .sub_mod(&gamma, p)
+            .sub_mod(&delta, p);
+
+        let gamma_sq = gamma.mul_mod(&gamma, p);
+        let two_gamma_sq = gamma_sq.add_mod(&gamma_sq, p);
+        let four_gamma_sq = two_gamma_sq.add_mod(&two_gamma_sq, p);
+        let eight_gamma_sq = four_gamma_sq.add_mod(&four_gamma_sq, p);
+
+        let y3 = alpha
+            .mul_mod(&four_beta.sub_mod(&x3, p), p)
+            .sub_mod(&eight_gamma_sq, p);
+
+        Self { x: x3, y: y3, z: z3 }
     }
 
     fn add(&self, other: &Self) -> Self {
-        if self.infinity {
+        if self.is_infinity() {
             return *other;
         }
-        if other.infinity {
+        if other.is_infinity() {
             return *self;
         }
         let p = &P256_P;
-        if self.x == other.x {
-            if self.y != other.y || self.y.is_zero() {
+        let z1z1 = self.z.mul_mod(&self.z, p);
+        let z2z2 = other.z.mul_mod(&other.z, p);
+        let u1 = self.x.mul_mod(&z2z2, p);
+        let u2 = other.x.mul_mod(&z1z1, p);
+        let z2_cubed = other.z.mul_mod(&z2z2, p);
+        let z1_cubed = self.z.mul_mod(&z1z1, p);
+        let s1 = self.y.mul_mod(&z2_cubed, p);
+        let s2 = other.y.mul_mod(&z1_cubed, p);
+
+        if u1 == u2 {
+            if s1 != s2 {
                 return Self::infinity();
             }
-            let x_sq = self.x.mul_mod(&self.x, p);
-            let three = U256([3, 0, 0, 0]);
-            let num = three.mul_mod(&x_sq, p).sub_mod(&three, p);
-            let den = self.y.add_mod(&self.y, p);
-            let Some(den_inv) = den.inv_mod(p) else {
-                return Self::infinity();
-            };
-            let lambda = num.mul_mod(&den_inv, p);
-            let rx = lambda
-                .mul_mod(&lambda, p)
-                .sub_mod(&self.x, p)
-                .sub_mod(&other.x, p);
-            let ry = lambda
-                .mul_mod(&self.x.sub_mod(&rx, p), p)
-                .sub_mod(&self.y, p);
-            Self {
-                x: rx,
-                y: ry,
-                infinity: false,
-            }
-        } else {
-            let num = other.y.sub_mod(&self.y, p);
-            let den = other.x.sub_mod(&self.x, p);
-            let Some(den_inv) = den.inv_mod(p) else {
-                return Self::infinity();
-            };
-            let lambda = num.mul_mod(&den_inv, p);
-            let rx = lambda
-                .mul_mod(&lambda, p)
-                .sub_mod(&self.x, p)
-                .sub_mod(&other.x, p);
-            let ry = lambda
-                .mul_mod(&self.x.sub_mod(&rx, p), p)
-                .sub_mod(&self.y, p);
-            Self {
-                x: rx,
-                y: ry,
-                infinity: false,
-            }
+            return self.double();
         }
+
+        let h = u2.sub_mod(&u1, p);
+        let r = s2.sub_mod(&s1, p);
+        let hh = h.mul_mod(&h, p);
+        let hhh = h.mul_mod(&hh, p);
+        let u1hh = u1.mul_mod(&hh, p);
+
+        let two_u1hh = u1hh.add_mod(&u1hh, p);
+        let x3 = r.mul_mod(&r, p).sub_mod(&hhh, p).sub_mod(&two_u1hh, p);
+        let y3 = r
+            .mul_mod(&u1hh.sub_mod(&x3, p), p)
+            .sub_mod(&s1.mul_mod(&hhh, p), p);
+        let z3 = h.mul_mod(&self.z, p).mul_mod(&other.z, p);
+
+        Self { x: x3, y: y3, z: z3 }
     }
 
     fn scalar_mul(&self, k: &U256) -> Self {
         let mut acc = Self::infinity();
         for i in (0..256).rev() {
-            acc = acc.add(&acc);
+            acc = acc.double();
             if k.bit(i) {
                 acc = acc.add(self);
             }
         }
         acc
+    }
+
+    fn to_affine_x(&self) -> Option<U256> {
+        if self.is_infinity() {
+            return None;
+        }
+        let p = &P256_P;
+        let z_inv = self.z.inv_mod(p)?;
+        let z_inv2 = z_inv.mul_mod(&z_inv, p);
+        Some(self.x.mul_mod(&z_inv2, p))
     }
 }
 
@@ -1601,11 +1663,7 @@ pub fn verify_p256_ecdsa(pub_key_uncompressed: &[u8], msg_hash: &[u8; 32], sig: 
     let mut yb = [0u8; 32];
     xb.copy_from_slice(&pub_key_uncompressed[1..33]);
     yb.copy_from_slice(&pub_key_uncompressed[33..65]);
-    let q = P256Point {
-        x: U256::from_be_bytes(&xb),
-        y: U256::from_be_bytes(&yb),
-        infinity: false,
-    };
+    let q = P256Point::from_affine(U256::from_be_bytes(&xb), U256::from_be_bytes(&yb));
 
     let z = U256::from_be_bytes(msg_hash).rem_mod(n);
     let Some(w) = s.inv_mod(n) else {
@@ -1618,10 +1676,10 @@ pub fn verify_p256_ecdsa(pub_key_uncompressed: &[u8], msg_hash: &[u8; 32], sig: 
     let p1 = g.scalar_mul(&u1);
     let p2 = q.scalar_mul(&u2);
     let pt = p1.add(&p2);
-    if pt.infinity {
+    let Some(affine_x) = pt.to_affine_x() else {
         return false;
-    }
-    let v = pt.x.rem_mod(n);
+    };
+    let v = affine_x.rem_mod(n);
     v == r
 }
 
@@ -1670,5 +1728,18 @@ mod tests {
         let mut bad_sig = raw_sig.clone();
         bad_sig[10] ^= 0x01;
         assert!(!verify_p256_ecdsa(&q_bytes, &msg_hash, &bad_sig));
+
+        // Verify COSE_Key extraction from WebAuthn authenticatorData where Y is at the very end
+        let mut fake_auth_data = vec![0u8; 55];
+        fake_auth_data[32] = 0x45; // UP + UV + AT
+        fake_auth_data[53] = 0x00;
+        fake_auth_data[54] = 0x10; // 16-byte credentialId
+        fake_auth_data.extend_from_slice(&[0xAA; 16]);
+        // COSE_Key header: a5 01 02 03 26 20 01 21 58 20 <32-byte X> 22 58 20 <32-byte Y>
+        fake_auth_data.extend_from_slice(&[0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]);
+        fake_auth_data.extend_from_slice(&q_bytes[1..33]);
+        fake_auth_data.extend_from_slice(&[0x22, 0x58, 0x20]);
+        fake_auth_data.extend_from_slice(&q_bytes[33..65]);
+        assert_eq!(extract_p256_pubkey(&fake_auth_data), Some(q_bytes));
     }
 }

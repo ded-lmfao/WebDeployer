@@ -565,7 +565,7 @@ mod tests {
             Some("acme/webapp".to_string())
         );
 
-        let tmp = std::path::PathBuf::from("./target/test-git-mirror");
+        let tmp = std::path::PathBuf::from(format!("./target/test-git-mirror-{}", crate::db::now()));
         let mirror_dir = tmp.join("mirror_repo");
         let rel1_dir = tmp.join("rel1");
         let _ = std::fs::remove_dir_all(&tmp);

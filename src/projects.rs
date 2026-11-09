@@ -354,18 +354,23 @@ impl Projects {
 
     pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
         let mut conn = self.db.lock().unwrap();
-        let tx = conn.transaction()?;
-        tx.execute("UPDATE projects SET current_release_id = NULL WHERE id = ?", params![id]).ok();
-        tx.execute("DELETE FROM logs WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM deployments WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM releases WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM project_env WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM backups WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM project_keys WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM jobs WHERE project_id = ?", params![id]).ok();
-        tx.execute("DELETE FROM projects WHERE id = ?", params![id])?;
-        tx.commit()?;
-        Ok(())
+        let _ = conn.execute_batch("PRAGMA foreign_keys = OFF;");
+        let res = (|| -> Result<(), rusqlite::Error> {
+            let tx = conn.transaction()?;
+            tx.execute("UPDATE projects SET current_release_id = NULL WHERE id = ?", params![id]).ok();
+            tx.execute("DELETE FROM logs WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM backups WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM deployments WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM releases WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM project_env WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM project_keys WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM jobs WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM projects WHERE id = ?", params![id])?;
+            tx.commit()?;
+            Ok(())
+        })();
+        let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        res
     }
 
     pub fn get_env_vars(&self, project_id: i64) -> Result<Vec<EnvVarView>, rusqlite::Error> {
