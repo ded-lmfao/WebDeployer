@@ -104,7 +104,7 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     let is_html = clean_path.ends_with(".html");
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
     let cache_control = if is_html {
-        "no-cache, must-revalidate"
+        "no-store, no-cache, must-revalidate, private"
     } else if has_version_query {
         "public, max-age=31536000, immutable"
     } else {
@@ -112,16 +112,18 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     };
 
     let etag_map = get_etag_map();
-    if let Some(etag) = etag_map.get(clean_path) {
-        if let Some(if_none_match) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
-            if if_none_match.trim() == etag || if_none_match.contains(etag) {
-                return Response::builder()
-                    .status(StatusCode::NOT_MODIFIED)
-                    .header(header::ETAG, HeaderValue::from_str(etag).unwrap_or_else(|_| HeaderValue::from_static("")))
-                    .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
-                    .header("x-cache", HeaderValue::from_static("HIT-304"))
-                    .body(Body::empty())
-                    .unwrap_or_else(|_| StatusCode::NOT_MODIFIED.into_response());
+    if !is_html {
+        if let Some(etag) = etag_map.get(clean_path) {
+            if let Some(if_none_match) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
+                if if_none_match.trim() == etag || if_none_match.contains(etag) {
+                    return Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .header(header::ETAG, HeaderValue::from_str(etag).unwrap_or_else(|_| HeaderValue::from_static("")))
+                        .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
+                        .header("x-cache", HeaderValue::from_static("HIT-304"))
+                        .body(Body::empty())
+                        .unwrap_or_else(|_| StatusCode::NOT_MODIFIED.into_response());
+                }
             }
         }
     }

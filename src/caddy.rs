@@ -82,6 +82,13 @@ impl Caddy {
         let master_path = self.caddy_dir.join("Caddyfile");
         fs::write(&master_path, self.generate_master_caddyfile(all_projects))?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o644));
+            let _ = fs::set_permissions(&master_path, fs::Permissions::from_mode(0o644));
+        }
+
         Ok(path)
     }
 
@@ -107,6 +114,20 @@ impl Caddy {
     }
 
     pub fn reload(&self) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            if Path::new("/etc/caddy/Caddyfile").exists() {
+                if let Ok(o) = Command::new("sudo")
+                    .args(["-n", "systemctl", "reload", "caddy"])
+                    .output()
+                {
+                    if o.status.success() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         let master_path = self.caddy_dir.join("Caddyfile");
 
         let out = Command::new("caddy")

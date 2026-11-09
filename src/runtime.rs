@@ -33,6 +33,7 @@ pub struct Runtime {
     project_locks: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
     stop_seq: Arc<Mutex<HashMap<i64, u64>>>,
     maintenance_shutdowns: Arc<Mutex<HashMap<i64, tokio::sync::oneshot::Sender<()>>>>,
+    allowed_ports: Arc<Mutex<HashSet<u16>>>,
 }
 
 impl Runtime {
@@ -44,6 +45,48 @@ impl Runtime {
             project_locks: Arc::new(Mutex::new(HashMap::new())),
             stop_seq: Arc::new(Mutex::new(HashMap::new())),
             maintenance_shutdowns: Arc::new(Mutex::new(HashMap::new())),
+            allowed_ports: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    /// Automatically open `port/tcp` in UFW and iptables on Linux so newly created servers/websites
+    /// are reachable without manual firewall commands.
+    pub fn allow_firewall_port(&self, port: u16, project_id: Option<i64>) {
+        if port == 0 {
+            return;
+        }
+        if let Ok(mut set) = self.allowed_ports.lock() {
+            if !set.insert(port) {
+                return;
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            let logs = self.logs.clone();
+            std::thread::spawn(move || {
+                let cmd = format!(
+                    "(sudo -n ufw allow {p}/tcp >/dev/null 2>&1 || ufw allow {p}/tcp >/dev/null 2>&1 || true) && \
+                     (sudo -n iptables -C INPUT -p tcp --dport {p} -m conntrack --ctstate NEW -j ACCEPT >/dev/null 2>&1 || \
+                      sudo -n iptables -I INPUT 1 -p tcp --dport {p} -m conntrack --ctstate NEW -j ACCEPT >/dev/null 2>&1 || true)",
+                    p = port
+                );
+                if let Ok(out) = std::process::Command::new("sh").arg("-c").arg(&cmd).output() {
+                    if out.status.success() && project_id.is_some() {
+                        logs.add(
+                            project_id,
+                            None,
+                            "system",
+                            "info",
+                            &format!("Automatically allowed TCP port {}/tcp in UFW & iptables firewall", port),
+                        );
+                    }
+                }
+            });
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = project_id;
         }
     }
 
@@ -413,11 +456,14 @@ impl Runtime {
             }
         }
 
+        let port = p.port.unwrap_or(3000);
+        self.allow_firewall_port(port, Some(p.id));
+
         let container = WebsiteContainer {
             container_id: format!("webdep-ctr-{}-{}", p.id, safe_slug),
             project_id: p.id,
             slug: safe_slug,
-            port: p.port.unwrap_or(3000),
+            port,
             root_dir: root_dir.clone(),
             db_dir,
             storage_dir,

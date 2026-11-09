@@ -544,9 +544,14 @@ impl Auth {
             entry.locked_until_s = 0;
         }
         entry.count += 1;
-        if entry.count >= 5 {
-            entry.locked_until_s = now + 300; // 5-minute lockout after 5 failed attempts
-            return Some(300);
+        let max_attempts = if key.starts_with("2fa:") || key.starts_with("2fa_user:") {
+            3
+        } else {
+            5
+        };
+        if entry.count >= max_attempts {
+            entry.locked_until_s = now + 600; // 10-minute lockout
+            return Some(600);
         }
         None
     }
@@ -558,10 +563,11 @@ impl Auth {
 
     pub fn create_mfa_challenge(&self, user_id: i64) -> String {
         let now = Self::now_secs();
-        let token = random_token(24);
+        let token = random_token(32);
         let mut map = self.mfa_challenges.lock().unwrap();
-        map.retain(|_, (_, exp)| *exp > now);
-        map.insert(token.clone(), (user_id, now + 300)); // valid for 5 minutes
+        // Invalidate any older pending MFA challenges for this user so only the newest challenge is valid
+        map.retain(|_, (uid, exp)| *exp > now && *uid != user_id);
+        map.insert(token.clone(), (user_id, now + 180)); // valid for 3 minutes
         token
     }
 

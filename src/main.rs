@@ -81,7 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let resume_projects = projects.clone();
         let resume_runtime = runtime.clone();
         let resume_logs = logs.clone();
+        let platform_port = config.port;
         tokio::spawn(async move {
+            resume_runtime.allow_firewall_port(80, None);
+            resume_runtime.allow_firewall_port(443, None);
+            resume_runtime.allow_firewall_port(platform_port, None);
             if let Ok(list) = resume_projects.list() {
                 for p in list {
                     let _ = resume_runtime.ensure_container(&p);

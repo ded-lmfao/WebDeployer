@@ -323,8 +323,14 @@ struct LoginResponse {
 
 async fn login_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<LoginPayload>,
 ) -> Result<Response, (StatusCode, String)> {
+    // Always revoke any pre-existing session cookie when starting a new login attempt
+    if let Some(old_sid) = extract_session_id(&headers) {
+        state.auth.delete_session(&old_sid);
+    }
+
     // Sync Main Admin login ID & password from .env (supports live editing .env without server restart)
     state.auth.ensure_admin();
 
@@ -341,12 +347,21 @@ async fn login_handler(
         return Err((StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()));
     };
 
+    let user_2fa_key = format!("2fa_user:{}", user.id);
+    if let Some(rem) = state.auth.check_lockout(&user_2fa_key) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Account temporarily locked due to failed 2FA attempts ({} seconds remaining).", rem),
+        ));
+    }
+
     if user.disabled {
         return Err((StatusCode::FORBIDDEN, "Account is disabled by administrator".to_string()));
     }
 
     if !verify_password(&payload.password, &hash) {
         if let Some(lock_s) = state.auth.record_failure(&uname_key) {
+            log_audit(&state, &user.username, "auth.lockout", Some(&user.username), Some("Account locked after repeated failed password attempts"));
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
                 format!("Too many failed sign-in attempts. Account locked for {} seconds.", lock_s),
@@ -360,12 +375,18 @@ async fn login_handler(
     // If 2FA is enabled on this account, require 2FA challenge verification before creating a session
     if user.totp_enabled {
         let mfa_token = state.auth.create_mfa_challenge(user.id);
-        return Ok(Json(serde_json::json!({
+        let mut res = Json(serde_json::json!({
             "requires2fa": true,
             "mfaToken": mfa_token,
             "username": user.username,
         }))
-        .into_response());
+        .into_response();
+        // Ensure no session cookie exists while awaiting 2FA completion
+        res.headers_mut().insert(
+            header::SET_COOKIE,
+            HeaderValue::from_static("nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
+        );
+        return Ok(res);
     }
 
     log_audit(&state, &user.username, "auth.login", Some(&user.username), Some("User signed in"));
@@ -419,18 +440,31 @@ async fn verify_2fa_login_handler(
         .peek_mfa_challenge(&payload.mfa_token)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "2FA session expired. Please sign in again.".to_string()))?;
 
+    let user_2fa_key = format!("2fa_user:{}", user_id);
+    if let Some(rem) = state.auth.check_lockout(&user_2fa_key) {
+        state.auth.consume_mfa_challenge(&payload.mfa_token);
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Too many failed 2FA attempts. Locked for {} seconds.", rem),
+        ));
+    }
+
     let user = state
         .auth
         .get_user_by_id(user_id)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
 
     if user.disabled {
+        state.auth.consume_mfa_challenge(&payload.mfa_token);
         return Err((StatusCode::FORBIDDEN, "Account is disabled".to_string()));
     }
 
     if !state.auth.verify_user_2fa(user.id, &payload.code) {
-        if let Some(lock_s) = state.auth.record_failure(&lock_key) {
+        let token_lock = state.auth.record_failure(&lock_key);
+        let user_lock = state.auth.record_failure(&user_2fa_key);
+        if let Some(lock_s) = token_lock.or(user_lock) {
             state.auth.consume_mfa_challenge(&payload.mfa_token);
+            log_audit(&state, &user.username, "auth.lockout", Some(&user.username), Some("Account locked after repeated failed 2FA attempts"));
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
                 format!("Too many failed 2FA attempts. Locked for {} seconds.", lock_s),
@@ -440,6 +474,7 @@ async fn verify_2fa_login_handler(
     }
 
     state.auth.clear_failures(&lock_key);
+    state.auth.clear_failures(&user_2fa_key);
     state.auth.consume_mfa_challenge(&payload.mfa_token);
 
     log_audit(
@@ -486,6 +521,10 @@ async fn logout_handler(
     res.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_static("nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
+    );
+    res.headers_mut().insert(
+        header::HeaderName::from_static("clear-site-data"),
+        HeaderValue::from_static("\"cache\", \"storage\""),
     );
     Ok(res)
 }
@@ -934,6 +973,8 @@ async fn create_project_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
+    let _ = state.runtime.ensure_container(&created);
+
     if let Ok(all) = state.projects.list() {
         let _ = state.caddy.write_config(&created, &all);
         let _ = state.caddy.reload();
@@ -988,6 +1029,8 @@ async fn update_project_handler(
         .get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    let _ = state.runtime.ensure_container(&updated);
 
     if let Ok(all) = state.projects.list() {
         let _ = state.caddy.write_config(&updated, &all);

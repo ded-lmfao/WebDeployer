@@ -3,8 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
   <title>WebDep — Multi-Website Deployment & Hosting Platform</title>
-  <link rel="stylesheet" href="/style.css?v=2.5.7">
+  <style>
+    /* Strict pre-auth gate: never render a single pixel of internal content until authentication & 2FA are finalized */
+    body:not(.auth-verified) #app,
+    body:not(.auth-verified) .modal-overlay {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+  </style>
+  <link rel="stylesheet" href="/style.css?v=2.5.8">
 </head>
 <body>
 
@@ -51,7 +63,7 @@
   </div>
 
   <!-- ======================== MAIN APP SHELL ======================== -->
-  <div id="app">
+  <div id="app" style="display: none;" aria-hidden="true">
     
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -1586,7 +1598,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=2.5.7"></script>
+  <script type="module" src="/app.js?v=2.5.8"></script>
 </body>
 </html>
 

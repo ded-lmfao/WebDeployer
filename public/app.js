@@ -188,7 +188,7 @@ try {
   sessionStorage.removeItem('webdep_fast_cache_v2');
 } catch (_) {}
 
-// Hydrate warm cache from sessionStorage on startup
+// Hydrate warm cache from sessionStorage on startup (never cache /api/auth/*)
 try {
   const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
   if (raw) {
@@ -196,7 +196,7 @@ try {
     const now = Date.now();
     if (Array.isArray(parsed)) {
       for (const [k, v] of parsed) {
-        if (v && typeof v.ts === 'number' && now - v.ts < 60000) {
+        if (typeof k === 'string' && !k.startsWith('/api/auth/') && v && typeof v.ts === 'number' && now - v.ts < 60000) {
           clientCache.set(k, v);
         }
       }
@@ -206,12 +206,15 @@ try {
 
 function persistCacheToSession() {
   try {
-    const entries = Array.from(clientCache.entries()).slice(-60);
+    const entries = Array.from(clientCache.entries())
+      .filter(([k]) => !k.startsWith('/api/auth/'))
+      .slice(-60);
     sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(entries));
   } catch (_) {}
 }
 
 function getCacheTtlMs(path) {
+  if (path.startsWith('/api/auth/')) return 0; // Always verify live authentication state with server
   if (path.startsWith('/api/logs')) return 0; // Live logs use SSE stream
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 2500;
   if (path.startsWith('/api/deployments')) return 4000;
@@ -220,7 +223,6 @@ function getCacheTtlMs(path) {
   if (path.includes('/releases') || path.includes('/backups') || path.includes('/env')) return 20000;
   if (path.includes('/caddy') || path.includes('/nginx')) return 60000;
   if (path.startsWith('/api/projects') || path.startsWith('/api/settings') || path.startsWith('/api/users')) return 12000;
-  if (path.startsWith('/api/auth/me')) return 15000;
   return 8000;
 }
 
@@ -398,26 +400,89 @@ export function toast(message, type = 'info', duration = 4000) {
 // ============================================================================
 // Auth & Lifecycle
 // ============================================================================
-async function initAuth() {
+function resetCleanUrl() {
   try {
-    const me = await api('/api/auth/me');
+    if (window.location.hash || window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname || '/');
+    }
+  } catch (_) {}
+}
+
+function stopPolling() {
+  if (state.overviewTimer) {
+    clearInterval(state.overviewTimer);
+    state.overviewTimer = null;
+  }
+  if (state.activeDepPollTimer) {
+    clearInterval(state.activeDepPollTimer);
+    state.activeDepPollTimer = null;
+  }
+  if (state.logEventSource) {
+    try { state.logEventSource.close(); } catch (_) {}
+    state.logEventSource = null;
+  }
+}
+
+async function initAuth() {
+  document.body.classList.remove('auth-verified');
+  const appEl = document.getElementById('app');
+  if (appEl) {
+    appEl.style.display = 'none';
+    appEl.setAttribute('aria-hidden', 'true');
+  }
+  try {
+    const me = await api('/api/auth/me', { noCache: true });
+    if (!me || !me.user || !me.csrf) {
+      showLogin();
+      return;
+    }
     state.user = me.user;
     state.csrf = me.csrf;
     state.activeSessions = me.activeSessions || 1;
-    onAuthenticated();
+    await onAuthenticated(false);
   } catch {
     showLogin();
   }
 }
 
 function showLogin() {
+  stopPolling();
+  document.body.classList.remove('auth-verified');
+
+  state.user = null;
+  state.csrf = null;
   state.pendingMfaToken = null;
-  document.getElementById('login-view').style.display = 'flex';
-  document.getElementById('app').style.display = 'none';
+  state.projects = [];
+  state.overview = null;
+  state.selectedProjectId = null;
+  state.currentView = 'overview';
+  state.lastOverviewSig = null;
+  invalidateClientCache();
+  try { sessionStorage.clear(); } catch (_) {}
+
+  // Reset URL to clean root (strip #/settings, #/projects, query params, etc.)
+  resetCleanUrl();
+
+  // Close any open modals
+  document.querySelectorAll('.modal-overlay.active').forEach((m) => m.classList.remove('active'));
+
+  const appEl = document.getElementById('app');
+  if (appEl) {
+    appEl.style.display = 'none';
+    appEl.setAttribute('aria-hidden', 'true');
+  }
+  const loginView = document.getElementById('login-view');
+  if (loginView) loginView.style.display = 'flex';
+
   const lf = document.getElementById('login-form');
   const mf = document.getElementById('login-2fa-form');
   if (lf) lf.style.display = 'block';
   if (mf) mf.style.display = 'none';
+
+  const passInput = document.getElementById('login-password');
+  if (passInput) passInput.value = '';
+  const codeInput = document.getElementById('login-2fa-code');
+  if (codeInput) codeInput.value = '';
 }
 
 function hasPower(power) {
@@ -428,9 +493,11 @@ function hasPower(power) {
 }
 window.hasPower = hasPower;
 
-function onAuthenticated() {
-  document.getElementById('login-view').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
+async function onAuthenticated(isFreshLogin = false) {
+  if (!state.user || !state.csrf || state.pendingMfaToken) {
+    showLogin();
+    return;
+  }
 
   document.getElementById('current-user-name').textContent = state.user.username;
   document.getElementById('current-user-role').textContent = state.user.isMainAdmin ? 'MAIN ADMIN' : (state.user.role || 'operator').toUpperCase();
@@ -450,11 +517,23 @@ function onAuthenticated() {
     if (navEl) navEl.style.display = hasPower(pwr) ? '' : 'none';
   });
 
-  // Load projects & overview
-  loadProjects().then(() => {
+  // Load projects before revealing the main application shell
+  await loadProjects();
+
+  document.getElementById('login-view').style.display = 'none';
+  const appEl = document.getElementById('app');
+  if (appEl) {
+    appEl.style.display = 'flex';
+    appEl.setAttribute('aria-hidden', 'false');
+  }
+  document.body.classList.add('auth-verified');
+
+  if (isFreshLogin) {
+    navigateTo('overview');
+  } else {
     handleHashRoute();
-    startPolling();
-  });
+  }
+  startPolling();
 }
 
 // ============================================================================
@@ -490,6 +569,10 @@ function switchWebsiteTab(tab) {
 window.switchWebsiteTab = switchWebsiteTab;
 
 function navigateTo(viewName, projectId = null) {
+  if (!state.user || !state.csrf || state.pendingMfaToken) {
+    showLogin();
+    return;
+  }
   state.currentView = viewName;
   if (projectId !== null) {
     state.selectedProjectId = Number(projectId);
@@ -501,6 +584,11 @@ function navigateTo(viewName, projectId = null) {
 window.navigateTo = navigateTo;
 
 function handleHashRoute() {
+  if (!state.user || !state.csrf || state.pendingMfaToken) {
+    resetCleanUrl();
+    showLogin();
+    return;
+  }
   const hash = window.location.hash.replace(/^#\/?/, '') || 'overview';
   const parts = hash.split('/');
   const view = parts[0] || 'overview';
@@ -512,6 +600,11 @@ function handleHashRoute() {
 }
 
 window.addEventListener('hashchange', handleHashRoute);
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted || !state.user || !state.csrf) {
+    initAuth();
+  }
+});
 
 function updateBreadcrumbs() {
   const secEl = document.getElementById('breadcrumb-section');
@@ -3540,7 +3633,11 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
   try {
     const res = await api('/api/auth/login', { method: 'POST', body: { username, password } });
     if (res.requires2fa && res.mfaToken) {
+      document.body.classList.remove('auth-verified');
+      state.user = null;
+      state.csrf = null;
       state.pendingMfaToken = res.mfaToken;
+      resetCleanUrl();
       document.getElementById('login-form').style.display = 'none';
       document.getElementById('login-2fa-form').style.display = 'block';
       const unameLabel = document.getElementById('login-2fa-username');
@@ -3554,10 +3651,11 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
       return;
     }
 
+    state.pendingMfaToken = null;
     state.user = res.user;
     state.csrf = res.csrf;
     state.activeSessions = res.activeSessions || 1;
-    onAuthenticated();
+    await onAuthenticated(true);
   } catch (err) {
     toast(err.message, 'error');
   } finally {
@@ -3584,10 +3682,13 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
     state.user = res.user;
     state.csrf = res.csrf;
     state.activeSessions = res.activeSessions || 1;
-    onAuthenticated();
+    await onAuthenticated(true);
     toast('Two-Factor Authentication verified!', 'success');
   } catch (err) {
     toast(err.message, 'error');
+    if (err.message && (err.message.includes('expired') || err.message.includes('Locked'))) {
+      showLogin();
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Verify & Sign In';
@@ -3595,9 +3696,7 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
 });
 
 document.getElementById('login-2fa-back-btn')?.addEventListener('click', () => {
-  state.pendingMfaToken = null;
-  document.getElementById('login-2fa-form').style.display = 'none';
-  document.getElementById('login-form').style.display = 'block';
+  showLogin();
 });
 
 // Logout
@@ -3605,8 +3704,6 @@ document.getElementById('logout-btn')?.addEventListener('click', async () => {
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch { /* ignore */ }
-  state.user = null;
-  state.csrf = null;
   showLogin();
 });
 

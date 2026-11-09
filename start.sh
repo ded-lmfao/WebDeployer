@@ -48,11 +48,38 @@ if [ ! -f "target/release/webdep" ]; then
 fi
 
 chmod +x target/release/webdep
-mkdir -p data/logs
+mkdir -p data/logs data/caddy
 
 PORT=$(grep -E '^PORT=' .env 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
 PORT="${PORT:-4600}"
 PUBLIC_IP=$(curl -s --max-time 2 https://api.ipify.org || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+
+# Automatically configure UFW & iptables firewall rules so ports are open out-of-the-box
+SERVICE_USER="${SUDO_USER:-$(whoami)}"
+if command -v sudo >/dev/null 2>&1; then
+    echo "[*] Configuring automatic firewall rules (UFW & iptables)..."
+    if ! command -v ufw >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update -y >/dev/null 2>&1 && sudo apt-get install -y ufw >/dev/null 2>&1 || true
+    fi
+    if command -v ufw >/dev/null 2>&1; then
+        sudo ufw allow OpenSSH >/dev/null 2>&1 || sudo ufw allow 22/tcp >/dev/null 2>&1 || true
+        sudo ufw allow 80/tcp >/dev/null 2>&1 || true
+        sudo ufw allow 443/tcp >/dev/null 2>&1 || true
+        sudo ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true
+        sudo ufw --force enable >/dev/null 2>&1 || true
+    fi
+    if command -v iptables >/dev/null 2>&1; then
+        for p in 80 443 "${PORT}"; do
+            sudo iptables -C INPUT -p tcp --dport "$p" -m conntrack --ctstate NEW -j ACCEPT 2>/dev/null || \
+                sudo iptables -I INPUT 1 -p tcp --dport "$p" -m conntrack --ctstate NEW -j ACCEPT 2>/dev/null || true
+        done
+    fi
+    # Allow WebDep service user to automatically open ports in UFW/iptables & reload Caddy when new websites are created
+    if [ -d "/etc/sudoers.d" ]; then
+        echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ufw, /usr/sbin/iptables, /usr/bin/systemctl reload caddy" | sudo tee /etc/sudoers.d/webdep-firewall >/dev/null 2>&1 || true
+        sudo chmod 0440 /etc/sudoers.d/webdep-firewall 2>/dev/null || true
+    fi
+fi
 
 if [ "$MODE" = "--service" ] || [ "$MODE" = "service" ]; then
     echo "[*] Installing systemd service (/etc/systemd/system/webdep.service)..."
