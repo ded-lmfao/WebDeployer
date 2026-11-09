@@ -1496,10 +1496,16 @@ struct ActionResponse {
     deployment_id: i64,
 }
 
+#[derive(Deserialize, Default)]
+struct DeployPayload {
+    sha: Option<String>,
+}
+
 async fn deploy_project_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
+    body_bytes: axum::body::Bytes,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "deploy", Some(id))?;
     let p = state
@@ -1508,7 +1514,20 @@ async fn deploy_project_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
+    let target_sha = serde_json::from_slice::<DeployPayload>(&body_bytes)
+        .ok()
+        .and_then(|b| b.sha)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "manual");
+    if let Some(ref sha) = target_sha {
+        let conn = state.db.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE deployments SET sha = ? WHERE id = ?",
+            rusqlite::params![sha, dep_id],
+        );
+    }
     log_audit_project(
         &state,
         Some(p.id),
@@ -3110,9 +3129,15 @@ struct CommitView {
     deployed_before: bool,
 }
 
+#[derive(Deserialize, Default)]
+struct CommitsQuery {
+    refresh: Option<bool>,
+}
+
 async fn project_commits_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
+    Query(q): Query<CommitsQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let p = state
         .projects
@@ -3120,32 +3145,60 @@ async fn project_commits_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
+    let force_refresh = q.refresh.unwrap_or(false);
+    let stale_poll = now().saturating_sub(p.last_poll_at.unwrap_or(0)) > 15_000;
+    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
+    let needs_sync = force_refresh || stale_poll || !repo_dir.join(".git").exists();
+
     let cache_key = format!(
         "commits:p{}:{}:{}",
         id,
         p.deployed_sha.as_deref().unwrap_or("none"),
         p.last_poll_at.unwrap_or(0)
     );
-    if let Some(cached_val) = state.cache.get(&cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
-        return Ok(res);
+    if !needs_sync {
+        if let Some(cached_val) = state.cache.get(&cache_key) {
+            let mut res = Json(cached_val).into_response();
+            res.headers_mut()
+                .insert("x-cache", HeaderValue::from_static("HIT"));
+            return Ok(res);
+        }
     }
 
-    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     let repo_url = p.repo_url.clone();
     let branch = p.branch.clone();
     let repo_dir_clone = repo_dir.clone();
 
-    let raw_commits = tokio::task::spawn_blocking(move || {
-        if !repo_dir_clone.exists() {
-            let _ = crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch);
+    let (raw_commits, synced_ok) = tokio::task::spawn_blocking(move || {
+        let mut synced = false;
+        if needs_sync {
+            synced = crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch).is_ok();
         }
-        crate::git::Git::list_commits(&repo_dir_clone, &branch, 200)
+        let commits = crate::git::Git::list_commits(&repo_dir_clone, &branch, 200);
+        (commits, synced)
     })
     .await
     .unwrap_or_default();
+
+    let poll_ts = if synced_ok {
+        let ts = now();
+        if let Ok(conn) = state.db.lock() {
+            let _ = conn.execute(
+                "UPDATE projects SET last_poll_at = ? WHERE id = ?",
+                rusqlite::params![ts, p.id],
+            );
+        }
+        ts
+    } else {
+        p.last_poll_at.unwrap_or(0)
+    };
+
+    let final_cache_key = format!(
+        "commits:p{}:{}:{}",
+        id,
+        p.deployed_sha.as_deref().unwrap_or("none"),
+        poll_ts
+    );
 
     let releases = state.deployer.list_releases(id);
 
@@ -3169,7 +3222,7 @@ async fn project_commits_handler(
     if let Ok(json_val) = serde_json::to_value(&views) {
         state
             .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(30));
+            .set(final_cache_key, json_val, std::time::Duration::from_secs(15));
     }
 
     let mut res = Json(views).into_response();
@@ -3195,14 +3248,20 @@ async fn project_check_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
 
+    let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     let repo_url = p.repo_url.clone();
     let branch = p.branch.clone();
-    let remote_sha = tokio::task::spawn_blocking(move || crate::git::Git::ls_remote(&repo_url, &branch))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let (remote_sha, local_head) = tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
+        let remote = crate::git::Git::ls_remote(&repo_url, &branch)?;
+        let local = crate::git::Git::resolve_head(&repo_dir).unwrap_or_default();
+        Ok((remote, local))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    let needs_fetch = !remote_sha.is_empty() && p.deployed_sha.as_deref() != Some(&remote_sha);
+    let needs_fetch = !remote_sha.is_empty()
+        && (p.deployed_sha.as_deref() != Some(&remote_sha) || local_head != remote_sha);
     Ok(Json(CheckGitResponse {
         needs_fetch,
         remote_sha,
@@ -3250,6 +3309,8 @@ async fn project_fetch_handler(
         )
         .ok();
     }
+    state.cache.invalidate_project(p.id);
+    state.cache.invalidate_all();
 
     log_audit_project(
         &state,

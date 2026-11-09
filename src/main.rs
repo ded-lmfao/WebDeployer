@@ -150,22 +150,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
                     if repo_dir.exists() {
-                        if let Ok(()) = Git::fetch(&repo_dir, &p.branch) {
-                            if let Ok(head) = Git::resolve_head(&repo_dir) {
-                                if p.deployed_sha.as_deref() != Some(&head) {
-                                    poll_logs.add(
-                                        Some(p.id),
-                                        None,
-                                        "github",
-                                        "info",
-                                        &format!("Auto-deploy: new commit {} detected on branch {}", &head[..7.min(head.len())], p.branch),
-                                    );
-                                    let dep_id = poll_deployer.create_deployment(&p, "deploy", "auto-poller", "auto");
-                                    let d = poll_deployer.clone();
-                                    tokio::spawn(async move {
-                                        d.run_deploy(p.id, dep_id).await;
-                                    });
-                                }
+                        let repo_url = p.repo_url.clone();
+                        let branch = p.branch.clone();
+                        let repo_dir_clone = repo_dir.clone();
+                        let fetched = tokio::task::spawn_blocking(move || {
+                            Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch)
+                                .and_then(|_| Git::resolve_head(&repo_dir_clone))
+                        })
+                        .await;
+                        if let Ok(Ok(head)) = fetched {
+                            if !head.is_empty() && p.deployed_sha.as_deref() != Some(&head) {
+                                poll_logs.add(
+                                    Some(p.id),
+                                    None,
+                                    "github",
+                                    "info",
+                                    &format!("Auto-deploy: new commit {} detected on branch {}", &head[..7.min(head.len())], p.branch),
+                                );
+                                let dep_id = poll_deployer.create_deployment(&p, "deploy", "auto-poller", "auto");
+                                let d = poll_deployer.clone();
+                                tokio::spawn(async move {
+                                    d.run_deploy(p.id, dep_id).await;
+                                });
                             }
                         }
                     }

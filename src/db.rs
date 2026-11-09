@@ -1,9 +1,15 @@
 use rusqlite::Connection;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type DbPool = Arc<Mutex<Connection>>;
+
+static ACTIVE_DB_PATH: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+pub fn active_db_path() -> Option<PathBuf> {
+    ACTIVE_DB_PATH.read().ok().and_then(|g| g.clone())
+}
 
 pub fn now() -> i64 {
     SystemTime::now()
@@ -15,6 +21,9 @@ pub fn now() -> i64 {
 pub fn open_db(data_dir: &Path) -> Result<DbPool, Box<dyn std::error::Error + Send + Sync>> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir.join("webdep.sqlite");
+    if let Ok(mut guard) = ACTIVE_DB_PATH.write() {
+        *guard = Some(db_path.clone());
+    }
     let legacy_path = data_dir.join("nexus-deploy.sqlite");
 
     // Seamlessly migrate legacy nexus-deploy.sqlite -> webdep.sqlite without losing any user data

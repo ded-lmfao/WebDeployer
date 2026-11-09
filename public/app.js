@@ -1449,7 +1449,7 @@ async function loadGithubView() {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">Loading commits from mirror...</td></tr>';
   }
   try {
-    const commits = await api(commitsPath);
+    const commits = await api(commitsPath, { noCache: true });
     if (!commits.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">No commits found. Click "Fetch Updates" above to sync with GitHub.</td></tr>';
       const bar = document.getElementById('github-commits-pagination');

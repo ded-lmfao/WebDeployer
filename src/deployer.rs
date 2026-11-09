@@ -341,12 +341,35 @@ impl Deployer {
             return;
         }
 
-        let head = match Git::resolve_head(&repo_dir) {
-            Ok(h) => h,
-            Err(e) => {
-                self.finish_deployment(dep_id, "failed", Some(&e));
-                return;
-            }
+        {
+            let conn = self.db.lock().unwrap();
+            let _ = conn.execute(
+                "UPDATE projects SET last_poll_at = ? WHERE id = ?",
+                params![now(), p.id],
+            );
+        }
+
+        let requested_sha: Option<String> = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row(
+                "SELECT sha FROM deployments WHERE id = ?",
+                params![dep_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+        };
+
+        let head = match requested_sha {
+            Some(sha) => sha,
+            None => match Git::resolve_head(&repo_dir) {
+                Ok(h) => h,
+                Err(e) => {
+                    self.finish_deployment(dep_id, "failed", Some(&e));
+                    return;
+                }
+            },
         };
 
         // Stage 2: Pulling
