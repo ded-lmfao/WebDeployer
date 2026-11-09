@@ -803,6 +803,8 @@ function renderWebsiteWorkspaceHeader() {
     backups: 'backups',
   };
 
+  const tabsBar = document.getElementById('ws-tabs-bar');
+  let activeBtn = null;
   document.querySelectorAll('#ws-tabs-bar .ws-tab-item').forEach((btn) => {
     const tab = btn.getAttribute('data-ws-tab');
     const reqPower = tabPowerMap[tab];
@@ -811,9 +813,47 @@ function renderWebsiteWorkspaceHeader() {
     } else {
       btn.style.display = '';
     }
-    btn.classList.toggle('active', tab === state.currentView);
+    const isActive = tab === state.currentView;
+    btn.classList.toggle('active', isActive);
+    if (isActive) activeBtn = btn;
   });
+
+  const activeTabSig = `${p.id}:${state.currentView}`;
+  if (tabsBar && activeBtn && state.lastCenteredWsTab !== activeTabSig) {
+    requestAnimationFrame(() => {
+      if (centerActiveWebsiteTab(true)) {
+        state.lastCenteredWsTab = activeTabSig;
+      }
+      setTimeout(() => {
+        if (centerActiveWebsiteTab(true)) {
+          state.lastCenteredWsTab = activeTabSig;
+        }
+      }, 80);
+    });
+  }
 }
+
+function centerActiveWebsiteTab(smooth = true) {
+  const tabsBar = document.getElementById('ws-tabs-bar');
+  if (!tabsBar || tabsBar.clientWidth === 0) return false;
+  const activeBtn = tabsBar.querySelector('.ws-tab-item.active');
+  if (!activeBtn || activeBtn.offsetWidth === 0) return false;
+
+  const barRect = tabsBar.getBoundingClientRect();
+  const btnRect = activeBtn.getBoundingClientRect();
+  const delta = (btnRect.left + btnRect.width / 2) - (barRect.left + barRect.width / 2);
+  const maxScroll = Math.max(0, tabsBar.scrollWidth - tabsBar.clientWidth);
+  const targetLeft = Math.min(maxScroll, Math.max(0, tabsBar.scrollLeft + delta));
+
+  if (Math.abs(tabsBar.scrollLeft - targetLeft) > 2) {
+    tabsBar.scrollTo({
+      left: targetLeft,
+      behavior: smooth ? 'smooth' : 'auto',
+    });
+  }
+  return true;
+}
+window.addEventListener('resize', () => centerActiveWebsiteTab(false));
 
 function syncProjectSelectors() {
   renderWebsiteWorkspaceHeader();

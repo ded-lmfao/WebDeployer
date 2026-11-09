@@ -810,6 +810,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .ws-btn-delete:hover { background: var(--danger) !important; border-color: var(--danger) !important; color: #fff !important; }
 
 .ws-tabs-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
