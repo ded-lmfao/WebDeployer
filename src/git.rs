@@ -37,34 +37,81 @@ fn copy_dir_all(src: &Path, dst: &Path, skip_git: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StoredGithubToken {
+    #[serde(default)]
+    pub label: String,
+    pub token: String,
+}
+
 impl Git {
-    fn get_sqlite_github_token() -> Option<String> {
+    pub fn get_sqlite_github_tokens() -> Vec<StoredGithubToken> {
         let db_path = std::env::var("WEBDEP_DB")
             .or_else(|_| std::env::var("NEXUS_DB"))
             .unwrap_or_else(|_| "./data/webdep.sqlite".into());
-        let conn = rusqlite::Connection::open(db_path).ok()?;
-        let tok: String = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'github_token'",
-                [],
-                |r| r.get(0),
-            )
-            .ok()?;
-        let trimmed = tok.trim().to_string();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    }
+        let Ok(conn) = rusqlite::Connection::open(db_path) else {
+            return Vec::new();
+        };
 
-    fn inject_token_url(repo_url: &str) -> String {
-        if let Some(tok) = Self::get_sqlite_github_token() {
-            if let Some(rest) = repo_url.strip_prefix("https://github.com/") {
-                return format!("https://x-access-token:{}@github.com/{}", tok, rest);
+        let mut list: Vec<StoredGithubToken> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // 1. Read structured multi-token JSON list (`github_tokens`)
+        if let Ok(raw_json) = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'github_tokens'",
+            [],
+            |r| r.get::<_, String>(0),
+        ) {
+            if let Ok(parsed) = serde_json::from_str::<Vec<StoredGithubToken>>(&raw_json) {
+                for item in parsed {
+                    let t = item.token.trim().to_string();
+                    if !t.is_empty() && seen.insert(t.clone()) {
+                        list.push(StoredGithubToken {
+                            label: if item.label.trim().is_empty() {
+                                format!("Token #{}", list.len() + 1)
+                            } else {
+                                item.label.trim().to_string()
+                            },
+                            token: t,
+                        });
+                    }
+                }
             }
         }
-        repo_url.to_string()
+
+        // 2. Also include any token(s) in `github_token` (supports single or comma/newline-separated tokens)
+        if let Ok(raw_single) = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'github_token'",
+            [],
+            |r| r.get::<_, String>(0),
+        ) {
+            for part in raw_single.split(|c| c == ',' || c == '\n' || c == ';') {
+                let t = part.trim().to_string();
+                if !t.is_empty() && seen.insert(t.clone()) {
+                    list.push(StoredGithubToken {
+                        label: format!("Token #{}", list.len() + 1),
+                        token: t,
+                    });
+                }
+            }
+        }
+
+        list
+    }
+
+    fn candidate_auth_urls(repo_url: &str) -> Vec<String> {
+        let tokens = Self::get_sqlite_github_tokens();
+        if let Some(rest) = repo_url.strip_prefix("https://github.com/") {
+            let mut urls: Vec<String> = tokens
+                .into_iter()
+                .map(|t| format!("https://x-access-token:{}@github.com/{}", t.token, rest))
+                .collect();
+            // Always keep unauthenticated URL as final fallback for public repos
+            urls.push(repo_url.to_string());
+            urls
+        } else {
+            vec![repo_url.to_string()]
+        }
     }
 
     pub fn resolve_head(repo_dir: &Path) -> Result<String, String> {
@@ -96,25 +143,36 @@ impl Git {
     }
 
     pub fn clone_or_fetch(repo_url: &str, target_dir: &Path, branch: &str) -> Result<(), String> {
-        let auth_url = Self::inject_token_url(repo_url);
+        let candidates = Self::candidate_auth_urls(repo_url);
+        let mut last_err = String::from("Git operation failed");
+
         if target_dir.join(".git").exists() {
-            let _ = Command::new("git")
-                .current_dir(target_dir)
-                .args(["remote", "set-url", "origin", &auth_url])
-                .output();
-            Self::fetch(target_dir, branch)?;
+            for auth_url in &candidates {
+                let _ = Command::new("git")
+                    .current_dir(target_dir)
+                    .args(["remote", "set-url", "origin", auth_url])
+                    .output();
+                match Self::fetch(target_dir, branch) {
+                    Ok(()) => return Ok(()),
+                    Err(e) => last_err = e,
+                }
+            }
+            Err(last_err)
         } else {
             std::fs::create_dir_all(target_dir).ok();
-            let out = Command::new("git")
-                .args(["clone", "--branch", branch, &auth_url, target_dir.to_str().unwrap_or(".")])
-                .output()
-                .map_err(|e| format!("Failed to run git clone: {}", e))?;
+            for auth_url in &candidates {
+                let out = Command::new("git")
+                    .args(["clone", "--branch", branch, auth_url, target_dir.to_str().unwrap_or(".")])
+                    .output()
+                    .map_err(|e| format!("Failed to run git clone: {}", e))?;
 
-            if !out.status.success() {
-                return Err(String::from_utf8_lossy(&out.stderr).to_string());
+                if out.status.success() {
+                    return Ok(());
+                }
+                last_err = String::from_utf8_lossy(&out.stderr).to_string();
             }
+            Err(last_err)
         }
-        Ok(())
     }
 
     pub fn checkout(repo_dir: &Path, sha: &str, destination_dir: &Path) -> Result<(), String> {
@@ -233,21 +291,26 @@ impl Git {
     }
 
     pub fn ls_remote(repo_url: &str, branch: &str) -> Result<String, String> {
-        let out = Command::new("git")
-            .args(["ls-remote", repo_url, &format!("refs/heads/{}", branch)])
-            .output()
-            .map_err(|e| e.to_string())?;
+        let candidates = Self::candidate_auth_urls(repo_url);
+        let mut last_err = String::from("Failed to query remote repository");
 
-        if out.status.success() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if let Some(first_line) = text.lines().next() {
-                if let Some(sha) = first_line.split_whitespace().next() {
-                    return Ok(sha.to_string());
+        for auth_url in &candidates {
+            let out = Command::new("git")
+                .args(["ls-remote", auth_url, &format!("refs/heads/{}", branch)])
+                .output()
+                .map_err(|e| e.to_string())?;
+
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if let Some(first_line) = text.lines().next() {
+                    if let Some(sha) = first_line.split_whitespace().next() {
+                        return Ok(sha.to_string());
+                    }
                 }
+                return Ok(String::new());
             }
-            Ok(String::new())
-        } else {
-            Err(String::from_utf8_lossy(&out.stderr).to_string())
+            last_err = String::from_utf8_lossy(&out.stderr).to_string();
         }
+        Err(last_err)
     }
 }

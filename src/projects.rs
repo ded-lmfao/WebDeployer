@@ -107,6 +107,16 @@ pub struct Project {
 pub struct EnvVarView {
     pub key: String,
     pub value: String,
+    #[serde(default)]
+    pub real_value: String,
+    pub is_secret: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct EnvVarInput {
+    pub key: String,
+    pub value: String,
+    #[serde(default = "default_true")]
     pub is_secret: bool,
 }
 
@@ -368,14 +378,16 @@ impl Projects {
             let key: String = r.get(0)?;
             let is_secret: bool = r.get::<_, i64>(2)? != 0;
             let val_enc: String = r.get(1)?;
+            let decrypted = self.vault.decrypt(&val_enc).unwrap_or_else(|_| "".to_string());
             let value = if is_secret {
                 "********".to_string()
             } else {
-                self.vault.decrypt(&val_enc).unwrap_or_else(|_| "".to_string())
+                decrypted.clone()
             };
             Ok(EnvVarView {
                 key,
                 value,
+                real_value: decrypted,
                 is_secret,
             })
         })?;
@@ -394,13 +406,38 @@ impl Projects {
         value: &str,
         is_secret: bool,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.set_env_var_with_rename(project_id, key, value, is_secret, None)
+    }
+
+    pub fn set_env_var_with_rename(
+        &self,
+        project_id: i64,
+        key: &str,
+        value: &str,
+        is_secret: bool,
+        previous_key: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let clean_key = key.trim();
+        if clean_key.is_empty() {
+            return Err("Variable key cannot be empty".into());
+        }
         let enc = self.vault.encrypt(value)?;
-        let conn = self.db.lock().unwrap();
-        conn.execute(
+        let mut conn = self.db.lock().unwrap();
+        let tx = conn.transaction()?;
+        if let Some(prev) = previous_key.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            if prev != clean_key {
+                tx.execute(
+                    "DELETE FROM project_env WHERE project_id = ? AND key = ?",
+                    params![project_id, prev],
+                )?;
+            }
+        }
+        tx.execute(
             "INSERT INTO project_env(project_id, key, value_enc, is_secret) VALUES(?, ?, ?, ?)
              ON CONFLICT(project_id, key) DO UPDATE SET value_enc=excluded.value_enc, is_secret=excluded.is_secret",
-            params![project_id, key, enc, if is_secret { 1 } else { 0 }],
+            params![project_id, clean_key, enc, if is_secret { 1 } else { 0 }],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -456,7 +493,7 @@ impl Projects {
         replace_all: bool,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let pairs = parse_dotenv(raw_or_vars);
-        if pairs.is_empty() {
+        if pairs.is_empty() && !replace_all {
             return Ok(0);
         }
 
@@ -474,6 +511,38 @@ impl Projects {
                 "INSERT INTO project_env(project_id, key, value_enc, is_secret) VALUES(?, ?, ?, ?)
                  ON CONFLICT(project_id, key) DO UPDATE SET value_enc=excluded.value_enc, is_secret=excluded.is_secret",
                 params![project_id, k, enc, if is_secret { 1 } else { 0 }],
+            )?;
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
+    pub fn set_batch_env_items(
+        &self,
+        project_id: i64,
+        items: &[EnvVarInput],
+        replace_all: bool,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.db.lock().unwrap();
+        let tx = conn.transaction()?;
+
+        if replace_all {
+            tx.execute("DELETE FROM project_env WHERE project_id = ?", params![project_id])?;
+        }
+
+        let mut count = 0;
+        for item in items {
+            let k = item.key.trim();
+            if k.is_empty() {
+                continue;
+            }
+            let enc = self.vault.encrypt(&item.value)?;
+            tx.execute(
+                "INSERT INTO project_env(project_id, key, value_enc, is_secret) VALUES(?, ?, ?, ?)
+                 ON CONFLICT(project_id, key) DO UPDATE SET value_enc=excluded.value_enc, is_secret=excluded.is_secret",
+                params![project_id, k, enc, if item.is_secret { 1 } else { 0 }],
             )?;
             count += 1;
         }

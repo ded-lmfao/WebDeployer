@@ -1234,7 +1234,10 @@ document.getElementById('browse-github-repos-btn')?.addEventListener('click', as
       return;
     }
     sel.innerHTML = '<option value="">-- Choose a repository --</option>' +
-      repos.map((r) => `<option value="${r.clone_url}">${r.full_name} (${r.private ? 'Private' : 'Public'})</option>`).join('');
+      repos.map((r) => {
+        const prefix = r.token_label ? `[${escapeHtml(r.token_label)}] ` : '';
+        return `<option value="${escapeHtml(r.clone_url)}">${prefix}${escapeHtml(r.full_name)} (${r.private ? 'Private' : 'Public'})</option>`;
+      }).join('');
     sel.style.display = 'block';
     sel.onchange = () => {
       if (sel.value) {
@@ -2273,8 +2276,38 @@ function openLogsForProject(projectId) {
 window.openLogsForProject = openLogsForProject;
 
 // ============================================================================
-// View 8: Environment Variables
+// View 8: Environment Variables (Single Inline Edit, Multi-Row Edit & Raw .env)
 // ============================================================================
+const envUiState = {
+  vars: [],
+  viewMode: 'list', // 'list' | 'multi' | 'raw'
+  editingKey: null,
+  editDraft: { key: '', value: '', is_secret: true },
+  revealedKeys: new Set(),
+  revealAll: false,
+  selectedKeys: new Set(),
+  quickAddSecret: true,
+  multiRows: [],
+};
+
+function getRealEnvValue(v) {
+  if (!v) return '';
+  if (typeof v.real_value === 'string' && v.real_value.length > 0) return v.real_value;
+  if (v.value && v.value !== '********') return v.value;
+  return v.real_value ?? '';
+}
+
+function formatEnvVarsToRaw(vars) {
+  return (vars || []).map((v) => {
+    const k = v.key || '';
+    const val = getRealEnvValue(v);
+    if (val.includes(' ') || val.includes('\n') || val.includes('"') || val.includes('#')) {
+      return `${k}="${val.replace(/"/g, '\\"')}"`;
+    }
+    return `${k}=${val}`;
+  }).join('\n');
+}
+
 async function loadEnvView() {
   if (!state.projects || state.projects.length === 0) {
     try {
@@ -2294,42 +2327,702 @@ async function loadEnvView() {
   }
 
   try {
-    const vars = await api(`/api/projects/${p.id}/env`);
-    if (!vars.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">No environment variables configured. Click "Add Variable" or "Bulk / .env File" above to add.</td></tr>';
-      const bar = document.getElementById('env-vars-pagination');
-      if (bar) bar.innerHTML = '';
-      return;
+    const vars = await api(`/api/projects/${p.id}/env`, { noCache: true });
+    // If any secret variable lacks real_value (e.g. older backend), hydrate from /env/raw
+    const needsRawHydration = vars.some((v) => (v.is_secret ?? v.secret) && typeof v.real_value !== 'string');
+    if (needsRawHydration) {
+      try {
+        const rawRes = await api(`/api/projects/${p.id}/env/raw`, { noCache: true });
+        const map = parseDotenvClient(rawRes.content || '');
+        vars.forEach((v) => {
+          if (map.has(v.key)) v.real_value = map.get(v.key);
+        });
+      } catch (_) {}
     }
 
-    paginateAndRender(vars, 'envVars', 'env-vars-pagination', (slice) => {
-      tbody.innerHTML = slice.map((v) => {
-        const isSecret = Boolean(v.is_secret ?? v.secret);
+    envUiState.vars = Array.isArray(vars) ? vars : [];
+    // Clean up selectedKeys that no longer exist
+    const existingKeySet = new Set(envUiState.vars.map((v) => v.key));
+    for (const k of Array.from(envUiState.selectedKeys)) {
+      if (!existingKeySet.has(k)) envUiState.selectedKeys.delete(k);
+    }
+
+    const countBadge = document.getElementById('env-count-badge');
+    if (countBadge) countBadge.textContent = String(envUiState.vars.length);
+
+    if (envUiState.viewMode === 'multi') {
+      initMultiEditRows();
+      renderMultiEditTable();
+    } else if (envUiState.viewMode === 'raw') {
+      populateRawEditorFromState();
+    } else {
+      renderEnvTableFromState();
+    }
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function parseDotenvClient(input) {
+  const map = new Map();
+  for (const rawLine of (input || '').split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.startsWith('export ')) line = line.slice(7).trim();
+    const eqIdx = line.indexOf('=');
+    if (eqIdx <= 0) continue;
+    const key = line.slice(0, eqIdx).trim();
+    let val = line.slice(eqIdx + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
+        (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
+      val = val.slice(1, -1).replace(/\\"/g, '"');
+    } else {
+      const commentIdx = val.indexOf(' #');
+      if (commentIdx !== -1) val = val.slice(0, commentIdx).trimEnd();
+    }
+    if (key) map.set(key, val);
+  }
+  return map;
+}
+
+function setEnvViewMode(mode) {
+  envUiState.viewMode = mode;
+  envUiState.editingKey = null;
+
+  const pillList = document.getElementById('env-pill-list');
+  const pillMulti = document.getElementById('env-pill-multi');
+  const pillRaw = document.getElementById('env-pill-raw');
+  pillList?.classList.toggle('active', mode === 'list');
+  pillMulti?.classList.toggle('active', mode === 'multi');
+  pillRaw?.classList.toggle('active', mode === 'raw');
+
+  const paneList = document.getElementById('env-pane-list');
+  const paneMulti = document.getElementById('env-pane-multi');
+  const paneRaw = document.getElementById('env-pane-raw');
+  if (paneList) paneList.style.display = mode === 'list' ? 'block' : 'none';
+  if (paneMulti) paneMulti.style.display = mode === 'multi' ? 'block' : 'none';
+  if (paneRaw) paneRaw.style.display = mode === 'raw' ? 'block' : 'none';
+
+  const tbList = document.getElementById('env-list-toolbar');
+  const tbMulti = document.getElementById('env-multi-toolbar');
+  const tbRaw = document.getElementById('env-raw-toolbar');
+  if (tbList) tbList.style.display = mode === 'list' ? 'flex' : 'none';
+  if (tbMulti) tbMulti.style.display = mode === 'multi' ? 'flex' : 'none';
+  if (tbRaw) tbRaw.style.display = mode === 'raw' ? 'flex' : 'none';
+
+  const quickCard = document.getElementById('env-quick-add-card');
+  if (quickCard) quickCard.style.display = mode === 'list' ? 'block' : 'none';
+
+  if (mode === 'multi') {
+    initMultiEditRows();
+    renderMultiEditTable();
+  } else if (mode === 'raw') {
+    populateRawEditorFromState();
+  } else {
+    renderEnvTableFromState();
+  }
+}
+window.setEnvViewMode = setEnvViewMode;
+
+function renderEnvTableFromState() {
+  const tbody = document.getElementById('env-vars-table-body');
+  if (!tbody) return;
+
+  const q = (document.getElementById('env-search-input')?.value || '').trim().toLowerCase();
+  const filtered = envUiState.vars.filter((v) => {
+    if (!q) return true;
+    const keyMatch = (v.key || '').toLowerCase().includes(q);
+    const valMatch = getRealEnvValue(v).toLowerCase().includes(q);
+    return keyMatch || valMatch;
+  });
+
+  updateSelectedEnvToolbar();
+
+  if (!envUiState.vars.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 28px; color: var(--text-muted);">No environment variables yet. Use the quick-add bar above, click <strong>Raw .env Editor</strong>, or <strong>Import .env</strong>.</td></tr>';
+    const bar = document.getElementById('env-vars-pagination');
+    if (bar) bar.innerHTML = '';
+    return;
+  }
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 24px; color: var(--text-muted);">No variables match filter "${escapeHtml(q)}".</td></tr>`;
+    const bar = document.getElementById('env-vars-pagination');
+    if (bar) bar.innerHTML = '';
+    return;
+  }
+
+  paginateAndRender(filtered, 'envVars', 'env-vars-pagination', (slice) => {
+    tbody.innerHTML = slice.map((v) => {
+      const isSecret = Boolean(v.is_secret ?? v.secret);
+      const realVal = getRealEnvValue(v);
+      const isRevealed = !isSecret || envUiState.revealAll || envUiState.revealedKeys.has(v.key);
+      const isEditing = envUiState.editingKey === v.key;
+      const isChecked = envUiState.selectedKeys.has(v.key);
+      const keyEsc = escapeHtml(v.key);
+      const keyJs = escapeHtml(JSON.stringify(v.key));
+
+      if (isEditing) {
+        const draftSecret = Boolean(envUiState.editDraft.is_secret);
         return `
+          <tr class="env-row-editing">
+            <td style="text-align: center;">
+              <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleSelectEnvVar(${keyJs}, this.checked)">
+            </td>
+            <td>
+              <input type="text" id="env-inline-edit-key" class="form-control env-mono-input" value="${escapeHtml(envUiState.editDraft.key)}" placeholder="KEY_NAME" onkeydown="handleInlineEditKeydown(event, ${keyJs})">
+            </td>
+            <td>
+              <input type="text" id="env-inline-edit-val" class="form-control env-mono-input" value="${escapeHtml(envUiState.editDraft.value)}" placeholder="Variable value..." onkeydown="handleInlineEditKeydown(event, ${keyJs})">
+            </td>
+            <td>
+              <button type="button" id="env-inline-edit-secret" class="env-visibility-btn ${draftSecret ? 'is-secret' : 'is-public'}" onclick="toggleInlineEditSecret()">
+                ${draftSecret ? 'Secret' : 'Public'}
+              </button>
+            </td>
+            <td style="text-align: right;">
+              <div style="display: inline-flex; gap: 6px; justify-content: flex-end;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveInlineEnvEdit(${keyJs})">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="cancelInlineEnvEdit()">Cancel</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }
+
+      return `
         <tr>
-          <td><code>${escapeHtml(v.key)}</code></td>
-          <td id="env-val-${v.key}">
-            ${isSecret
-              ? '<span style="font-family: var(--font-mono); color: var(--text-dim);">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>'
-              : `<code style="color: var(--text-main);">${escapeHtml(v.value)}</code>`
+          <td style="text-align: center;">
+            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleSelectEnvVar(${keyJs}, this.checked)">
+          </td>
+          <td>
+            <span class="env-key-badge" onclick="copyTextToClipboard(${keyJs}, 'Copied key ' + ${keyJs})" title="Click to copy key">${keyEsc}</span>
+          </td>
+          <td>
+            ${isRevealed
+              ? `<span class="env-val-box" title="${escapeHtml(realVal)}">${escapeHtml(realVal) || '<em style="color:var(--text-dim);">(empty)</em>'}</span>`
+              : `<span class="env-val-box masked" onclick="toggleRevealSingleEnv(${keyJs})" title="Click to show value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>`
             }
           </td>
-          <td>${isSecret ? '<span class="badge badge-warning">Secret</span>' : '<span class="badge badge-neutral">Public</span>'}</td>
-          <td><span class="badge badge-success">Saved in SQLite</span></td>
           <td>
-            <div style="display: flex; gap: 6px;">
-              <button class="btn btn-secondary btn-sm" onclick="promptRevealEnv('${escapeHtml(v.key)}')">Reveal</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteEnvVar('${escapeHtml(v.key)}')">Delete</button>
+            ${isSecret
+              ? '<span class="badge badge-warning">Secret</span>'
+              : '<span class="badge badge-neutral">Public</span>'
+            }
+          </td>
+          <td style="text-align: right;">
+            <div style="display: inline-flex; gap: 6px; justify-content: flex-end;">
+              ${isSecret ? `
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleRevealSingleEnv(${keyJs})" title="${isRevealed ? 'Hide value' : 'Show value'}">
+                  ${isRevealed ? 'Hide' : 'Show'}
+                </button>
+              ` : ''}
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyEnvVarValue(${keyJs})" title="Copy value to clipboard">Copy</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="startInlineEnvEdit(${keyJs})" title="Edit this variable">Edit</button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="deleteEnvVar(${keyJs})" title="Delete variable">Delete</button>
             </div>
           </td>
         </tr>
       `;
-      }).join('');
-    });
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
+    }).join('');
+  });
+}
+window.renderEnvTableFromState = renderEnvTableFromState;
+
+// --- Single Variable Inline Edit ---
+function startInlineEnvEdit(key) {
+  const found = envUiState.vars.find((v) => v.key === key);
+  if (!found) return;
+  envUiState.editingKey = key;
+  envUiState.editDraft = {
+    key: found.key,
+    value: getRealEnvValue(found),
+    is_secret: Boolean(found.is_secret ?? found.secret),
+  };
+  renderEnvTableFromState();
+  setTimeout(() => {
+    const valInput = document.getElementById('env-inline-edit-val');
+    if (valInput) {
+      valInput.focus();
+      valInput.select();
+    }
+  }, 20);
+}
+window.startInlineEnvEdit = startInlineEnvEdit;
+
+function toggleInlineEditSecret() {
+  const keyInput = document.getElementById('env-inline-edit-key');
+  const valInput = document.getElementById('env-inline-edit-val');
+  if (keyInput) envUiState.editDraft.key = keyInput.value;
+  if (valInput) envUiState.editDraft.value = valInput.value;
+  envUiState.editDraft.is_secret = !envUiState.editDraft.is_secret;
+  const btn = document.getElementById('env-inline-edit-secret');
+  if (btn) {
+    btn.className = `env-visibility-btn ${envUiState.editDraft.is_secret ? 'is-secret' : 'is-public'}`;
+    btn.textContent = envUiState.editDraft.is_secret ? 'Secret' : 'Public';
   }
 }
+window.toggleInlineEditSecret = toggleInlineEditSecret;
+
+function cancelInlineEnvEdit() {
+  envUiState.editingKey = null;
+  renderEnvTableFromState();
+}
+window.cancelInlineEnvEdit = cancelInlineEnvEdit;
+
+function handleInlineEditKeydown(e, originalKey) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    saveInlineEnvEdit(originalKey);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelInlineEnvEdit();
+  }
+}
+window.handleInlineEditKeydown = handleInlineEditKeydown;
+
+async function saveInlineEnvEdit(originalKey) {
+  const p = getSelectedProject();
+  if (!p) return;
+  const newKey = (document.getElementById('env-inline-edit-key')?.value || '').trim();
+  const newVal = document.getElementById('env-inline-edit-val')?.value ?? '';
+  const isSecret = Boolean(envUiState.editDraft.is_secret);
+
+  if (!newKey) {
+    toast('Variable key cannot be empty.', 'error');
+    return;
+  }
+
+  try {
+    await api(`/api/projects/${p.id}/env`, {
+      method: 'PUT',
+      body: {
+        key: newKey,
+        value: newVal,
+        is_secret: isSecret,
+        previous_key: originalKey,
+      },
+    });
+    envUiState.editingKey = null;
+    toast(`Updated "${newKey}".`, 'success');
+    await loadEnvView();
+  } catch (err) {
+    toast(`Failed to update variable: ${err.message}`, 'error');
+  }
+}
+window.saveInlineEnvEdit = saveInlineEnvEdit;
+
+// --- Quick-Add Single Variable Bar ---
+function toggleQuickAddSecret() {
+  envUiState.quickAddSecret = !envUiState.quickAddSecret;
+  const btn = document.getElementById('env-quick-secret-toggle');
+  const lbl = document.getElementById('env-quick-secret-label');
+  if (btn) {
+    btn.className = `env-visibility-btn ${envUiState.quickAddSecret ? 'is-secret' : 'is-public'}`;
+  }
+  if (lbl) {
+    lbl.textContent = envUiState.quickAddSecret ? 'Secret (Masked)' : 'Public (Plaintext)';
+  }
+}
+window.toggleQuickAddSecret = toggleQuickAddSecret;
+
+async function handleInlineQuickAddEnv(e) {
+  if (e) e.preventDefault();
+  const p = getSelectedProject();
+  if (!p) {
+    toast('Please select or create a website first.', 'warning');
+    return;
+  }
+
+  const keyInput = document.getElementById('env-quick-key-input');
+  const valInput = document.getElementById('env-quick-val-input');
+  let key = (keyInput?.value || '').trim();
+  let value = valInput?.value ?? '';
+
+  // Support typing/pasting KEY=VALUE directly into the Key field
+  if (key.includes('=') && !value) {
+    const eq = key.indexOf('=');
+    const extractedKey = key.slice(0, eq).replace(/^export\s+/, '').trim();
+    let extractedVal = key.slice(eq + 1).trim();
+    if ((extractedVal.startsWith('"') && extractedVal.endsWith('"')) ||
+        (extractedVal.startsWith("'") && extractedVal.endsWith("'"))) {
+      extractedVal = extractedVal.slice(1, -1);
+    }
+    key = extractedKey;
+    value = extractedVal;
+  }
+
+  if (!key) {
+    toast('Please enter a variable key (e.g. DATABASE_URL).', 'error');
+    keyInput?.focus();
+    return;
+  }
+
+  try {
+    await api(`/api/projects/${p.id}/env`, {
+      method: 'PUT',
+      body: {
+        key,
+        value,
+        is_secret: envUiState.quickAddSecret,
+      },
+    });
+    if (keyInput) keyInput.value = '';
+    if (valInput) valInput.value = '';
+    toast(`Saved variable "${key}".`, 'success');
+    await loadEnvView();
+    keyInput?.focus();
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, 'error');
+  }
+}
+window.handleInlineQuickAddEnv = handleInlineQuickAddEnv;
+
+// Smart paste handler on Quick-Add Key input: if user pastes KEY=VALUE or multiple lines
+document.addEventListener('paste', (e) => {
+  const target = e.target;
+  if (!target || target.id !== 'env-quick-key-input') return;
+  const text = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+  if (!text.includes('=')) return;
+
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith('#') && l.includes('='));
+  if (lines.length > 1) {
+    e.preventDefault();
+    setEnvViewMode('raw');
+    const rawTa = document.getElementById('env-raw-editor-textarea');
+    if (rawTa) {
+      const existing = rawTa.value.trim();
+      rawTa.value = existing ? `${existing}\n${text.trim()}` : text.trim();
+      updateRawEnvLineStats();
+    }
+    toast(`Pasted ${lines.length} variables into Raw .env Editor — click "Save .env" to apply.`, 'info');
+  } else if (lines.length === 1) {
+    e.preventDefault();
+    const line = lines[0].trim().replace(/^export\s+/, '');
+    const eq = line.indexOf('=');
+    const k = line.slice(0, eq).trim();
+    let v = line.slice(eq + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    target.value = k;
+    const valInput = document.getElementById('env-quick-val-input');
+    if (valInput) {
+      valInput.value = v;
+      valInput.focus();
+    }
+  }
+});
+
+// --- Show / Hide & Copy Helpers (Zero Password Friction) ---
+function toggleRevealSingleEnv(key) {
+  if (envUiState.revealedKeys.has(key)) {
+    envUiState.revealedKeys.delete(key);
+  } else {
+    envUiState.revealedKeys.add(key);
+  }
+  renderEnvTableFromState();
+}
+window.toggleRevealSingleEnv = toggleRevealSingleEnv;
+
+function toggleRevealAllEnv() {
+  envUiState.revealAll = !envUiState.revealAll;
+  if (!envUiState.revealAll) {
+    envUiState.revealedKeys.clear();
+  }
+  const btn = document.getElementById('env-toggle-all-reveal-btn');
+  if (btn) {
+    btn.textContent = envUiState.revealAll ? 'Hide All Values' : 'Show All Values';
+  }
+  renderEnvTableFromState();
+}
+window.toggleRevealAllEnv = toggleRevealAllEnv;
+
+async function copyTextToClipboard(text, msg = 'Copied to clipboard') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(msg, 'success');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast(msg, 'success');
+  }
+}
+window.copyTextToClipboard = copyTextToClipboard;
+
+function copyEnvVarValue(key) {
+  const found = envUiState.vars.find((v) => v.key === key);
+  if (!found) return;
+  copyTextToClipboard(getRealEnvValue(found), `Copied value for "${key}"`);
+}
+window.copyEnvVarValue = copyEnvVarValue;
+
+// --- Multi-Select & Bulk Delete ---
+function toggleSelectEnvVar(key, checked) {
+  if (checked) {
+    envUiState.selectedKeys.add(key);
+  } else {
+    envUiState.selectedKeys.delete(key);
+  }
+  updateSelectedEnvToolbar();
+}
+window.toggleSelectEnvVar = toggleSelectEnvVar;
+
+function toggleSelectAllEnvVars(checked) {
+  if (checked) {
+    envUiState.vars.forEach((v) => envUiState.selectedKeys.add(v.key));
+  } else {
+    envUiState.selectedKeys.clear();
+  }
+  renderEnvTableFromState();
+}
+window.toggleSelectAllEnvVars = toggleSelectAllEnvVars;
+
+function updateSelectedEnvToolbar() {
+  const count = envUiState.selectedKeys.size;
+  const delBtn = document.getElementById('env-delete-selected-btn');
+  const countSpan = document.getElementById('env-selected-count');
+  const selectAllCheck = document.getElementById('env-select-all-check');
+  if (delBtn) delBtn.style.display = count > 0 ? 'inline-flex' : 'none';
+  if (countSpan) countSpan.textContent = String(count);
+  if (selectAllCheck) {
+    selectAllCheck.checked = envUiState.vars.length > 0 && count === envUiState.vars.length;
+  }
+}
+
+async function deleteSelectedEnvVars() {
+  const p = getSelectedProject();
+  if (!p || !envUiState.selectedKeys.size) return;
+  const keys = Array.from(envUiState.selectedKeys);
+  const ok = await showConfirmDialog({
+    title: `Delete ${keys.length} Selected Variable(s)`,
+    message: `Are you sure you want to delete ${keys.length} selected variable(s) (${keys.slice(0, 5).join(', ')}${keys.length > 5 ? '...' : ''}) from ${p.name}?`,
+    confirmText: `Delete ${keys.length} Variable(s)`,
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    for (const k of keys) {
+      await api(`/api/projects/${p.id}/env/${encodeURIComponent(k)}`, { method: 'DELETE' });
+    }
+    envUiState.selectedKeys.clear();
+    toast(`Deleted ${keys.length} variable(s).`, 'success');
+    await loadEnvView();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+window.deleteSelectedEnvVars = deleteSelectedEnvVars;
+
+// --- Mode 2: Multi-Row Table Editor (Edit Multiple Variables at Once) ---
+function initMultiEditRows() {
+  envUiState.multiRows = envUiState.vars.map((v) => ({
+    key: v.key,
+    value: getRealEnvValue(v),
+    is_secret: Boolean(v.is_secret ?? v.secret),
+  }));
+  if (envUiState.multiRows.length === 0) {
+    envUiState.multiRows.push({ key: '', value: '', is_secret: true });
+  }
+}
+
+function syncMultiEditDomToState() {
+  const rows = document.querySelectorAll('#env-multi-edit-tbody tr[data-multi-idx]');
+  rows.forEach((tr) => {
+    const idx = Number(tr.getAttribute('data-multi-idx'));
+    if (!envUiState.multiRows[idx]) return;
+    const kEl = tr.querySelector('.multi-env-key');
+    const vEl = tr.querySelector('.multi-env-val');
+    if (kEl) envUiState.multiRows[idx].key = kEl.value;
+    if (vEl) envUiState.multiRows[idx].value = vEl.value;
+  });
+}
+
+function renderMultiEditTable() {
+  const tbody = document.getElementById('env-multi-edit-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = envUiState.multiRows.map((row, idx) => `
+    <tr data-multi-idx="${idx}">
+      <td>
+        <input type="text" class="form-control env-mono-input multi-env-key" value="${escapeHtml(row.key)}" placeholder="KEY_NAME">
+      </td>
+      <td>
+        <input type="text" class="form-control env-mono-input multi-env-val" value="${escapeHtml(row.value)}" placeholder="Value...">
+      </td>
+      <td>
+        <button type="button" class="env-visibility-btn ${row.is_secret ? 'is-secret' : 'is-public'}" onclick="toggleMultiEditRowSecret(${idx})">
+          ${row.is_secret ? 'Secret' : 'Public'}
+        </button>
+      </td>
+      <td style="text-align: right;">
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeMultiEditEnvRow(${idx})" title="Remove this variable">&times;</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function addMultiEditEnvRow() {
+  syncMultiEditDomToState();
+  envUiState.multiRows.push({ key: '', value: '', is_secret: true });
+  renderMultiEditTable();
+  const inputs = document.querySelectorAll('#env-multi-edit-tbody .multi-env-key');
+  const last = inputs[inputs.length - 1];
+  if (last) last.focus();
+}
+window.addMultiEditEnvRow = addMultiEditEnvRow;
+
+function removeMultiEditEnvRow(idx) {
+  syncMultiEditDomToState();
+  envUiState.multiRows.splice(idx, 1);
+  if (envUiState.multiRows.length === 0) {
+    envUiState.multiRows.push({ key: '', value: '', is_secret: true });
+  }
+  renderMultiEditTable();
+}
+window.removeMultiEditEnvRow = removeMultiEditEnvRow;
+
+function toggleMultiEditRowSecret(idx) {
+  syncMultiEditDomToState();
+  if (envUiState.multiRows[idx]) {
+    envUiState.multiRows[idx].is_secret = !envUiState.multiRows[idx].is_secret;
+    renderMultiEditTable();
+  }
+}
+window.toggleMultiEditRowSecret = toggleMultiEditRowSecret;
+
+async function saveMultiEditEnv(andRestart = false) {
+  const p = getSelectedProject();
+  if (!p) return;
+  syncMultiEditDomToState();
+
+  const items = envUiState.multiRows
+    .map((r) => ({
+      key: (r.key || '').trim(),
+      value: r.value ?? '',
+      is_secret: Boolean(r.is_secret),
+    }))
+    .filter((r) => r.key.length > 0);
+
+  const btn = document.getElementById('env-multi-save-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await api(`/api/projects/${p.id}/env/bulk`, {
+      method: 'POST',
+      body: {
+        items,
+        replace_all: true,
+      },
+    });
+    toast(`Saved ${res.count ?? items.length} environment variable(s) for ${p.name}!`, 'success');
+    setEnvViewMode('list');
+    await loadEnvView();
+    if (andRestart) {
+      await restartProject(p.id);
+    }
+  } catch (err) {
+    toast(`Failed to save variables: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save All Changes';
+    }
+  }
+}
+window.saveMultiEditEnv = saveMultiEditEnv;
+
+// --- Mode 3: Inline Raw .env Editor ---
+function populateRawEditorFromState() {
+  const ta = document.getElementById('env-raw-editor-textarea');
+  if (!ta) return;
+  ta.value = formatEnvVarsToRaw(envUiState.vars);
+  updateRawEnvLineStats();
+}
+
+function updateRawEnvLineStats() {
+  const ta = document.getElementById('env-raw-editor-textarea');
+  const stats = document.getElementById('env-raw-line-stats');
+  if (!ta || !stats) return;
+  const parsed = parseDotenvClient(ta.value);
+  stats.textContent = `${parsed.size} variable${parsed.size === 1 ? '' : 's'} detected`;
+}
+
+document.getElementById('env-raw-editor-textarea')?.addEventListener('input', updateRawEnvLineStats);
+
+async function saveInlineRawEnv(andRestart = false) {
+  const p = getSelectedProject();
+  if (!p) return;
+  const content = document.getElementById('env-raw-editor-textarea')?.value || '';
+  const replace_all = document.getElementById('env-raw-sync-delete-check')?.checked ?? true;
+  const is_secret = document.getElementById('env-raw-secret-check')?.checked ?? true;
+
+  const btn = document.getElementById('env-raw-save-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await api(`/api/projects/${p.id}/env/bulk`, {
+      method: 'POST',
+      body: { content, is_secret, replace_all },
+    });
+    toast(`Saved ${res.count || 0} variables from .env editor!`, 'success');
+    setEnvViewMode('list');
+    await loadEnvView();
+    if (andRestart) {
+      await restartProject(p.id);
+    }
+  } catch (err) {
+    toast(`Failed to save .env: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save .env';
+    }
+  }
+}
+window.saveInlineRawEnv = saveInlineRawEnv;
+
+function copyRawEnvToClipboard() {
+  const ta = document.getElementById('env-raw-editor-textarea');
+  const content = ta ? ta.value : formatEnvVarsToRaw(envUiState.vars);
+  if (!content.trim()) {
+    toast('No variables to copy.', 'info');
+    return;
+  }
+  copyTextToClipboard(content, 'Copied .env contents to clipboard');
+}
+window.copyRawEnvToClipboard = copyRawEnvToClipboard;
+
+function handleEnvFileUpload(event) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = String(e.target?.result || '');
+    setEnvViewMode('raw');
+    const ta = document.getElementById('env-raw-editor-textarea');
+    if (ta) {
+      ta.value = content;
+      updateRawEnvLineStats();
+    }
+    toast(`Loaded "${file.name}" into Raw .env Editor — review and click "Save .env".`, 'info');
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+window.handleEnvFileUpload = handleEnvFileUpload;
 
 function onEnvProjectChange(projectId) {
   state.selectedProjectId = Number(projectId);
@@ -2346,91 +3039,40 @@ function restartCurrentProject() {
 }
 window.restartCurrentProject = restartCurrentProject;
 
-// Environment modal state & tab switching
+// Keep legacy modal functions working seamlessly if invoked anywhere
 let activeEnvTab = 'single';
 
 function switchEnvModalTab(tab) {
   activeEnvTab = tab;
-  const singleTab = document.getElementById('tab-env-single');
-  const bulkTab = document.getElementById('tab-env-bulk');
   const singleSec = document.getElementById('env-section-single');
   const bulkSec = document.getElementById('env-section-bulk');
-  const title = document.getElementById('env-modal-title');
-  const saveBtn = document.getElementById('save-env-btn');
-
-  if (tab === 'single') {
-    if (singleTab) {
-      singleTab.style.background = 'var(--bg-card)';
-      singleTab.style.borderColor = 'var(--accent)';
-      singleTab.style.color = 'var(--accent-light)';
-    }
-    if (bulkTab) {
-      bulkTab.style.background = 'transparent';
-      bulkTab.style.borderColor = 'transparent';
-      bulkTab.style.color = 'var(--text-muted)';
-    }
-    if (singleSec) singleSec.style.display = 'block';
-    if (bulkSec) bulkSec.style.display = 'none';
-    if (title) title.textContent = 'Add Environment Variable';
-    if (saveBtn) saveBtn.textContent = 'Save Variable';
-  } else {
-    if (singleTab) {
-      singleTab.style.background = 'transparent';
-      singleTab.style.borderColor = 'transparent';
-      singleTab.style.color = 'var(--text-muted)';
-    }
-    if (bulkTab) {
-      bulkTab.style.background = 'var(--bg-card)';
-      bulkTab.style.borderColor = 'var(--accent)';
-      bulkTab.style.color = 'var(--accent-light)';
-    }
-    if (singleSec) singleSec.style.display = 'none';
-    if (bulkSec) bulkSec.style.display = 'block';
-    if (title) title.textContent = 'Bulk / .env File Import';
-    if (saveBtn) saveBtn.textContent = 'Import & Save .env';
-  }
+  if (singleSec) singleSec.style.display = tab === 'single' ? 'block' : 'none';
+  if (bulkSec) bulkSec.style.display = tab === 'bulk' ? 'block' : 'none';
 }
 window.switchEnvModalTab = switchEnvModalTab;
 
 function openAddEnvModal() {
-  const p = getSelectedProject();
-  if (!p) {
-    toast('Please select or create a website first.', 'warning');
-    return;
-  }
-  const targetLabel = document.getElementById('env-modal-target-project');
-  if (targetLabel) targetLabel.textContent = `${p.name} (${p.slug})`;
-  document.getElementById('add-env-form')?.reset();
-  switchEnvModalTab('single');
-  openModal('modal-env');
+  setEnvViewMode('list');
+  document.getElementById('env-quick-key-input')?.focus();
 }
 window.openAddEnvModal = openAddEnvModal;
 
 function openBulkEnvModal() {
-  const p = getSelectedProject();
-  if (!p) {
-    toast('Please select or create a website first.', 'warning');
-    return;
-  }
-  const targetLabel = document.getElementById('env-modal-target-project');
-  if (targetLabel) targetLabel.textContent = `${p.name} (${p.slug})`;
-  switchEnvModalTab('bulk');
-  openModal('modal-env');
+  setEnvViewMode('raw');
 }
 window.openBulkEnvModal = openBulkEnvModal;
 
 async function loadCurrentEnv() {
   const p = getSelectedProject();
-  if (!p) {
-    toast('No website selected.', 'error');
-    return;
-  }
+  if (!p) return;
   try {
-    const res = await api(`/api/projects/${p.id}/env/raw`);
+    const res = await api(`/api/projects/${p.id}/env/raw`, { noCache: true });
     const bulkInput = document.getElementById('env-bulk-input');
-    if (bulkInput) {
-      bulkInput.value = res.content || '';
-      toast(`Current .env loaded for "${p.name}".`, 'info');
+    if (bulkInput) bulkInput.value = res.content || '';
+    const rawTa = document.getElementById('env-raw-editor-textarea');
+    if (rawTa) {
+      rawTa.value = res.content || '';
+      updateRawEnvLineStats();
     }
   } catch (err) {
     toast(`Failed to load .env: ${err.message}`, 'error');
@@ -2445,7 +3087,7 @@ async function exportEnvFile() {
     return;
   }
   try {
-    const res = await api(`/api/projects/${p.id}/env/raw`);
+    const res = await api(`/api/projects/${p.id}/env/raw`, { noCache: true });
     if (!res.content || !res.content.trim()) {
       toast('No environment variables to export.', 'info');
       return;
@@ -2468,51 +3110,7 @@ window.exportEnvFile = exportEnvFile;
 
 async function handleSaveEnv(e) {
   if (e) e.preventDefault();
-  const p = getSelectedProject();
-  if (!p) {
-    toast('No website selected. Please select a website first.', 'error');
-    return;
-  }
-
-  if (activeEnvTab === 'single') {
-    const key = (document.getElementById('env-key-input')?.value || '').trim();
-    const value = document.getElementById('env-value-input')?.value || '';
-    const is_secret = document.getElementById('env-secret-checkbox')?.checked ?? true;
-
-    if (!key) {
-      toast('Variable key is required.', 'error');
-      return;
-    }
-
-    try {
-      await api(`/api/projects/${p.id}/env`, { method: 'PUT', body: { key, value, is_secret } });
-      toast(`Variable "${key}" saved. Restart application for it to take effect.`, 'success');
-      closeModal('modal-env');
-      loadEnvView();
-    } catch (err) {
-      toast(`Save failed: ${err.message}`, 'error');
-    }
-  } else {
-    const content = document.getElementById('env-bulk-input')?.value || '';
-    if (!content.trim()) {
-      toast('Please enter or paste .env file contents.', 'error');
-      return;
-    }
-    const is_secret = document.getElementById('env-bulk-secret-checkbox')?.checked ?? true;
-    const replace_all = document.getElementById('env-bulk-replace-checkbox')?.checked ?? false;
-
-    try {
-      const res = await api(`/api/projects/${p.id}/env/bulk`, {
-        method: 'POST',
-        body: { content, is_secret, replace_all },
-      });
-      toast(`Successfully saved ${res.count || 0} variables for ${p.name}! Restart app to apply.`, 'success');
-      closeModal('modal-env');
-      loadEnvView();
-    } catch (err) {
-      toast(`Bulk save failed: ${err.message}`, 'error');
-    }
-  }
+  return handleInlineQuickAddEnv(e);
 }
 window.handleSaveEnv = handleSaveEnv;
 
@@ -2529,8 +3127,9 @@ async function deleteEnvVar(key) {
 
   try {
     await api(`/api/projects/${p.id}/env/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    envUiState.selectedKeys.delete(key);
     toast(`Variable "${key}" deleted.`, 'success');
-    loadEnvView();
+    await loadEnvView();
   } catch (err) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
@@ -2538,30 +3137,9 @@ async function deleteEnvVar(key) {
 window.deleteEnvVar = deleteEnvVar;
 
 function promptRevealEnv(key) {
-  state.revealingEnvKey = key;
-  document.getElementById('reveal-password-input').value = '';
-  openModal('modal-reveal');
+  toggleRevealSingleEnv(key);
 }
 window.promptRevealEnv = promptRevealEnv;
-
-document.getElementById('confirm-reveal-btn')?.addEventListener('click', async () => {
-  const p = getSelectedProject();
-  const key = state.revealingEnvKey;
-  const password = document.getElementById('reveal-password-input').value;
-  if (!password || !key || !p) return;
-
-  try {
-    const res = await api(`/api/projects/${p.id}/env/reveal`, { method: 'POST', body: { key, password } });
-    closeModal('modal-reveal');
-    const td = document.getElementById(`env-val-${key}`);
-    if (td) {
-      td.innerHTML = `<code style="color:var(--success); font-weight:600;">${escapeHtml(res.value)}</code>`;
-    }
-    toast(`Revealed "${key}".`, 'info');
-  } catch (err) {
-    toast(`Reveal failed: ${err.message}`, 'error');
-  }
-});
 
 // ============================================================================
 // View 9: Application Backups
@@ -2892,20 +3470,36 @@ async function loadSettingsView() {
     document.getElementById('setting-deploy-timeout').value = s.deploy_timeout_s || 1800;
 
     const tokBadge = document.getElementById('github-token-status-badge');
-    const tokInput = document.getElementById('setting-github-token');
-    if (s.github_token_configured === 'true') {
-      if (tokBadge) tokBadge.innerHTML = `<span class="badge badge-success">Saved in SQLite (${escapeHtml(s.github_token_masked || 'Configured')})</span>`;
-      if (tokInput) {
-        tokInput.value = s.github_token || '';
-        tokInput.placeholder = `${s.github_token_masked || 'Token saved in SQLite'}`;
+    let parsedTokens = [];
+    if (s.github_tokens) {
+      try {
+        parsedTokens = JSON.parse(s.github_tokens);
+      } catch (_) {}
+    }
+    if ((!Array.isArray(parsedTokens) || !parsedTokens.length) && s.github_token) {
+      parsedTokens = String(s.github_token)
+        .split(/[\n,;]+/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((token, idx) => ({ label: `Account #${idx + 1}`, token }));
+    }
+    state.githubTokensDraft = Array.isArray(parsedTokens) && parsedTokens.length
+      ? parsedTokens.map((t, i) => ({
+          label: t.label || `Account #${i + 1}`,
+          token: t.token || '',
+          revealed: false,
+        }))
+      : [{ label: 'Primary Account', token: '', revealed: false }];
+
+    const activeCount = state.githubTokensDraft.filter((t) => (t.token || '').trim().length > 0).length;
+    if (activeCount > 0) {
+      if (tokBadge) {
+        tokBadge.innerHTML = `<span class="badge badge-success">${activeCount} Token${activeCount === 1 ? '' : 's'} Saved (${escapeHtml(s.github_token_masked || 'Configured')})</span>`;
       }
     } else {
       if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">Not Configured</span>';
-      if (tokInput) {
-        tokInput.value = '';
-        tokInput.placeholder = 'github_pat_...';
-      }
     }
+    renderGithubTokensRows();
 
     // Users list
     if (isMain) {
@@ -2985,33 +3579,87 @@ async function loadSettingsView() {
   }
 }
 
-document.getElementById('toggle-github-token-btn')?.addEventListener('click', () => {
-  const input = document.getElementById('setting-github-token');
-  const btn = document.getElementById('toggle-github-token-btn');
-  if (!input || !btn) return;
-  if (input.type === 'password') {
-    input.type = 'text';
-    btn.textContent = 'Hide';
-  } else {
-    input.type = 'password';
-    btn.textContent = 'Show';
+function syncGithubTokensDomToDraft() {
+  if (!Array.isArray(state.githubTokensDraft)) state.githubTokensDraft = [];
+  document.querySelectorAll('#github-tokens-list .gh-token-row').forEach((row) => {
+    const idx = Number(row.getAttribute('data-gh-idx'));
+    if (!state.githubTokensDraft[idx]) return;
+    const lblEl = row.querySelector('.gh-token-label-input');
+    const tokEl = row.querySelector('.gh-token-value-input');
+    if (lblEl) state.githubTokensDraft[idx].label = lblEl.value;
+    if (tokEl) state.githubTokensDraft[idx].token = tokEl.value;
+  });
+}
+
+function renderGithubTokensRows() {
+  const container = document.getElementById('github-tokens-list');
+  if (!container) return;
+  const list = state.githubTokensDraft || [{ label: 'Primary Account', token: '', revealed: false }];
+  container.innerHTML = list.map((item, idx) => `
+    <div class="gh-token-row" data-gh-idx="${idx}" style="display: grid; grid-template-columns: 200px 1fr auto auto; gap: 8px; align-items: center;">
+      <input type="text" class="form-control gh-token-label-input" value="${escapeHtml(item.label || '')}" placeholder="Account label (e.g. Personal, Org)">
+      <input type="${item.revealed ? 'text' : 'password'}" class="form-control env-mono-input gh-token-value-input" value="${escapeHtml(item.token || '')}" placeholder="ghp_... or github_pat_...">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="toggleGithubTokenRowReveal(${idx})" style="min-width: 62px;">
+        ${item.revealed ? 'Hide' : 'Show'}
+      </button>
+      <button type="button" class="btn btn-danger btn-sm" onclick="removeGithubTokenRow(${idx})" title="Remove token">&times;</button>
+    </div>
+  `).join('');
+}
+
+function addGithubTokenRow() {
+  syncGithubTokensDomToDraft();
+  if (!Array.isArray(state.githubTokensDraft)) state.githubTokensDraft = [];
+  state.githubTokensDraft.push({
+    label: `Account #${state.githubTokensDraft.length + 1}`,
+    token: '',
+    revealed: false,
+  });
+  renderGithubTokensRows();
+}
+window.addGithubTokenRow = addGithubTokenRow;
+
+function removeGithubTokenRow(idx) {
+  syncGithubTokensDomToDraft();
+  if (!Array.isArray(state.githubTokensDraft)) return;
+  state.githubTokensDraft.splice(idx, 1);
+  if (state.githubTokensDraft.length === 0) {
+    state.githubTokensDraft.push({ label: 'Primary Account', token: '', revealed: false });
   }
-});
+  renderGithubTokensRows();
+}
+window.removeGithubTokenRow = removeGithubTokenRow;
+
+function toggleGithubTokenRowReveal(idx) {
+  syncGithubTokensDomToDraft();
+  if (state.githubTokensDraft && state.githubTokensDraft[idx]) {
+    state.githubTokensDraft[idx].revealed = !state.githubTokensDraft[idx].revealed;
+    renderGithubTokensRows();
+  }
+}
+window.toggleGithubTokenRowReveal = toggleGithubTokenRowReveal;
 
 document.getElementById('settings-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  syncGithubTokensDomToDraft();
+  const cleanTokens = (state.githubTokensDraft || [])
+    .map((t, i) => ({
+      label: (t.label || '').trim() || `Account #${i + 1}`,
+      token: (t.token || '').trim(),
+    }))
+    .filter((t) => t.token.length > 0);
+
   const payload = {
     min_free_mb: Number(document.getElementById('setting-min-free-mb').value) || 500,
     default_retention: Number(document.getElementById('setting-default-retention').value) || 10,
     step_timeout_s: Number(document.getElementById('setting-step-timeout').value) || 900,
     deploy_timeout_s: Number(document.getElementById('setting-deploy-timeout').value) || 1800,
+    github_tokens: cleanTokens,
   };
-  const token = document.getElementById('setting-github-token').value.trim();
-  if (token) payload.github_token = token;
 
   try {
     await api('/api/settings', { method: 'PUT', body: payload });
-    toast('Global settings & GitHub token saved in SQLite!', 'success');
+    toast(`Global settings & ${cleanTokens.length} GitHub token(s) saved in SQLite!`, 'success');
     loadSettingsView();
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');

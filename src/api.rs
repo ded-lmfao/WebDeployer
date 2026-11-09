@@ -28,7 +28,7 @@ use crate::db::{now, DbPool};
 use crate::deployer::Deployer;
 use crate::logs::Logs;
 use crate::monitor::Monitor;
-use crate::projects::{EnvVarView, Project, Projects};
+use crate::projects::{EnvVarInput, EnvVarView, Project, Projects};
 use crate::runtime::Runtime;
 use crate::static_assets::static_handler;
 
@@ -1082,6 +1082,7 @@ struct SetEnvPayload {
     key: String,
     value: String,
     is_secret: Option<bool>,
+    previous_key: Option<String>,
 }
 
 async fn set_env_handler(
@@ -1094,7 +1095,13 @@ async fn set_env_handler(
     let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
     state
         .projects
-        .set_env_var(id, &payload.key, &payload.value, payload.is_secret.unwrap_or(false))
+        .set_env_var_with_rename(
+            id,
+            &payload.key,
+            &payload.value,
+            payload.is_secret.unwrap_or(false),
+            payload.previous_key.as_deref(),
+        )
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     log_audit_project(
         &state,
@@ -1109,7 +1116,10 @@ async fn set_env_handler(
 
 #[derive(Deserialize)]
 struct BulkEnvPayload {
+    #[serde(default)]
     content: String,
+    #[serde(default)]
+    items: Option<Vec<EnvVarInput>>,
     is_secret: Option<bool>,
     replace_all: Option<bool>,
 }
@@ -1127,22 +1137,30 @@ async fn bulk_set_env_handler(
 ) -> Result<Json<BulkEnvResponse>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "env", Some(id))?;
     let p_name = state.projects.get(id).ok().flatten().map(|p| p.name).unwrap_or_else(|| format!("Website #{}", id));
-    let count = state
-        .projects
-        .set_bulk_env(
-            id,
-            &payload.content,
-            payload.is_secret.unwrap_or(true),
-            payload.replace_all.unwrap_or(false),
-        )
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let replace_all = payload.replace_all.unwrap_or(false);
+    let count = if let Some(ref items) = payload.items {
+        state
+            .projects
+            .set_batch_env_items(id, items, replace_all)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+    } else {
+        state
+            .projects
+            .set_bulk_env(
+                id,
+                &payload.content,
+                payload.is_secret.unwrap_or(true),
+                replace_all,
+            )
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+    };
     log_audit_project(
         &state,
         Some(id),
         &actor.username,
         "env.bulk_import",
         Some(&p_name),
-        Some(&format!("Bulk imported {} environment variables", count)),
+        Some(&format!("Saved {} environment variables", count)),
     );
     Ok(Json(BulkEnvResponse { count }))
 }
@@ -2504,13 +2522,43 @@ async fn get_settings_handler(
         }
     }
 
-    if let Some(tok_raw) = map.get("github_token").cloned() {
-        let tok = tok_raw.trim();
-        if !tok.is_empty() {
-            let suffix = if tok.len() >= 4 { &tok[tok.len() - 4..] } else { "****" };
-            map.insert("github_token_configured".to_string(), "true".to_string());
-            map.insert("github_token_masked".to_string(), format!("••••••••{}", suffix));
+    // Build unified list of configured GitHub tokens
+    let mut tok_list: Vec<crate::git::StoredGithubToken> = map
+        .get("github_tokens")
+        .and_then(|raw| serde_json::from_str::<Vec<crate::git::StoredGithubToken>>(raw).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| !t.token.trim().is_empty())
+        .collect();
+
+    if tok_list.is_empty() {
+        for part in current_tok.split(|c| c == ',' || c == '\n' || c == ';') {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                tok_list.push(crate::git::StoredGithubToken {
+                    label: format!("Account #{}", tok_list.len() + 1),
+                    token: trimmed.to_string(),
+                });
+            }
         }
+    }
+
+    if !tok_list.is_empty() {
+        if let Ok(serialized) = serde_json::to_string(&tok_list) {
+            map.insert("github_tokens".to_string(), serialized);
+        }
+        let first_tok = tok_list[0].token.trim();
+        let suffix = if first_tok.len() >= 4 { &first_tok[first_tok.len() - 4..] } else { "****" };
+        map.insert("github_token_configured".to_string(), "true".to_string());
+        map.insert("github_token_count".to_string(), tok_list.len().to_string());
+        map.insert(
+            "github_token_masked".to_string(),
+            if tok_list.len() > 1 {
+                format!("{} tokens configured (••••••••{})", tok_list.len(), suffix)
+            } else {
+                format!("••••••••{}", suffix)
+            },
+        );
     }
 
     Ok(Json(map))
@@ -2524,6 +2572,36 @@ async fn update_settings_handler(
     let actor = verify_power(&state, &headers, "settings_manage", None)?;
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
+        if k == "github_tokens" {
+            let tokens_vec: Vec<crate::git::StoredGithubToken> = if let Some(arr) = v.as_array() {
+                arr.iter()
+                    .filter_map(|item| serde_json::from_value::<crate::git::StoredGithubToken>(item.clone()).ok())
+                    .filter(|t| !t.token.trim().is_empty())
+                    .collect()
+            } else if let Some(s) = v.as_str() {
+                serde_json::from_str::<Vec<crate::git::StoredGithubToken>>(s)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|t| !t.token.trim().is_empty())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            let json_str = serde_json::to_string(&tokens_vec).unwrap_or_else(|_| "[]".to_string());
+            conn.execute(
+                "INSERT INTO settings(key, value) VALUES('github_tokens', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![json_str],
+            ).ok();
+
+            let primary = tokens_vec.first().map(|t| t.token.trim().to_string()).unwrap_or_default();
+            conn.execute(
+                "INSERT INTO settings(key, value) VALUES('github_token', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![primary],
+            ).ok();
+            continue;
+        }
+
         let val_str = match v {
             serde_json::Value::String(s) => s.trim().to_string(),
             serde_json::Value::Number(n) => n.to_string(),
@@ -3096,41 +3174,52 @@ struct GithubRepoItem {
     clone_url: String,
     private: bool,
     default_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token_label: Option<String>,
 }
 
 async fn github_repos_handler(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Result<Json<Vec<GithubRepoItem>>, (StatusCode, String)> {
-    let token: Option<String> = {
-        let conn = state.db.lock().unwrap();
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = 'github_token'",
-            [],
-            |r| r.get(0),
-        )
-        .ok()
-    };
+    let tokens = crate::git::Git::get_sqlite_github_tokens();
 
-    if let Some(tok) = token.filter(|t| !t.trim().is_empty()) {
-        let out = std::process::Command::new("curl")
-            .args([
-                "-s",
-                "-H",
-                &format!("Authorization: Bearer {}", tok.trim()),
-                "-H",
-                "Accept: application/vnd.github+json",
-                "-H",
-                "User-Agent: WebDep",
-                "https://api.github.com/user/repos?per_page=100&sort=updated",
-            ])
-            .output()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !tokens.is_empty() {
+        let mut combined: Vec<GithubRepoItem> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
 
-        if out.status.success() {
-            let body = String::from_utf8_lossy(&out.stdout);
-            if let Ok(repos) = serde_json::from_str::<Vec<GithubRepoItem>>(&body) {
-                return Ok(Json(repos));
+        for item in &tokens {
+            let out = std::process::Command::new("curl")
+                .args([
+                    "-s",
+                    "-H",
+                    &format!("Authorization: Bearer {}", item.token.trim()),
+                    "-H",
+                    "Accept: application/vnd.github+json",
+                    "-H",
+                    "User-Agent: WebDep",
+                    "https://api.github.com/user/repos?per_page=100&sort=updated",
+                ])
+                .output();
+
+            if let Ok(o) = out {
+                if o.status.success() {
+                    let body = String::from_utf8_lossy(&o.stdout);
+                    if let Ok(repos) = serde_json::from_str::<Vec<GithubRepoItem>>(&body) {
+                        for mut r in repos {
+                            if seen.insert(r.full_name.clone()) {
+                                if tokens.len() > 1 {
+                                    r.token_label = Some(item.label.clone());
+                                }
+                                combined.push(r);
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        if !combined.is_empty() {
+            return Ok(Json(combined));
         }
     }
 
@@ -3166,6 +3255,7 @@ async fn github_repos_handler(
                             clone_url: format!("{}.git", url),
                             private,
                             default_branch: branch,
+                            token_label: None,
                         });
                     }
                 }
