@@ -450,6 +450,7 @@ async function initAuth() {
     state.user = me.user;
     state.csrf = me.csrf;
     state.activeSessions = me.activeSessions || 1;
+    state.passkeyCount = me.passkeyCount || 0;
     await onAuthenticated(false);
   } catch {
     showLogin();
@@ -3483,13 +3484,33 @@ async function loadMonitorView() {
 function renderSecurityStatusSummary() {
   if (!state.user) return;
   const is2fa = Boolean(state.user.totpEnabled);
+  const pkCount = Number(state.passkeyCount || (state.passkeysList && state.passkeysList.length) || 0);
   const badge = document.getElementById('settings-2fa-status-badge');
   if (badge) {
-    badge.className = `badge ${is2fa ? 'badge-success' : 'badge-warning'}`;
-    badge.textContent = is2fa ? '2FA ENABLED' : '2FA NOT ENABLED';
+    const isProtected = is2fa || pkCount > 0;
+    badge.className = `badge ${isProtected ? 'badge-success' : 'badge-warning'}`;
+    if (pkCount > 0 && is2fa) {
+      badge.textContent = `PASSKEY + 2FA ACTIVE`;
+    } else if (pkCount > 0) {
+      badge.textContent = `${pkCount} PASSKEY${pkCount === 1 ? '' : 'S'} ACTIVE`;
+    } else {
+      badge.textContent = is2fa ? '2FA ENABLED' : '2FA NOT ENABLED';
+    }
   }
   const unameEl = document.getElementById('settings-sec-username');
   if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main Admin' : state.user.role})`;
+
+  const pkText = document.getElementById('settings-sec-passkeys-text');
+  if (pkText) {
+    pkText.textContent = pkCount > 0 ? `${pkCount} Registered (Face ID / Fingerprint)` : 'None Registered';
+    pkText.style.color = pkCount > 0 ? 'var(--success-light)' : 'var(--text-dim)';
+  }
+
+  const pkModalBadge = document.getElementById('sec-passkey-modal-badge');
+  if (pkModalBadge) {
+    pkModalBadge.className = `badge ${pkCount > 0 ? 'badge-success' : 'badge-neutral'}`;
+    pkModalBadge.textContent = `${pkCount} Registered`;
+  }
 
   const tfaText = document.getElementById('settings-sec-2fa-text');
   if (tfaText) {
@@ -3510,6 +3531,7 @@ function renderSecurityStatusSummary() {
 
 async function loadSettingsView() {
   renderSecurityStatusSummary();
+  loadPasskeysList().catch(() => {});
 
   const canManagePlatform = hasPower('settings_manage');
   const isMain = Boolean(state.user && state.user.isMainAdmin);
@@ -4362,6 +4384,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     state.user = res.user;
     state.csrf = res.csrf;
     state.activeSessions = res.activeSessions || 1;
+    state.passkeyCount = res.passkeyCount || 0;
     await onAuthenticated(true);
   } catch (err) {
     toast(err.message, 'error');
@@ -4389,6 +4412,7 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
     state.user = res.user;
     state.csrf = res.csrf;
     state.activeSessions = res.activeSessions || 1;
+    state.passkeyCount = res.passkeyCount || 0;
     await onAuthenticated(true);
     toast('Two-Factor Authentication verified!', 'success');
   } catch (err) {
@@ -4650,14 +4674,284 @@ function openSecurityModal(tab = 'password') {
 window.openSecurityModal = openSecurityModal;
 
 function switchSecurityTab(tab) {
-  ['password', '2fa', 'sessions'].forEach((t) => {
+  ['passkeys', 'password', '2fa', 'sessions'].forEach((t) => {
     const btn = document.getElementById(`sec-tab-btn-${t}`);
     const pane = document.getElementById(`sec-pane-${t}`);
     if (btn) btn.classList.toggle('active', t === tab);
     if (pane) pane.style.display = t === tab ? 'block' : 'none';
   });
+  if (tab === 'passkeys') {
+    const nameInput = document.getElementById('passkey-device-name');
+    if (nameInput && !nameInput.value.trim()) {
+      nameInput.value = detectDefaultPasskeyDeviceName();
+    }
+    const httpsHint = document.getElementById('passkey-https-hint');
+    if (httpsHint) {
+      httpsHint.style.display = window.PublicKeyCredential ? 'none' : 'block';
+    }
+    loadPasskeysList();
+  }
 }
 window.switchSecurityTab = switchSecurityTab;
+
+function base64UrlToUint8Array(base64Url) {
+  const padding = '='.repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function bufferToBase64Url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function detectDefaultPasskeyDeviceName() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone/i.test(ua)) return 'iPhone Face ID';
+  if (/iPad/i.test(ua)) return 'iPad Face ID / Touch ID';
+  if (/Android/i.test(ua)) return 'Android Fingerprint';
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'Mac Touch ID';
+  if (/Windows/i.test(ua)) return 'Windows Hello';
+  return 'Passkey / Biometric Device';
+}
+
+async function loadPasskeysList() {
+  const container = document.getElementById('passkeys-list-container');
+  try {
+    const res = await api('/api/auth/passkeys', { noCache: true });
+    const list = Array.isArray(res?.passkeys) ? res.passkeys : [];
+    state.passkeysList = list;
+    state.passkeyCount = list.length;
+    renderSecurityStatusSummary();
+    if (!container) return;
+    if (!list.length) {
+      container.innerHTML = `
+        <div style="font-size: 12.5px; color: var(--text-dim); padding: 14px; text-align: center; border: 1px dashed var(--border-subtle); border-radius: var(--radius-md);">
+          No passkeys or biometric devices registered yet. Add your phone or laptop above to sign in with Face ID or Fingerprint.
+        </div>
+      `;
+      return;
+    }
+    container.innerHTML = list.map((pk) => {
+      const addedText = pk.createdAt ? formatDate(pk.createdAt) : '--';
+      const usedText = pk.lastUsedAt ? `Last used ${formatRelativeTime(pk.lastUsedAt)}` : 'Never used yet';
+      return `
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+            <div style="width: 32px; height: 32px; border-radius: 6px; background: var(--info-bg); border: 1px solid var(--info-border); color: var(--accent-light); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>
+            </div>
+            <div style="min-width: 0;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(pk.name)}</div>
+              <div style="font-size: 11px; color: var(--text-dim);">Added ${escapeHtml(addedText)} &bull; ${escapeHtml(usedText)}</div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-danger btn-xs" onclick="deletePasskey(${pk.id}, '${escapeHtml(pk.name)}')">Remove</button>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    if (container) {
+      container.innerHTML = `<div style="font-size: 12px; color: var(--danger-light); padding: 10px;">${escapeHtml(err.message)}</div>`;
+    }
+  }
+}
+window.loadPasskeysList = loadPasskeysList;
+
+async function registerNewPasskey() {
+  if (!window.PublicKeyCredential || !navigator.credentials?.create) {
+    toast('Passkeys / WebAuthn require HTTPS (your domain SSL) or localhost in a modern browser.', 'warning');
+    return;
+  }
+  const nameInput = document.getElementById('passkey-device-name');
+  const label = (nameInput?.value || '').trim() || detectDefaultPasskeyDeviceName();
+  const btn = document.getElementById('register-passkey-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>Waiting for Face ID / Fingerprint...</span>';
+  }
+  try {
+    const start = await api('/api/auth/passkeys/register/start', { method: 'POST', body: {} });
+    const publicKey = {
+      challenge: base64UrlToUint8Array(start.challenge),
+      rp: {
+        name: 'WebDep Deployment Platform',
+        id: window.location.hostname,
+      },
+      user: {
+        id: base64UrlToUint8Array(start.user.id),
+        name: start.user.name,
+        displayName: start.user.displayName,
+      },
+      pubKeyCredParams: [
+        { type: 'public-key', alg: -7 }, // ES256 (NIST P-256)
+      ],
+      authenticatorSelection: {
+        userVerification: 'preferred',
+        residentKey: 'preferred',
+      },
+      timeout: 60000,
+      attestation: 'none',
+      excludeCredentials: (start.excludeCredentials || []).map((cid) => ({
+        type: 'public-key',
+        id: base64UrlToUint8Array(cid),
+      })),
+    };
+
+    const cred = await navigator.credentials.create({ publicKey });
+    if (!cred || !cred.response) {
+      throw new Error('Passkey registration was cancelled.');
+    }
+
+    let publicKeySpki = null;
+    if (typeof cred.response.getPublicKey === 'function') {
+      const spkiBuf = cred.response.getPublicKey();
+      if (spkiBuf) publicKeySpki = bufferToBase64Url(spkiBuf);
+    }
+    let authenticatorData = null;
+    if (typeof cred.response.getAuthenticatorData === 'function') {
+      const adBuf = cred.response.getAuthenticatorData();
+      if (adBuf) authenticatorData = bufferToBase64Url(adBuf);
+    }
+
+    const finishRes = await api('/api/auth/passkeys/register/finish', {
+      method: 'POST',
+      body: {
+        challengeId: start.challengeId,
+        name: label,
+        credentialId: bufferToBase64Url(cred.rawId),
+        publicKeySpki,
+        authenticatorData,
+        attestationObject: bufferToBase64Url(cred.response.attestationObject),
+        clientDataJSON: bufferToBase64Url(cred.response.clientDataJSON),
+      },
+    });
+
+    state.passkeysList = finishRes.passkeys || [];
+    state.passkeyCount = state.passkeysList.length;
+    renderSecurityStatusSummary();
+    await loadPasskeysList();
+    toast(`Passkey "${label}" registered! You can now sign in with Face ID / Fingerprint.`, 'success');
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      toast('Biometric / Passkey prompt was cancelled or timed out.', 'info');
+    } else if (err.name === 'InvalidStateError') {
+      toast('This device passkey is already registered on your account.', 'info');
+    } else {
+      toast(`Passkey registration failed: ${err.message}`, 'error');
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>
+        <span>Register Passkey / Biometric</span>
+      `;
+    }
+  }
+}
+window.registerNewPasskey = registerNewPasskey;
+
+async function deletePasskey(id, name) {
+  const ok = await showConfirmDialog({
+    title: 'Remove Passkey / Biometric Device',
+    message: `Remove "${name}" from your account? You will no longer be able to sign in with this passkey unless you register it again.`,
+    confirmText: 'Remove Passkey',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await api(`/api/auth/passkeys/${id}`, { method: 'DELETE' });
+    state.passkeysList = res.passkeys || [];
+    state.passkeyCount = state.passkeysList.length;
+    renderSecurityStatusSummary();
+    await loadPasskeysList();
+    toast(`Removed passkey "${name}".`, 'info');
+  } catch (err) {
+    toast(`Failed to remove passkey: ${err.message}`, 'error');
+  }
+}
+window.deletePasskey = deletePasskey;
+
+async function loginWithPasskey() {
+  if (!window.PublicKeyCredential || !navigator.credentials?.get) {
+    toast('Passkeys / Biometrics require HTTPS (domain SSL) or localhost in a modern browser.', 'warning');
+    return;
+  }
+  const username = (document.getElementById('login-username')?.value || '').trim();
+  const btn = document.getElementById('login-passkey-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>Verifying Face ID / Fingerprint...</span>';
+  }
+  try {
+    const start = await api('/api/auth/passkeys/login/start', {
+      method: 'POST',
+      body: { username: username || null },
+    });
+    const allowCredentials = (start.allowCredentials || []).map((cid) => ({
+      type: 'public-key',
+      id: base64UrlToUint8Array(cid),
+    }));
+    const publicKey = {
+      challenge: base64UrlToUint8Array(start.challenge),
+      rpId: window.location.hostname,
+      userVerification: 'preferred',
+      timeout: 60000,
+    };
+    if (allowCredentials.length > 0) {
+      publicKey.allowCredentials = allowCredentials;
+    }
+
+    const assertion = await navigator.credentials.get({ publicKey });
+    if (!assertion || !assertion.response) {
+      throw new Error('Passkey sign-in was cancelled.');
+    }
+
+    const res = await api('/api/auth/passkeys/login/finish', {
+      method: 'POST',
+      body: {
+        challengeId: start.challengeId,
+        credentialId: bufferToBase64Url(assertion.rawId),
+        authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
+        clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
+        signature: bufferToBase64Url(assertion.response.signature),
+      },
+    });
+
+    state.pendingMfaToken = null;
+    state.user = res.user;
+    state.csrf = res.csrf;
+    state.activeSessions = res.activeSessions || 1;
+    state.passkeyCount = res.passkeyCount || 0;
+    await onAuthenticated(true);
+    toast('Signed in with Passkey / Biometrics!', 'success');
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      toast('Biometric / Passkey sign-in was cancelled.', 'info');
+    } else {
+      toast(err.message || 'Passkey sign-in failed', 'error');
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>
+        <span>Sign in with Passkey / Biometrics</span>
+      `;
+    }
+  }
+}
+window.loginWithPasskey = loginWithPasskey;
 
 function togglePasswordField(inputId, btn) {
   const el = document.getElementById(inputId);

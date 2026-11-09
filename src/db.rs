@@ -375,6 +375,19 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS user_passkeys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            credential_id TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            alg INTEGER NOT NULL DEFAULT -7,
+            sign_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            last_used_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_passkeys_user ON user_passkeys(user_id, id DESC);
+
         INSERT OR IGNORE INTO settings(key, value) VALUES ('min_free_mb', '500');
         INSERT OR IGNORE INTO settings(key, value) VALUES ('default_retention', '10');
         INSERT OR IGNORE INTO settings(key, value) VALUES ('step_timeout_s', '900');

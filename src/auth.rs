@@ -483,8 +483,26 @@ pub struct Auth {
     db: DbPool,
     pub session_ttl_s: u64,
     mfa_challenges: Mutex<HashMap<String, (i64, u64)>>,
+    passkey_challenges: Mutex<HashMap<String, (Option<i64>, String, u64)>>,
     failures: Mutex<HashMap<String, FailureRecord>>,
     session_cache: Mutex<HashMap<String, (Session, User, u64)>>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PasskeyInfo {
+    pub id: i64,
+    #[serde(rename = "userId")]
+    pub user_id: i64,
+    #[serde(rename = "credentialId")]
+    pub credential_id: String,
+    pub name: String,
+    pub alg: i64,
+    #[serde(rename = "signCount")]
+    pub sign_count: i64,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    #[serde(rename = "lastUsedAt")]
+    pub last_used_at: Option<i64>,
 }
 
 impl Auth {
@@ -493,6 +511,7 @@ impl Auth {
             db,
             session_ttl_s,
             mfa_challenges: Mutex::new(HashMap::new()),
+            passkey_challenges: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
             session_cache: Mutex::new(HashMap::new()),
         };
@@ -860,5 +879,796 @@ impl Auth {
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", params![now_s as i64])
             .ok();
+    }
+
+    pub fn create_passkey_challenge(&self, user_id: Option<i64>) -> (String, String) {
+        let now = Self::now_secs();
+        let challenge_id = random_token(24);
+        let mut raw_challenge = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut raw_challenge);
+        let challenge_b64 = b64url_encode(&raw_challenge);
+        if let Ok(mut map) = self.passkey_challenges.lock() {
+            map.retain(|_, (_, _, exp)| *exp > now);
+            map.insert(challenge_id.clone(), (user_id, challenge_b64.clone(), now + 300));
+        }
+        (challenge_id, challenge_b64)
+    }
+
+    pub fn consume_passkey_challenge(&self, challenge_id: &str) -> Option<(Option<i64>, String)> {
+        let now = Self::now_secs();
+        let mut map = self.passkey_challenges.lock().ok()?;
+        map.retain(|_, (_, _, exp)| *exp > now);
+        map.remove(challenge_id).map(|(uid, ch, _)| (uid, ch))
+    }
+
+    pub fn list_passkeys(&self, user_id: i64) -> Vec<PasskeyInfo> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, user_id, credential_id, name, alg, sign_count, created_at, last_used_at
+             FROM user_passkeys WHERE user_id = ? ORDER BY id DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(params![user_id], |r| {
+            Ok(PasskeyInfo {
+                id: r.get(0)?,
+                user_id: r.get(1)?,
+                credential_id: r.get(2)?,
+                name: r.get(3)?,
+                alg: r.get(4)?,
+                sign_count: r.get(5)?,
+                created_at: r.get(6)?,
+                last_used_at: r.get(7)?,
+            })
+        })
+        .map(|it| it.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    pub fn count_user_passkeys(&self, user_id: i64) -> usize {
+        let conn = self.db.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM user_passkeys WHERE user_id = ?",
+            params![user_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    pub fn total_passkeys_count(&self) -> usize {
+        let conn = self.db.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM user_passkeys p JOIN users u ON u.id = p.user_id WHERE COALESCE(u.disabled, 0) = 0",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    pub fn list_login_credential_ids(&self, username_opt: Option<&str>) -> Vec<String> {
+        let conn = self.db.lock().unwrap();
+        if let Some(uname) = username_opt.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let mut stmt = match conn.prepare(
+                "SELECT p.credential_id FROM user_passkeys p
+                 JOIN users u ON u.id = p.user_id
+                 WHERE LOWER(u.username) = LOWER(?) AND COALESCE(u.disabled, 0) = 0
+                 ORDER BY p.id DESC",
+            ) {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            stmt.query_map(params![uname], |r| r.get::<_, String>(0))
+                .map(|it| it.flatten().collect())
+                .unwrap_or_default()
+        } else {
+            let mut stmt = match conn.prepare(
+                "SELECT p.credential_id FROM user_passkeys p
+                 JOIN users u ON u.id = p.user_id
+                 WHERE COALESCE(u.disabled, 0) = 0
+                 ORDER BY p.id DESC LIMIT 50",
+            ) {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            stmt.query_map([], |r| r.get::<_, String>(0))
+                .map(|it| it.flatten().collect())
+                .unwrap_or_default()
+        }
+    }
+
+    pub fn register_passkey(
+        &self,
+        user_id: i64,
+        name: &str,
+        credential_id_b64: &str,
+        public_key_spki_b64: Option<&str>,
+        attestation_object_b64: Option<&str>,
+        auth_data_b64: Option<&str>,
+        client_data_b64: &str,
+        expected_challenge_b64: &str,
+    ) -> Result<PasskeyInfo, String> {
+        let cred_raw = b64url_decode(credential_id_b64)
+            .ok_or_else(|| "Invalid credential ID encoding".to_string())?;
+        if cred_raw.is_empty() || cred_raw.len() > 1024 {
+            return Err("Invalid credential ID length".to_string());
+        }
+        let norm_cred_id = b64url_encode(&cred_raw);
+
+        let client_data_bytes = b64url_decode(client_data_b64)
+            .ok_or_else(|| "Invalid clientDataJSON encoding".to_string())?;
+        let client_json: serde_json::Value = serde_json::from_slice(&client_data_bytes)
+            .map_err(|_| "Invalid clientDataJSON payload".to_string())?;
+
+        if client_json.get("type").and_then(|v| v.as_str()) != Some("webauthn.create") {
+            return Err("WebAuthn clientDataJSON type mismatch (expected webauthn.create)".to_string());
+        }
+        let got_challenge = client_json
+            .get("challenge")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if !constant_time_eq(got_challenge, expected_challenge_b64) {
+            return Err("WebAuthn registration challenge mismatch".to_string());
+        }
+
+        let mut pub_point: Option<[u8; 65]> = None;
+        if let Some(spki_b64) = public_key_spki_b64.filter(|s| !s.trim().is_empty()) {
+            if let Some(spki_bytes) = b64url_decode(spki_b64) {
+                pub_point = extract_p256_pubkey(&spki_bytes);
+            }
+        }
+        if pub_point.is_none() {
+            if let Some(ad_b64) = auth_data_b64.filter(|s| !s.trim().is_empty()) {
+                if let Some(ad_bytes) = b64url_decode(ad_b64) {
+                    pub_point = extract_p256_pubkey(&ad_bytes);
+                }
+            }
+        }
+        if pub_point.is_none() {
+            if let Some(att_b64) = attestation_object_b64.filter(|s| !s.trim().is_empty()) {
+                if let Some(att_bytes) = b64url_decode(att_b64) {
+                    pub_point = extract_p256_pubkey(&att_bytes);
+                }
+            }
+        }
+
+        let point65 = pub_point.ok_or_else(|| {
+            "Unsupported passkey public key format (expected ES256 / P-256)".to_string()
+        })?;
+        let pub_hex = hex::encode(point65);
+
+        let clean_name = {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                "Passkey / Biometric Device".to_string()
+            } else {
+                trimmed.chars().take(64).collect()
+            }
+        };
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        let conn = self.db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO user_passkeys (user_id, credential_id, name, public_key, alg, sign_count, created_at)
+             VALUES (?, ?, ?, ?, -7, 0, ?)
+             ON CONFLICT(credential_id) DO UPDATE SET
+               user_id = excluded.user_id,
+               name = excluded.name,
+               public_key = excluded.public_key",
+            params![user_id, norm_cred_id, clean_name, pub_hex, now_ms],
+        )
+        .map_err(|e| format!("Failed to save passkey: {}", e))?;
+
+        let id = conn.last_insert_rowid();
+        Ok(PasskeyInfo {
+            id,
+            user_id,
+            credential_id: norm_cred_id,
+            name: clean_name,
+            alg: -7,
+            sign_count: 0,
+            created_at: now_ms,
+            last_used_at: None,
+        })
+    }
+
+    pub fn verify_passkey_login(
+        &self,
+        credential_id_b64: &str,
+        auth_data_b64: &str,
+        client_data_b64: &str,
+        signature_b64: &str,
+        expected_challenge_b64: &str,
+    ) -> Result<(User, String), String> {
+        let cred_raw = b64url_decode(credential_id_b64)
+            .ok_or_else(|| "Invalid credential ID".to_string())?;
+        let norm_cred_id = b64url_encode(&cred_raw);
+
+        let auth_data = b64url_decode(auth_data_b64)
+            .ok_or_else(|| "Invalid authenticatorData".to_string())?;
+        if auth_data.len() < 37 {
+            return Err("authenticatorData too short".to_string());
+        }
+        let flags = auth_data[32];
+        if (flags & 0x01) == 0 {
+            return Err("Authenticator did not assert User Presence".to_string());
+        }
+        let new_sign_count = u32::from_be_bytes([auth_data[33], auth_data[34], auth_data[35], auth_data[36]]) as i64;
+
+        let client_data = b64url_decode(client_data_b64)
+            .ok_or_else(|| "Invalid clientDataJSON".to_string())?;
+        let client_json: serde_json::Value = serde_json::from_slice(&client_data)
+            .map_err(|_| "Malformed clientDataJSON".to_string())?;
+        if client_json.get("type").and_then(|v| v.as_str()) != Some("webauthn.get") {
+            return Err("WebAuthn clientDataJSON type mismatch (expected webauthn.get)".to_string());
+        }
+        let got_challenge = client_json
+            .get("challenge")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if !constant_time_eq(got_challenge, expected_challenge_b64) {
+            return Err("Passkey challenge expired or mismatched".to_string());
+        }
+
+        let sig_bytes = b64url_decode(signature_b64)
+            .ok_or_else(|| "Invalid passkey signature encoding".to_string())?;
+
+        let (passkey_id, user_id, passkey_name, pub_hex, prev_sign_count): (i64, i64, String, String, i64) = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row(
+                "SELECT id, user_id, name, public_key, sign_count FROM user_passkeys WHERE credential_id = ?",
+                params![norm_cred_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .map_err(|_| "Passkey is not registered on this server".to_string())?
+        };
+
+        let pub_bytes = hex::decode(&pub_hex)
+            .map_err(|_| "Stored passkey public key is corrupted".to_string())?;
+
+        use sha2::{Digest, Sha256};
+        let client_hash = Sha256::digest(&client_data);
+        let mut signed_payload = Vec::with_capacity(auth_data.len() + 32);
+        signed_payload.extend_from_slice(&auth_data);
+        signed_payload.extend_from_slice(&client_hash);
+        let msg_hash_generic = Sha256::digest(&signed_payload);
+        let mut msg_hash = [0u8; 32];
+        msg_hash.copy_from_slice(&msg_hash_generic);
+
+        if !verify_p256_ecdsa(&pub_bytes, &msg_hash, &sig_bytes) {
+            return Err("Passkey cryptographic signature verification failed".to_string());
+        }
+
+        let user = self
+            .get_user_by_id(user_id)
+            .ok_or_else(|| "Account associated with passkey no longer exists".to_string())?;
+        if user.disabled {
+            return Err("Account disabled".to_string());
+        }
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let updated_count = new_sign_count.max(prev_sign_count);
+        {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "UPDATE user_passkeys SET last_used_at = ?, sign_count = ? WHERE id = ?",
+                params![now_ms, updated_count, passkey_id],
+            )
+            .ok();
+        }
+
+        Ok((user, passkey_name))
+    }
+
+    pub fn delete_passkey(&self, user_id: i64, passkey_id: i64) -> bool {
+        let conn = self.db.lock().unwrap();
+        let changed = conn
+            .execute(
+                "DELETE FROM user_passkeys WHERE id = ? AND user_id = ?",
+                params![passkey_id, user_id],
+            )
+            .unwrap_or(0);
+        changed > 0
+    }
+}
+
+// ===========================================================================
+// Base64URL & Pure-Rust NIST P-256 (secp256r1 / ES256) WebAuthn Verifier
+// ===========================================================================
+pub fn b64url_encode(data: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data)
+}
+
+pub fn b64url_decode(input: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut norm: String = trimmed
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '=')
+        .map(|c| match c {
+            '+' => '-',
+            '/' => '_',
+            other => other,
+        })
+        .collect();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&norm)
+        .ok()
+        .or_else(|| {
+            while norm.len() % 4 != 0 {
+                norm.push('=');
+            }
+            base64::engine::general_purpose::URL_SAFE.decode(&norm).ok()
+        })
+}
+
+pub fn extract_p256_pubkey(raw: &[u8]) -> Option<[u8; 65]> {
+    if raw.len() == 65 && raw[0] == 0x04 {
+        let mut out = [0u8; 65];
+        out.copy_from_slice(raw);
+        if is_valid_p256_point(&out) {
+            return Some(out);
+        }
+    }
+    if raw.len() >= 66 {
+        let tail = &raw[raw.len() - 65..];
+        if tail[0] == 0x04 {
+            let mut out = [0u8; 65];
+            out.copy_from_slice(tail);
+            if is_valid_p256_point(&out) {
+                return Some(out);
+            }
+        }
+    }
+    let mut x_opt: Option<[u8; 32]> = None;
+    let mut y_opt: Option<[u8; 32]> = None;
+    if raw.len() >= 70 {
+        for i in 0..raw.len().saturating_sub(35) {
+            if raw[i] == 0x21 && raw[i + 1] == 0x58 && raw[i + 2] == 0x20 {
+                let mut x = [0u8; 32];
+                x.copy_from_slice(&raw[i + 3..i + 35]);
+                x_opt = Some(x);
+            } else if raw[i] == 0x22 && raw[i + 1] == 0x58 && raw[i + 2] == 0x20 {
+                let mut y = [0u8; 32];
+                y.copy_from_slice(&raw[i + 3..i + 35]);
+                y_opt = Some(y);
+            }
+            if let (Some(x), Some(y)) = (x_opt, y_opt) {
+                let mut cand = [0u8; 65];
+                cand[0] = 0x04;
+                cand[1..33].copy_from_slice(&x);
+                cand[33..65].copy_from_slice(&y);
+                if is_valid_p256_point(&cand) {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct U256([u64; 4]);
+
+const P256_ZERO: U256 = U256([0, 0, 0, 0]);
+const P256_ONE: U256 = U256([1, 0, 0, 0]);
+
+const P256_P: U256 = U256([
+    0xFFFFFFFFFFFFFFFF,
+    0x00000000FFFFFFFF,
+    0x0000000000000000,
+    0xFFFFFFFF00000001,
+]);
+
+const P256_N: U256 = U256([
+    0xF3B9CAC2FC632551,
+    0xBCE6FAADA7179E84,
+    0xFFFFFFFFFFFFFFFF,
+    0xFFFFFFFF00000000,
+]);
+
+const P256_B: U256 = U256([
+    0x3BCE3C3E27D2604B,
+    0x651D06B0CC53B0F6,
+    0xB3EBBD55769886BC,
+    0x5AC635D8AA3A93E7,
+]);
+
+const P256_GX: U256 = U256([
+    0xF4A13945D898C296,
+    0x77037D812DEB33A0,
+    0xF8BCE6E563A440F2,
+    0x6B17D1F2E12C4247,
+]);
+
+const P256_GY: U256 = U256([
+    0xCBB6406837BF51F5,
+    0x2BCE33576B315ECE,
+    0x8EE7EB4A7C0F9E16,
+    0x4FE342E2FE1A7F9B,
+]);
+
+impl U256 {
+    fn from_be_bytes(b: &[u8; 32]) -> Self {
+        let l3 = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+        let l2 = u64::from_be_bytes([b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]);
+        let l1 = u64::from_be_bytes([b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23]]);
+        let l0 = u64::from_be_bytes([b[24], b[25], b[26], b[27], b[28], b[29], b[30], b[31]]);
+        Self([l0, l1, l2, l3])
+    }
+
+    fn is_zero(&self) -> bool {
+        (self.0[0] | self.0[1] | self.0[2] | self.0[3]) == 0
+    }
+
+    fn bit(&self, idx: usize) -> bool {
+        let word = idx / 64;
+        let bit = idx % 64;
+        if word >= 4 {
+            false
+        } else {
+            ((self.0[word] >> bit) & 1) == 1
+        }
+    }
+
+    fn ge(&self, other: &Self) -> bool {
+        for i in (0..4).rev() {
+            if self.0[i] > other.0[i] {
+                return true;
+            }
+            if self.0[i] < other.0[i] {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn add_raw(&self, other: &Self) -> (Self, u64) {
+        let mut out = [0u64; 4];
+        let mut carry = 0u128;
+        for i in 0..4 {
+            let sum = (self.0[i] as u128) + (other.0[i] as u128) + carry;
+            out[i] = sum as u64;
+            carry = sum >> 64;
+        }
+        (Self(out), carry as u64)
+    }
+
+    fn sub_raw(&self, other: &Self) -> (Self, u64) {
+        let mut out = [0u64; 4];
+        let mut borrow = 0u128;
+        for i in 0..4 {
+            let a = self.0[i] as u128;
+            let b = (other.0[i] as u128) + borrow;
+            if a >= b {
+                out[i] = (a - b) as u64;
+                borrow = 0;
+            } else {
+                out[i] = ((1u128 << 64) + a - b) as u64;
+                borrow = 1;
+            }
+        }
+        (Self(out), borrow as u64)
+    }
+
+    fn rem_mod(&self, m: &Self) -> Self {
+        let mut cur = *self;
+        while cur.ge(m) {
+            cur = cur.sub_raw(m).0;
+        }
+        cur
+    }
+
+    fn add_mod(&self, other: &Self, m: &Self) -> Self {
+        let (sum, carry) = self.add_raw(other);
+        if carry > 0 || sum.ge(m) {
+            sum.sub_raw(m).0
+        } else {
+            sum
+        }
+    }
+
+    fn sub_mod(&self, other: &Self, m: &Self) -> Self {
+        if self.ge(other) {
+            self.sub_raw(other).0
+        } else {
+            let diff = other.sub_raw(self).0;
+            m.sub_raw(&diff).0
+        }
+    }
+
+    fn mul_mod(&self, other: &Self, m: &Self) -> Self {
+        let mut acc = P256_ZERO;
+        let a = self.rem_mod(m);
+        for i in (0..256).rev() {
+            acc = acc.add_mod(&acc, m);
+            if other.bit(i) {
+                acc = acc.add_mod(&a, m);
+            }
+        }
+        acc
+    }
+
+    fn pow_mod(&self, exp: &Self, m: &Self) -> Self {
+        let mut res = P256_ONE;
+        let base = self.rem_mod(m);
+        for i in (0..256).rev() {
+            res = res.mul_mod(&res, m);
+            if exp.bit(i) {
+                res = res.mul_mod(&base, m);
+            }
+        }
+        res
+    }
+
+    fn inv_mod(&self, m: &Self) -> Option<Self> {
+        if self.is_zero() {
+            return None;
+        }
+        let two = U256([2, 0, 0, 0]);
+        let exp = m.sub_raw(&two).0;
+        Some(self.pow_mod(&exp, m))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct P256Point {
+    x: U256,
+    y: U256,
+    infinity: bool,
+}
+
+impl P256Point {
+    fn infinity() -> Self {
+        Self {
+            x: P256_ZERO,
+            y: P256_ZERO,
+            infinity: true,
+        }
+    }
+
+    fn generator() -> Self {
+        Self {
+            x: P256_GX,
+            y: P256_GY,
+            infinity: false,
+        }
+    }
+
+    fn add(&self, other: &Self) -> Self {
+        if self.infinity {
+            return *other;
+        }
+        if other.infinity {
+            return *self;
+        }
+        let p = &P256_P;
+        if self.x == other.x {
+            if self.y != other.y || self.y.is_zero() {
+                return Self::infinity();
+            }
+            let x_sq = self.x.mul_mod(&self.x, p);
+            let three = U256([3, 0, 0, 0]);
+            let num = three.mul_mod(&x_sq, p).sub_mod(&three, p);
+            let den = self.y.add_mod(&self.y, p);
+            let Some(den_inv) = den.inv_mod(p) else {
+                return Self::infinity();
+            };
+            let lambda = num.mul_mod(&den_inv, p);
+            let rx = lambda
+                .mul_mod(&lambda, p)
+                .sub_mod(&self.x, p)
+                .sub_mod(&other.x, p);
+            let ry = lambda
+                .mul_mod(&self.x.sub_mod(&rx, p), p)
+                .sub_mod(&self.y, p);
+            Self {
+                x: rx,
+                y: ry,
+                infinity: false,
+            }
+        } else {
+            let num = other.y.sub_mod(&self.y, p);
+            let den = other.x.sub_mod(&self.x, p);
+            let Some(den_inv) = den.inv_mod(p) else {
+                return Self::infinity();
+            };
+            let lambda = num.mul_mod(&den_inv, p);
+            let rx = lambda
+                .mul_mod(&lambda, p)
+                .sub_mod(&self.x, p)
+                .sub_mod(&other.x, p);
+            let ry = lambda
+                .mul_mod(&self.x.sub_mod(&rx, p), p)
+                .sub_mod(&self.y, p);
+            Self {
+                x: rx,
+                y: ry,
+                infinity: false,
+            }
+        }
+    }
+
+    fn scalar_mul(&self, k: &U256) -> Self {
+        let mut acc = Self::infinity();
+        for i in (0..256).rev() {
+            acc = acc.add(&acc);
+            if k.bit(i) {
+                acc = acc.add(self);
+            }
+        }
+        acc
+    }
+}
+
+pub fn is_valid_p256_point(uncompressed: &[u8]) -> bool {
+    if uncompressed.len() != 65 || uncompressed[0] != 0x04 {
+        return false;
+    }
+    let mut xb = [0u8; 32];
+    let mut yb = [0u8; 32];
+    xb.copy_from_slice(&uncompressed[1..33]);
+    yb.copy_from_slice(&uncompressed[33..65]);
+    let x = U256::from_be_bytes(&xb);
+    let y = U256::from_be_bytes(&yb);
+    if x.ge(&P256_P) || y.ge(&P256_P) || (x.is_zero() && y.is_zero()) {
+        return false;
+    }
+    let p = &P256_P;
+    let lhs = y.mul_mod(&y, p);
+    let x2 = x.mul_mod(&x, p);
+    let x3 = x2.mul_mod(&x, p);
+    let three_x = x.add_mod(&x, p).add_mod(&x, p);
+    let rhs = x3.sub_mod(&three_x, p).add_mod(&P256_B, p);
+    lhs == rhs
+}
+
+fn parse_ecdsa_sig_rs(sig: &[u8]) -> Option<(U256, U256)> {
+    if sig.len() == 64 {
+        let mut rb = [0u8; 32];
+        let mut sb = [0u8; 32];
+        rb.copy_from_slice(&sig[0..32]);
+        sb.copy_from_slice(&sig[32..64]);
+        return Some((U256::from_be_bytes(&rb), U256::from_be_bytes(&sb)));
+    }
+    if sig.len() < 8 || sig[0] != 0x30 {
+        return None;
+    }
+    let mut idx = 1;
+    let _seq_len = if (sig[idx] & 0x80) == 0 {
+        let l = sig[idx] as usize;
+        idx += 1;
+        l
+    } else {
+        let nbytes = (sig[idx] & 0x7f) as usize;
+        if nbytes == 0 || nbytes > 2 || idx + nbytes >= sig.len() {
+            return None;
+        }
+        idx += 1 + nbytes;
+        0
+    };
+
+    let read_int = |pos: &mut usize| -> Option<U256> {
+        if *pos + 2 > sig.len() || sig[*pos] != 0x02 {
+            return None;
+        }
+        let len = sig[*pos + 1] as usize;
+        *pos += 2;
+        if *pos + len > sig.len() || len == 0 {
+            return None;
+        }
+        let mut slice = &sig[*pos..*pos + len];
+        *pos += len;
+        while slice.len() > 1 && slice[0] == 0x00 {
+            slice = &slice[1..];
+        }
+        if slice.len() > 32 {
+            return None;
+        }
+        let mut buf = [0u8; 32];
+        buf[32 - slice.len()..].copy_from_slice(slice);
+        Some(U256::from_be_bytes(&buf))
+    };
+
+    let r = read_int(&mut idx)?;
+    let s = read_int(&mut idx)?;
+    Some((r, s))
+}
+
+pub fn verify_p256_ecdsa(pub_key_uncompressed: &[u8], msg_hash: &[u8; 32], sig: &[u8]) -> bool {
+    if !is_valid_p256_point(pub_key_uncompressed) {
+        return false;
+    }
+    let Some((r, s)) = parse_ecdsa_sig_rs(sig) else {
+        return false;
+    };
+    let n = &P256_N;
+    if r.is_zero() || r.ge(n) || s.is_zero() || s.ge(n) {
+        return false;
+    }
+    let mut xb = [0u8; 32];
+    let mut yb = [0u8; 32];
+    xb.copy_from_slice(&pub_key_uncompressed[1..33]);
+    yb.copy_from_slice(&pub_key_uncompressed[33..65]);
+    let q = P256Point {
+        x: U256::from_be_bytes(&xb),
+        y: U256::from_be_bytes(&yb),
+        infinity: false,
+    };
+
+    let z = U256::from_be_bytes(msg_hash).rem_mod(n);
+    let Some(w) = s.inv_mod(n) else {
+        return false;
+    };
+    let u1 = z.mul_mod(&w, n);
+    let u2 = r.mul_mod(&w, n);
+
+    let g = P256Point::generator();
+    let p1 = g.scalar_mul(&u1);
+    let p2 = q.scalar_mul(&u2);
+    let pt = p1.add(&p2);
+    if pt.infinity {
+        return false;
+    }
+    let v = pt.x.rem_mod(n);
+    v == r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_p256_generator_and_ecdsa_verification() {
+        let mut g_bytes = [0u8; 65];
+        g_bytes[0] = 0x04;
+        g_bytes[1..33].copy_from_slice(
+            &hex::decode("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
+                .unwrap(),
+        );
+        g_bytes[33..65].copy_from_slice(
+            &hex::decode("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
+                .unwrap(),
+        );
+        assert!(is_valid_p256_point(&g_bytes));
+
+        let mut q_bytes = [0u8; 65];
+        q_bytes[0] = 0x04;
+        q_bytes[1..33].copy_from_slice(
+            &hex::decode("60FED4BA255A9D31C961EB74C6356D68C049B8923B61FA6CE669622E60F29FB6")
+                .unwrap(),
+        );
+        q_bytes[33..65].copy_from_slice(
+            &hex::decode("7903FE1008B8BC99A41AE9E95628BC64F2F1B20C2D7E9F5177A3C294D4462299")
+                .unwrap(),
+        );
+        assert!(is_valid_p256_point(&q_bytes));
+
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(b"sample");
+        let mut msg_hash = [0u8; 32];
+        msg_hash.copy_from_slice(&digest);
+
+        let raw_sig = hex::decode(
+            "EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716\
+             F7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8",
+        )
+        .unwrap();
+        assert!(verify_p256_ecdsa(&q_bytes, &msg_hash, &raw_sig));
+
+        let mut bad_sig = raw_sig.clone();
+        bad_sig[10] ^= 0x01;
+        assert!(!verify_p256_ecdsa(&q_bytes, &msg_hash, &bad_sig));
     }
 }

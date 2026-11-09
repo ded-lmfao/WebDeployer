@@ -53,6 +53,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/auth/2fa/setup", post(setup_2fa_handler))
         .route("/api/auth/2fa/enable", post(enable_2fa_handler))
         .route("/api/auth/2fa/disable", post(disable_2fa_handler))
+        .route("/api/auth/passkeys", get(list_passkeys_handler))
+        .route("/api/auth/passkeys/register/start", post(passkey_register_start_handler))
+        .route("/api/auth/passkeys/register/finish", post(passkey_register_finish_handler))
+        .route("/api/auth/passkeys/:id", delete(delete_passkey_handler))
+        .route("/api/auth/passkeys/login/start", post(passkey_login_start_handler))
+        .route("/api/auth/passkeys/login/finish", post(passkey_login_finish_handler))
         .route("/api/auth/sessions/revoke-others", post(revoke_other_sessions_handler))
         .route("/api/auth/logout", post(logout_handler))
         .route("/api/auth/me", get(me_handler))
@@ -145,6 +151,8 @@ async fn security_middleware(
     if is_api {
         let is_public_auth = path == "/api/auth/login"
             || path == "/api/auth/2fa/verify-login"
+            || path == "/api/auth/passkeys/login/start"
+            || path == "/api/auth/passkeys/login/finish"
             || path.starts_with("/api/webhooks/github/");
 
         if !is_public_auth {
@@ -319,6 +327,8 @@ struct LoginResponse {
     csrf: String,
     #[serde(rename = "activeSessions")]
     active_sessions: usize,
+    #[serde(rename = "passkeyCount")]
+    passkey_count: usize,
 }
 
 async fn login_handler(
@@ -397,6 +407,7 @@ async fn login_handler(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
 
     let active_sessions = state.auth.count_active_sessions(user.id);
+    let passkey_count = state.auth.count_user_passkeys(user.id);
     let cookie_val = format!(
         "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
         session.id, state.auth.session_ttl_s
@@ -406,6 +417,7 @@ async fn login_handler(
         user,
         csrf: session.csrf_token,
         active_sessions,
+        passkey_count,
     });
 
     let mut res = body.into_response();
@@ -491,6 +503,7 @@ async fn verify_2fa_login_handler(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
 
     let active_sessions = state.auth.count_active_sessions(user.id);
+    let passkey_count = state.auth.count_user_passkeys(user.id);
     let cookie_val = format!(
         "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
         session.id, state.auth.session_ttl_s
@@ -500,6 +513,7 @@ async fn verify_2fa_login_handler(
         user,
         csrf: session.csrf_token,
         active_sessions,
+        passkey_count,
     });
 
     let mut res = body.into_response();
@@ -540,10 +554,12 @@ async fn me_handler(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let active_sessions = state.auth.count_active_sessions(user.id);
+    let passkey_count = state.auth.count_user_passkeys(user.id);
     Ok(Json(LoginResponse {
         user,
         csrf: session.csrf_token,
         active_sessions,
+        passkey_count,
     }))
 }
 
@@ -879,6 +895,241 @@ async fn admin_reset_user_2fa_handler(
     );
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Passkey & Biometric (WebAuthn) Handlers
+// ---------------------------------------------------------------------------
+async fn list_passkeys_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let passkeys = state.auth.list_passkeys(user.id);
+    Ok(Json(serde_json::json!({ "passkeys": passkeys })))
+}
+
+async fn passkey_register_start_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let (challenge_id, challenge_b64) = state.auth.create_passkey_challenge(Some(user.id));
+    let existing: Vec<String> = state
+        .auth
+        .list_passkeys(user.id)
+        .into_iter()
+        .map(|p| p.credential_id)
+        .collect();
+    let user_id_b64 = crate::auth::b64url_encode(format!("webdep-user-{}", user.id).as_bytes());
+    Ok(Json(serde_json::json!({
+        "challengeId": challenge_id,
+        "challenge": challenge_b64,
+        "user": {
+            "id": user_id_b64,
+            "name": user.username,
+            "displayName": user.username,
+        },
+        "excludeCredentials": existing,
+    })))
+}
+
+#[derive(Deserialize)]
+struct PasskeyRegisterFinishPayload {
+    #[serde(rename = "challengeId")]
+    challenge_id: String,
+    name: Option<String>,
+    #[serde(rename = "credentialId")]
+    credential_id: String,
+    #[serde(rename = "publicKeySpki")]
+    public_key_spki: Option<String>,
+    #[serde(rename = "attestationObject")]
+    attestation_object: Option<String>,
+    #[serde(rename = "authenticatorData")]
+    authenticator_data: Option<String>,
+    #[serde(rename = "clientDataJSON")]
+    client_data_json: String,
+}
+
+async fn passkey_register_finish_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<PasskeyRegisterFinishPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let (uid_opt, expected_challenge) = state
+        .auth
+        .consume_passkey_challenge(&payload.challenge_id)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Passkey registration challenge expired. Please try again.".to_string()))?;
+    if uid_opt != Some(user.id) {
+        return Err((StatusCode::BAD_REQUEST, "Passkey challenge user mismatch".to_string()));
+    }
+
+    let label = payload
+        .name
+        .as_deref()
+        .unwrap_or("Passkey / Biometric Device");
+    let info = state
+        .auth
+        .register_passkey(
+            user.id,
+            label,
+            &payload.credential_id,
+            payload.public_key_spki.as_deref(),
+            payload.attestation_object.as_deref(),
+            payload.authenticator_data.as_deref(),
+            &payload.client_data_json,
+            &expected_challenge,
+        )
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    log_audit(
+        &state,
+        &user.username,
+        "user.update",
+        Some(&user.username),
+        Some(&format!("Registered passkey / biometric device '{}'", info.name)),
+    );
+
+    let passkeys = state.auth.list_passkeys(user.id);
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "passkey": info,
+        "passkeys": passkeys,
+    })))
+}
+
+async fn delete_passkey_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    if !state.auth.delete_passkey(user.id, id) {
+        return Err((StatusCode::NOT_FOUND, "Passkey not found".to_string()));
+    }
+    log_audit(
+        &state,
+        &user.username,
+        "user.update",
+        Some(&user.username),
+        Some(&format!("Removed passkey #{}", id)),
+    );
+    let passkeys = state.auth.list_passkeys(user.id);
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "passkeys": passkeys,
+    })))
+}
+
+#[derive(Deserialize, Default)]
+struct PasskeyLoginStartPayload {
+    username: Option<String>,
+}
+
+async fn passkey_login_start_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<PasskeyLoginStartPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let total = state.auth.total_passkeys_count();
+    if total == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No passkeys or biometric devices are registered yet. Sign in with your password and add one in Settings -> Security.".to_string(),
+        ));
+    }
+    let cred_ids = state
+        .auth
+        .list_login_credential_ids(payload.username.as_deref());
+    if cred_ids.is_empty() && payload.username.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No passkeys registered for this username.".to_string(),
+        ));
+    }
+    let (challenge_id, challenge_b64) = state.auth.create_passkey_challenge(None);
+    Ok(Json(serde_json::json!({
+        "challengeId": challenge_id,
+        "challenge": challenge_b64,
+        "allowCredentials": cred_ids,
+    })))
+}
+
+#[derive(Deserialize)]
+struct PasskeyLoginFinishPayload {
+    #[serde(rename = "challengeId")]
+    challenge_id: String,
+    #[serde(rename = "credentialId")]
+    credential_id: String,
+    #[serde(rename = "authenticatorData")]
+    authenticator_data: String,
+    #[serde(rename = "clientDataJSON")]
+    client_data_json: String,
+    signature: String,
+}
+
+async fn passkey_login_finish_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<PasskeyLoginFinishPayload>,
+) -> Result<Response, (StatusCode, String)> {
+    if let Some(old_sid) = extract_session_id(&headers) {
+        state.auth.delete_session(&old_sid);
+    }
+
+    let (_uid_opt, expected_challenge) = state
+        .auth
+        .consume_passkey_challenge(&payload.challenge_id)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Passkey login challenge expired. Please try again.".to_string()))?;
+
+    let (user, passkey_name) = state
+        .auth
+        .verify_passkey_login(
+            &payload.credential_id,
+            &payload.authenticator_data,
+            &payload.client_data_json,
+            &payload.signature,
+            &expected_challenge,
+        )
+        .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+
+    log_audit(
+        &state,
+        &user.username,
+        "auth.login",
+        Some(&user.username),
+        Some(&format!("User signed in via Passkey / Biometrics ({})", passkey_name)),
+    );
+
+    let session = state
+        .auth
+        .create_session(user.id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
+
+    let active_sessions = state.auth.count_active_sessions(user.id);
+    let passkey_count = state.auth.count_user_passkeys(user.id);
+    let cookie_val = format!(
+        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+        session.id, state.auth.session_ttl_s
+    );
+
+    let body = Json(LoginResponse {
+        user,
+        csrf: session.csrf_token,
+        active_sessions,
+        passkey_count,
+    });
+
+    let mut res = body.into_response();
+    res.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie_val).unwrap(),
+    );
+    Ok(res)
 }
 
 // ---------------------------------------------------------------------------
