@@ -481,6 +481,62 @@ impl Runtime {
         container
     }
 
+    /// Delete all on-disk directories, releases, git clones, backups, isolated container DB/cache/storage,
+    /// and deploy keys associated with a deleted website.
+    pub fn cleanup_project_files(&self, p: &Project) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let safe_slug = if p.slug.trim().is_empty() {
+            format!("site-{}", p.id)
+        } else {
+            p.slug.trim().to_string()
+        };
+
+        // 1. Clean up in-memory runtime maps for this project
+        if let Ok(mut map) = self.processes.lock() {
+            map.remove(&p.id);
+        }
+        if let Ok(mut map) = self.project_locks.lock() {
+            map.remove(&p.id);
+        }
+        if let Ok(mut map) = self.stop_seq.lock() {
+            map.remove(&p.id);
+        }
+
+        // 2. Remove isolated container directory (`data/containers/<slug>` including `db/`, `cache/`, `storage/`, `tmp/`, `home/`, `run/`)
+        let container_root = cwd.join("data").join("containers").join(&safe_slug);
+        if container_root.exists() {
+            let _ = std::fs::remove_dir_all(&container_root);
+        }
+        let legacy_app_data = cwd.join("data").join("app-data").join(&safe_slug);
+        if legacy_app_data.exists() {
+            let _ = std::fs::remove_dir_all(&legacy_app_data);
+        }
+
+        // 3. Remove SSH deploy keys (`data/keys/deploy_key_<id>*`)
+        let key_dir = cwd.join("data").join("keys");
+        let _ = std::fs::remove_file(key_dir.join(format!("deploy_key_{}", p.id)));
+        let _ = std::fs::remove_file(key_dir.join(format!("deploy_key_{}.pub", p.id)));
+
+        // 4. Remove deployment directory (`p.deploy_dir` and `data/sites/<slug>`)
+        let mut dirs_to_remove = vec![cwd.join("data").join("sites").join(&safe_slug)];
+        let dep_trimmed = p.deploy_dir.trim();
+        if !dep_trimmed.is_empty() && dep_trimmed != "/" && dep_trimmed != "." && dep_trimmed != "./" {
+            dirs_to_remove.push(PathBuf::from(dep_trimmed));
+        }
+
+        for dir in dirs_to_remove {
+            if dir.exists() || std::fs::symlink_metadata(&dir).is_ok() {
+                #[cfg(windows)]
+                {
+                    let current_link = dir.join("current");
+                    let cur_str = current_link.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                    let _ = std::process::Command::new("cmd").args(["/C", "rmdir", &cur_str]).output();
+                }
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        }
+    }
+
     /// Link `<work_dir>/data` to the website's isolated container `db/` folder so relative `./data` paths
     /// inside any Node/Python app stay isolated per container and persist across releases.
     pub fn link_work_dir_to_container(&self, work_dir: &Path, container: &WebsiteContainer) {

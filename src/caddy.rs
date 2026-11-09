@@ -92,6 +92,16 @@ impl Caddy {
         Ok(path)
     }
 
+    pub fn remove_project_config(&self, slug: &str, remaining_projects: &[Project]) {
+        if !slug.trim().is_empty() {
+            let _ = fs::remove_file(self.caddy_dir.join(format!("{}.caddy", slug)));
+            let _ = fs::remove_file(self.caddy_dir.join(format!("{}-maintenance.html", slug)));
+        }
+        let master_path = self.caddy_dir.join("Caddyfile");
+        let _ = fs::write(&master_path, self.generate_master_caddyfile(remaining_projects));
+        let _ = self.reload();
+    }
+
     pub fn validate_config(&self, config_path: &Path) -> Result<(), String> {
         let out = Command::new("caddy")
             .args(["validate", "--config", config_path.to_str().unwrap_or("Caddyfile")])

@@ -365,11 +365,13 @@ impl Projects {
             tx.execute("DELETE FROM project_env WHERE project_id = ?", params![id]).ok();
             tx.execute("DELETE FROM project_keys WHERE project_id = ?", params![id]).ok();
             tx.execute("DELETE FROM jobs WHERE project_id = ?", params![id]).ok();
+            tx.execute("DELETE FROM audit WHERE project_id = ? AND action != 'website.delete'", params![id]).ok();
             tx.execute("DELETE FROM projects WHERE id = ?", params![id])?;
             tx.commit()?;
             Ok(())
         })();
         let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        crate::db::purge_orphaned_project_data(&conn);
         res
     }
 

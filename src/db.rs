@@ -570,5 +570,37 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
+    purge_orphaned_project_data(conn);
+
     Ok(())
+}
+
+/// Automatically sweeps and deletes any leftover SQLite database rows
+/// belonging to websites (`project_id`) that were previously deleted.
+/// Never touches disk files so active websites or custom directories on disk can never be affected.
+pub fn purge_orphaned_project_data(conn: &Connection) {
+    // Verify the `projects` table exists and is readable before cleaning child tables
+    let projects_table_ok: bool = conn
+        .query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'", [], |_| Ok(true))
+        .unwrap_or(false);
+    if !projects_table_ok {
+        return;
+    }
+
+    let _ = conn.execute_batch(
+        "
+        PRAGMA foreign_keys = OFF;
+        DELETE FROM logs WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM backups WHERE project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM deployments WHERE project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM releases WHERE project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM project_env WHERE project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM project_keys WHERE project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM jobs WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
+        DELETE FROM logs WHERE deployment_id IS NOT NULL AND deployment_id NOT IN (SELECT id FROM deployments);
+        DELETE FROM audit WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
+        PRAGMA foreign_keys = ON;
+        PRAGMA wal_checkpoint(PASSIVE);
+        ",
+    );
 }

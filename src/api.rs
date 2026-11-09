@@ -1298,22 +1298,36 @@ async fn delete_project_handler(
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
-    if let Ok(Some(p)) = state.projects.get(id) {
+    let deleted_proj = state.projects.get(id).ok().flatten();
+    if let Some(ref p) = deleted_proj {
         log_audit_project(
             &state,
             Some(id),
             &actor.username,
             "website.delete",
             Some(&p.name),
-            Some(&format!("Deleted website '{}' ({})", p.name, p.slug)),
+            Some(&format!(
+                "Deleted website '{}' ({}) along with its files, container data, and cache",
+                p.name, p.slug
+            )),
         );
-        let _ = state.runtime.stop_project(&p).await;
+        let _ = state.runtime.stop_project(p).await;
         state.runtime.stop_maintenance_server(id);
     }
     state
         .projects
         .delete(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if let Some(ref p) = deleted_proj {
+        if let Ok(remaining) = state.projects.list() {
+            state.runtime.cleanup_project_files(p, &remaining);
+            state.caddy.remove_project_config(&p.slug, &remaining);
+        }
+    }
+    state.cache.invalidate_project(id);
+    state.cache.invalidate_all();
+
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -2481,13 +2495,17 @@ async fn cache_clear_handler(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let actor = current_user(&state, &headers)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    {
+        let conn = state.db.lock().unwrap();
+        crate::db::purge_orphaned_project_data(&conn);
+    }
     state.cache.invalidate_all();
     log_audit(
         &state,
         &actor.username,
         "cache.clear",
         Some("platform"),
-        Some("Flushed server in-memory response cache"),
+        Some("Flushed server in-memory response cache and purged orphaned website data"),
     );
     Ok(Json(serde_json::json!({
         "ok": true,
