@@ -663,7 +663,7 @@ function handleHashRoute() {
 window.addEventListener('hashchange', handleHashRoute);
 window.addEventListener('pageshow', (e) => {
   if (e.persisted || !state.user || !state.csrf) {
-    initAuth();
+    void initAuth();
   }
 });
 
@@ -923,17 +923,17 @@ function renderCurrentView() {
 
   // Load relevant view data
   switch (state.currentView) {
-    case 'overview': loadOverview(); break;
+    case 'overview': void loadOverview(); break;
     case 'projects': renderProjectsList(); break;
-    case 'github': loadGithubView(); break;
-    case 'deployments': loadDeploymentsView(); break;
-    case 'releases': loadReleasesView(); break;
-    case 'rollbacks': loadRollbacksView(); break;
-    case 'logs': loadLogsView(); break;
-    case 'env': loadEnvView(); break;
-    case 'monitor': loadMonitorView(); break;
-    case 'settings': loadSettingsView(); break;
-    case 'audit': loadAuditView(); break;
+    case 'github': void loadGithubView(); break;
+    case 'deployments': void loadDeploymentsView(); break;
+    case 'releases': void loadReleasesView(); break;
+    case 'rollbacks': void loadRollbacksView(); break;
+    case 'logs': void loadLogsView(); break;
+    case 'env': void loadEnvView(); break;
+    case 'monitor': void loadMonitorView(); break;
+    case 'settings': void loadSettingsView(); break;
+    case 'audit': void loadAuditView(); break;
   }
 }
 
@@ -1510,7 +1510,7 @@ window.rotateWebhookSecret = rotateWebhookSecret;
 document.getElementById('github-fetch-btn')?.addEventListener('click', async () => {
   const p = getSelectedProject();
   if (!p) return;
-  fetchProjectUpdates(p.id);
+  await fetchProjectUpdates(p.id);
 });
 
 async function fetchProjectUpdates(projectId) {
@@ -1532,8 +1532,8 @@ async function fetchProjectUpdates(projectId) {
     }
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'github') loadGithubView();
-    if (state.currentView === 'overview') loadOverview();
+    if (state.currentView === 'github') await loadGithubView();
+    if (state.currentView === 'overview') await loadOverview();
   } catch (err) {
     toast(`Fetch failed: ${err.message}`, 'error');
   } finally {

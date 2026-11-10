@@ -540,7 +540,7 @@ impl Deployer {
         self.runtime.link_work_dir_to_container(&release_dir, &container);
         let env_map = self.projects.get_env_map(p.id);
         let (_isolated_env, dotenv_body) = self.runtime.build_container_env(&p, &env_map, &container);
-        let _ = fs::write(release_dir.join(".env"), dotenv_body);
+        let _ = tokio::fs::write(release_dir.join(".env"), dotenv_body).await;
 
         // Stage 3: Installing dependencies
         let has_pkg_json = release_dir.join("package.json").exists();
@@ -577,7 +577,7 @@ impl Deployer {
         } else {
             let pkg_path = release_dir.join("package.json");
             if pkg_path.exists() {
-                if let Ok(pkg_txt) = fs::read_to_string(&pkg_path) {
+                if let Ok(pkg_txt) = tokio::fs::read_to_string(&pkg_path).await {
                     if pkg_txt.contains("\"build\"") {
                         "npm run build".to_string()
                     } else {

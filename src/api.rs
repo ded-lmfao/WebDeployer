@@ -1185,10 +1185,10 @@ async fn create_project_handler(
             format!("data/sites/{}", p.slug)
         };
         let abs = cwd.join(rel);
-        let _ = std::fs::create_dir_all(&abs);
+        let _ = tokio::fs::create_dir_all(&abs).await;
         p.deploy_dir = abs.to_string_lossy().to_string();
     } else {
-        let _ = std::fs::create_dir_all(&p.deploy_dir);
+        let _ = tokio::fs::create_dir_all(&p.deploy_dir).await;
     }
 
     // Ensure non-conflicting port across all hosted websites
@@ -1835,7 +1835,7 @@ async fn create_release_handler(
         let ts = now();
         let base_dir = std::path::PathBuf::from(&p.deploy_dir);
         let rel_dir = base_dir.join("releases").join(format!("rel-snap-{}", ts));
-        std::fs::create_dir_all(&rel_dir).ok();
+        tokio::fs::create_dir_all(&rel_dir).await.ok();
 
         let src_dir = if base_dir.join("current").exists() {
             base_dir.join("current")
@@ -2767,26 +2767,30 @@ async fn get_settings_handler(
     headers: HeaderMap,
 ) -> Result<Json<HashMap<String, String>>, (StatusCode, String)> {
     let _actor = verify_power(&state, &headers, "settings_manage", None)?;
-    let conn = state.db.lock().unwrap();
-    let mut stmt = conn
-        .prepare("SELECT key, value FROM settings")
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
-    let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
+    let (mut map, current_tok) = {
+        let conn = state.db.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT key, value FROM settings")
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
 
-    let mut map = HashMap::new();
-    for r in rows.flatten() {
-        map.insert(r.0, r.1);
-    }
+        let mut map = HashMap::new();
+        for r in rows.flatten() {
+            map.insert(r.0, r.1);
+        }
+        let current_tok = map.get("github_token").cloned().unwrap_or_default();
+        (map, current_tok)
+    };
 
     // If github_token is not yet saved in SQLite, try auto-detecting from gh CLI once and persisting it
-    let current_tok = map.get("github_token").cloned().unwrap_or_default();
     if current_tok.trim().is_empty() {
-        if let Ok(out) = std::process::Command::new("gh").args(["auth", "token"]).output() {
+        if let Ok(out) = tokio::process::Command::new("gh").args(["auth", "token"]).output().await {
             if out.status.success() {
                 let detected = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !detected.is_empty() {
+                    let conn = state.db.lock().unwrap();
                     conn.execute(
                         "INSERT INTO settings(key, value) VALUES('github_token', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                         rusqlite::params![&detected],
@@ -3349,7 +3353,7 @@ async fn detect_project_handler(
 
     let pkg_json = repo_dir.join("package.json");
     if pkg_json.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+        if let Ok(content) = tokio::fs::read_to_string(&pkg_json).await {
             let has_build = content.contains("\"build\"");
             let has_server_js = repo_dir.join("server.js").exists();
             let has_vite = content.contains("\"vite\"");
@@ -3404,12 +3408,12 @@ async fn project_deploy_key_handler(
     }
 
     let key_dir = std::path::Path::new("./data/keys");
-    std::fs::create_dir_all(key_dir).ok();
+    tokio::fs::create_dir_all(key_dir).await.ok();
     let key_path = key_dir.join(format!("deploy_key_{}", id));
     let pub_path = key_dir.join(format!("deploy_key_{}.pub", id));
 
     if !pub_path.exists() {
-        let _ = std::process::Command::new("ssh-keygen")
+        let _ = tokio::process::Command::new("ssh-keygen")
             .args([
                 "-t",
                 "ed25519",
@@ -3420,12 +3424,14 @@ async fn project_deploy_key_handler(
                 "-C",
                 &format!("webdep-project-{}", id),
             ])
-            .output();
+            .output()
+            .await;
     }
 
-    let public_key = std::fs::read_to_string(&pub_path)
+    let public_key = tokio::fs::read_to_string(&pub_path)
+        .await
         .unwrap_or_else(|_| format!("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWebDepGeneratedKeyProject{} webdep", id));
-    let private_key = std::fs::read_to_string(&key_path).unwrap_or_default();
+    let private_key = tokio::fs::read_to_string(&key_path).await.unwrap_or_default();
 
     {
         let conn = state.db.lock().unwrap();
@@ -3488,7 +3494,7 @@ async fn github_repos_handler(
         let mut seen = std::collections::HashSet::new();
 
         for item in &tokens {
-            let out = std::process::Command::new("curl")
+            let out = tokio::process::Command::new("curl")
                 .args([
                     "-s",
                     "-H",
@@ -3499,7 +3505,8 @@ async fn github_repos_handler(
                     "User-Agent: WebDep",
                     "https://api.github.com/user/repos?per_page=100&sort=updated",
                 ])
-                .output();
+                .output()
+                .await;
 
             if let Ok(o) = out {
                 if o.status.success() {
@@ -3524,7 +3531,7 @@ async fn github_repos_handler(
     }
 
     // Fallback: try GitHub CLI (`gh`) if installed and authenticated on machine
-    if let Ok(out) = std::process::Command::new("gh")
+    if let Ok(out) = tokio::process::Command::new("gh")
         .args([
             "repo",
             "list",
@@ -3534,6 +3541,7 @@ async fn github_repos_handler(
             "nameWithOwner,url,isPrivate,defaultBranchRef",
         ])
         .output()
+        .await
     {
         if out.status.success() {
             let body = String::from_utf8_lossy(&out.stdout);
@@ -3709,14 +3717,14 @@ async fn create_backup_handler(
     let ts = now();
     let base_dir = std::path::PathBuf::from(&p.deploy_dir);
     let backup_dir = base_dir.join("backups").join(format!("backup-{}", ts));
-    let _ = std::fs::create_dir_all(&backup_dir);
+    let _ = tokio::fs::create_dir_all(&backup_dir).await;
 
     let mut total_size = 0u64;
 
     // 1. Snapshot .env variables
     if let Ok(raw_env) = state.projects.export_raw_env(id) {
         let env_path = backup_dir.join("backup.env");
-        if std::fs::write(&env_path, &raw_env).is_ok() {
+        if tokio::fs::write(&env_path, &raw_env).await.is_ok() {
             total_size += raw_env.len() as u64;
         }
     }
@@ -3842,7 +3850,7 @@ async fn restore_backup_handler(
         let b_dir = std::path::PathBuf::from(&b_path);
         // Restore .env if present in snapshot
         let env_file = b_dir.join("backup.env");
-        if let Ok(raw_env) = std::fs::read_to_string(&env_file) {
+        if let Ok(raw_env) = tokio::fs::read_to_string(&env_file).await {
             if !raw_env.trim().is_empty() {
                 let _ = state.projects.set_bulk_env(id, &raw_env, true, false);
             }
@@ -3904,7 +3912,7 @@ async fn delete_backup_handler(
     if let Some(p_str) = b_path {
         let path = std::path::Path::new(&p_str);
         if (p_str.contains("backups") || p_str.contains("rel-snap-")) && path.exists() {
-            let _ = std::fs::remove_dir_all(path);
+            let _ = tokio::fs::remove_dir_all(path).await;
         }
     }
 
@@ -3964,7 +3972,7 @@ async fn delete_release_handler(
     if let Some(d_str) = rel_dir {
         let path = std::path::Path::new(&d_str);
         if path.exists() && (d_str.contains("releases") || d_str.contains("rel-")) {
-            let _ = std::fs::remove_dir_all(path);
+            let _ = tokio::fs::remove_dir_all(path).await;
         }
     }
 
@@ -4029,7 +4037,7 @@ async fn caddy_status_handler(State(state): State<AppState>) -> Response {
         return res;
     }
 
-    let out = std::process::Command::new("caddy").arg("version").output();
+    let out = tokio::process::Command::new("caddy").arg("version").output().await;
     let (installed, version) = match out {
         Ok(o) if o.status.success() => (true, String::from_utf8_lossy(&o.stdout).trim().to_string()),
         _ => (true, "Caddy 2 (Auto-SSL Managed)".to_string()),

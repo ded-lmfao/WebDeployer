@@ -140,13 +140,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let exe_path = std::path::PathBuf::from("target")
             .join("release")
             .join(if cfg!(windows) { "webdep.exe" } else { "webdep" });
-        let initial_mtime = std::fs::metadata(&exe_path)
+        let initial_mtime = tokio::fs::metadata(&exe_path)
+            .await
             .and_then(|m| m.modified())
             .ok();
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         loop {
             interval.tick().await;
-            if let (Some(init_t), Ok(meta)) = (initial_mtime, std::fs::metadata(&exe_path)) {
+            if let (Some(init_t), Ok(meta)) = (initial_mtime, tokio::fs::metadata(&exe_path).await) {
                 if let Ok(cur_t) = meta.modified() {
                     if cur_t > init_t && meta.len() > 1_000_000 {
                         tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;

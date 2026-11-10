@@ -923,11 +923,13 @@ impl Runtime {
             let s = p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\");
             cwd.join(s)
         };
-        let _ = std::fs::create_dir_all(&base_dir);
+        let _ = tokio::fs::create_dir_all(&base_dir).await;
 
         // Determine working directory where package.json/built files exist
         let current_path = base_dir.join("current");
-        let is_valid_dir = |d: &Path| d.is_dir() && std::fs::read_dir(d).is_ok();
+        async fn check_dir(d: &Path) -> bool {
+            tokio::fs::metadata(d).await.map(|m| m.is_dir()).unwrap_or(false)
+        }
 
         let mut work_dir: Option<PathBuf> = None;
         if let Some(rd) = release_dir {
@@ -937,23 +939,23 @@ impl Runtime {
                 let s = rd.to_string_lossy();
                 cwd.join(s.trim_start_matches("./").trim_start_matches(".\\"))
             };
-            if is_valid_dir(&abs_rd) {
+            if check_dir(&abs_rd).await {
                 work_dir = Some(abs_rd);
             }
         }
-        if work_dir.is_none() && is_valid_dir(&current_path) {
+        if work_dir.is_none() && check_dir(&current_path).await {
             work_dir = Some(current_path);
         }
         if work_dir.is_none() {
             // Check releases directory for the latest release
             let releases_dir = base_dir.join("releases");
-            if is_valid_dir(&releases_dir) {
-                if let Ok(entries) = std::fs::read_dir(&releases_dir) {
+            if check_dir(&releases_dir).await {
+                if let Ok(mut entries) = tokio::fs::read_dir(&releases_dir).await {
                     let mut max_id = 0i64;
                     let mut latest: Option<PathBuf> = None;
-                    for e in entries.flatten() {
+                    while let Ok(Some(e)) = entries.next_entry().await {
                         let path = e.path();
-                        if is_valid_dir(&path) {
+                        if check_dir(&path).await {
                             let n = e.file_name().to_string_lossy().to_string();
                             if let Some(id_str) = n.strip_prefix("rel-") {
                                 if let Ok(id) = id_str.parse::<i64>() {
@@ -980,7 +982,7 @@ impl Runtime {
 
         // Build isolated container environment and write `.env` into working directory
         let (isolated_env, dotenv_body) = self.build_container_env(p, &env_vars, &container);
-        let _ = std::fs::write(work_dir.join(".env"), dotenv_body);
+        let _ = tokio::fs::write(work_dir.join(".env"), dotenv_body).await;
 
         // Shell execution: supports npx, npm, node, yarn, python, uvicorn on any OS
         let mut final_cmd = resolved_cmd;

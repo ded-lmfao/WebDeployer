@@ -13,6 +13,11 @@ impl Caddy {
     pub fn new(data_dir: &Path) -> Self {
         let caddy_dir = data_dir.join("caddy");
         fs::create_dir_all(&caddy_dir).ok();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&caddy_dir, fs::Permissions::from_mode(0o755));
+        }
         Self { caddy_dir }
     }
 
@@ -87,6 +92,7 @@ impl Caddy {
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o644));
             let _ = fs::set_permissions(&master_path, fs::Permissions::from_mode(0o644));
+            let _ = fs::set_permissions(&maint_path, fs::Permissions::from_mode(0o644));
         }
 
         Ok(path)
@@ -99,6 +105,11 @@ impl Caddy {
         }
         let master_path = self.caddy_dir.join("Caddyfile");
         let _ = fs::write(&master_path, self.generate_master_caddyfile(remaining_projects));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&master_path, fs::Permissions::from_mode(0o644));
+        }
         let _ = self.reload();
     }
 
