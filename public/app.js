@@ -2130,7 +2130,7 @@ async function deleteRelease(projectId, releaseId) {
   try {
     await api(`/api/projects/${projectId}/releases/${releaseId}`, { method: 'DELETE' });
     toast(`Release #${releaseId} deleted.`, 'info');
-    loadReleasesView();
+    await loadReleasesView();
   } catch (err) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
@@ -2616,7 +2616,7 @@ window.cancelInlineEnvEdit = cancelInlineEnvEdit;
 function handleInlineEditKeydown(e, originalKey) {
   if (e.key === 'Enter') {
     e.preventDefault();
-    saveInlineEnvEdit(originalKey);
+    void saveInlineEnvEdit(originalKey);
   } else if (e.key === 'Escape') {
     e.preventDefault();
     cancelInlineEnvEdit();
@@ -2800,7 +2800,7 @@ window.copyTextToClipboard = copyTextToClipboard;
 function copyEnvVarValue(key) {
   const found = envUiState.vars.find((v) => v.key === key);
   if (!found) return;
-  copyTextToClipboard(getRealEnvValue(found), `Copied value for "${key}"`);
+  void copyTextToClipboard(getRealEnvValue(found), `Copied value for "${key}"`);
 }
 window.copyEnvVarValue = copyEnvVarValue;
 
@@ -3042,7 +3042,7 @@ function copyRawEnvToClipboard() {
     toast('No variables to copy.', 'info');
     return;
   }
-  copyTextToClipboard(content, 'Copied .env contents to clipboard');
+  void copyTextToClipboard(content, 'Copied .env contents to clipboard');
 }
 window.copyRawEnvToClipboard = copyRawEnvToClipboard;
 
@@ -3076,7 +3076,7 @@ window.onEnvProjectChange = onEnvProjectChange;
 
 function restartCurrentProject() {
   const p = getSelectedProject();
-  if (p) restartProject(p.id);
+  if (p) void restartProject(p.id);
 }
 window.restartCurrentProject = restartCurrentProject;
 
@@ -3269,7 +3269,7 @@ async function confirmCreateRelease(e) {
     } else {
       toast(`Release #${res.releaseId} created successfully!`, 'success');
       closeModal('modal-create-release');
-      loadReleasesView();
+      await loadReleasesView();
     }
   } catch (err) {
     toast(`Create release failed: ${err.message}`, 'error');
@@ -3599,7 +3599,7 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
   try {
     await api('/api/settings', { method: 'PUT', body: payload });
     toast(`Global settings & ${cleanTokens.length} GitHub token(s) saved in SQLite!`, 'success');
-    loadSettingsView();
+    await loadSettingsView();
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
   }
@@ -3741,7 +3741,7 @@ async function toggleUserDisabled(userId, disabled) {
   try {
     await api(`/api/users/${userId}`, { method: 'PUT', body: { disabled: Boolean(disabled) } });
     toast(disabled ? 'User account disabled.' : 'User account enabled.', 'success');
-    loadSettingsView();
+    await loadSettingsView();
   } catch (err) {
     toast(`Update failed: ${err.message}`, 'error');
   }
@@ -3759,7 +3759,7 @@ async function deleteUser(userId, username) {
   try {
     await api(`/api/users/${userId}`, { method: 'DELETE' });
     toast(`User "${username}" removed from SQLite.`, 'success');
-    loadSettingsView();
+    await loadSettingsView();
   } catch (err) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
@@ -3952,7 +3952,7 @@ async function openNginxModal(projectId) {
     domainInput.onkeydown = (ev) => {
       if (ev.key === 'Enter') {
         ev.preventDefault();
-        saveCaddyDomains();
+        void saveCaddyDomains();
       }
     };
   }
@@ -3980,7 +3980,7 @@ function cleanDomainList(rawStr) {
   if (!rawStr) return [];
   return rawStr
     .split(/[\n,;]+/)
-    .map((s) => s.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim().toLowerCase())
+    .map((s) => s.trim().replace(/^https?:\/\//i, '').split('/')[0].trim().toLowerCase())
     .filter(Boolean);
 }
 
@@ -4037,7 +4037,7 @@ async function saveCaddyDomains() {
     await loadProjects();
     renderWebsiteWorkspaceHeader();
     if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') loadOverview();
+    if (state.currentView === 'overview') await loadOverview();
   } catch (err) {
     toast(`Failed to update domains: ${err.message}`, 'error');
   } finally {
@@ -4059,7 +4059,7 @@ document.getElementById('nginx-certbot-btn')?.addEventListener('click', async ()
   try {
     await api(`/api/projects/${activeNginxProjectId}/nginx/certbot`, { method: 'POST' });
     toast('SSL certificate provisioned successfully with Let\'s Encrypt!', 'success');
-    openNginxModal(activeNginxProjectId);
+    await openNginxModal(activeNginxProjectId);
   } catch (err) {
     toast(`Certbot failed: ${err.message}`, 'error');
   }
@@ -4079,7 +4079,7 @@ async function startProject(projectId) {
     toast('Process started.', 'success');
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') loadOverview();
+    if (state.currentView === 'overview') await loadOverview();
     if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Start failed: ${err.message}`, 'error');
@@ -4093,7 +4093,7 @@ async function stopProject(projectId) {
     toast('Process stopped.', 'info');
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') loadOverview();
+    if (state.currentView === 'overview') await loadOverview();
     if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Stop failed: ${err.message}`, 'error');
@@ -4111,7 +4111,7 @@ async function toggleMaintenanceMode(projectId) {
     }
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') loadOverview();
+    if (state.currentView === 'overview') await loadOverview();
     if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Maintenance toggle failed: ${err.message}`, 'error');
@@ -4130,7 +4130,7 @@ async function restartProject(projectId) {
     toast('Application restarted.', 'success');
     await loadProjects();
     if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') loadOverview();
+    if (state.currentView === 'overview') await loadOverview();
     if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
   } catch (err) {
     toast(`Restart failed: ${err.message}`, 'error');
@@ -4543,7 +4543,7 @@ function switchSecurityTab(tab) {
     if (httpsHint) {
       httpsHint.style.display = window.PublicKeyCredential ? 'none' : 'block';
     }
-    loadPasskeysList();
+    void loadPasskeysList();
   }
 }
 window.switchSecurityTab = switchSecurityTab;
@@ -4565,7 +4565,11 @@ function bufferToBase64Url(buffer) {
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  let b64 = window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
+  while (b64.endsWith('=')) {
+    b64 = b64.slice(0, -1);
+  }
+  return b64;
 }
 
 function detectDefaultPasskeyDeviceName() {
@@ -4962,6 +4966,8 @@ function copy2faSecret() {
   const raw = state.pending2faSecret || document.getElementById('tfa-secret-display')?.value || '';
   navigator.clipboard.writeText(raw.replace(/\s+/g, '')).then(() => {
     toast('2FA Base32 secret copied to clipboard!', 'success');
+  }).catch((err) => {
+    toast(`Failed to copy to clipboard: ${err.message}`, 'error');
   });
 }
 window.copy2faSecret = copy2faSecret;
@@ -4978,7 +4984,7 @@ async function confirmEnable2fa() {
     state.user.totpEnabled = true;
     state.lastRecoveryCodes = res.backupCodes || [];
     renderSecurityStatusSummary();
-    if (state.currentView === 'settings') loadSettingsView();
+    if (state.currentView === 'settings') await loadSettingsView();
 
     const grid = document.getElementById('tfa-recovery-codes-grid');
     if (grid) {
@@ -4996,21 +5002,21 @@ window.confirmEnable2fa = confirmEnable2fa;
 document.getElementById('tfa-setup-password')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    start2faSetup();
+    void start2faSetup();
   }
 });
 
 document.getElementById('tfa-verify-code')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    confirmEnable2fa();
+    void confirmEnable2fa();
   }
 });
 
 document.getElementById('tfa-disable-code')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    disable2fa();
+    void disable2fa();
   }
 });
 
@@ -5019,6 +5025,8 @@ function copyRecoveryCodes() {
   if (!codes) return;
   navigator.clipboard.writeText(codes).then(() => {
     toast('Recovery codes copied to clipboard!', 'success');
+  }).catch((err) => {
+    toast(`Failed to copy to clipboard: ${err.message}`, 'error');
   });
 }
 window.copyRecoveryCodes = copyRecoveryCodes;
@@ -5065,7 +5073,7 @@ async function adminResetUser2fa(userId, username) {
   try {
     await api(`/api/users/${userId}/reset-2fa`, { method: 'POST' });
     toast(`Reset 2FA for "${username}".`, 'success');
-    loadSettingsView();
+    await loadSettingsView();
   } catch (err) {
     toast(`Reset 2FA failed: ${err.message}`, 'error');
   }
@@ -5296,8 +5304,8 @@ function generateQrMatrix(text) {
   let bitIdx = 0;
   const totalBits = finalCw.length * 8;
   let upward = true;
-  for (let col = size - 1; col >= 1; col -= 2) {
-    if (col === 6) col = 5;
+  for (let rawCol = size - 1; rawCol >= 1; rawCol -= 2) {
+    const col = rawCol <= 6 ? rawCol - 1 : rawCol;
     for (let step = 0; step < size; step++) {
       const r = upward ? size - 1 - step : step;
       for (let dc = 0; dc < 2; dc++) {
@@ -5333,7 +5341,7 @@ function generateQrMatrix(text) {
 }
 
 // Start application
-initAuth();
+void initAuth();
 
 
 // ============================================================================

@@ -120,6 +120,58 @@ pub struct EnvVarInput {
     pub is_secret: bool,
 }
 
+const SELECT_PROJECT_FIELDS: &str = "\
+    id, name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port, \
+    install_cmd, build_cmd, start_cmd, health_url, health_cmd, health_timeout_s, \
+    stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention, \
+    persistent_paths, current_release_id, deployed_sha, last_poll_at, app_status, \
+    app_pid, app_started_at, domains, ssl_enabled, ssl_email, nginx_configured, \
+    created_at, updated_at";
+
+fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
+    let p_paths_str: String = r.get(21)?;
+    let p_paths: Vec<String> = serde_json::from_str(&p_paths_str).unwrap_or_default();
+    let domains_str: String = r.get(28)?;
+    let domains: Vec<String> = serde_json::from_str(&domains_str).unwrap_or_default();
+
+    Ok(Project {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        slug: r.get(2)?,
+        repo_url: r.get(3)?,
+        branch: r.get(4)?,
+        project_type: r.get(5)?,
+        deploy_method: r.get(6)?,
+        deploy_dir: r.get(7)?,
+        port: r.get::<_, Option<u32>>(8)?.map(|p| p as u16),
+        install_cmd: r.get(9)?,
+        build_cmd: r.get(10)?,
+        start_cmd: r.get(11)?,
+        health_url: r.get(12)?,
+        health_cmd: r.get(13)?,
+        health_timeout_s: r.get(14)?,
+        stability_s: r.get(15)?,
+        preflight: r.get::<_, i64>(16)? != 0,
+        auto_deploy: r.get::<_, i64>(17)? != 0,
+        poll_interval_s: r.get(18)?,
+        webhook_secret: r.get(19)?,
+        retention: r.get(20)?,
+        persistent_paths: p_paths,
+        current_release_id: r.get(22)?,
+        deployed_sha: r.get(23)?,
+        last_poll_at: r.get(24)?,
+        app_status: r.get(25)?,
+        app_pid: r.get::<_, Option<u32>>(26)?,
+        app_started_at: r.get(27)?,
+        domains,
+        ssl_enabled: r.get::<_, i64>(29)? != 0,
+        ssl_email: r.get(30)?,
+        nginx_configured: r.get::<_, i64>(31)? != 0,
+        created_at: r.get(32)?,
+        updated_at: r.get(33)?,
+    })
+}
+
 pub struct Projects {
     db: DbPool,
     vault: Arc<Vault>,
@@ -137,59 +189,10 @@ impl Projects {
 
     pub fn list(&self) -> Result<Vec<Project>, rusqlite::Error> {
         let conn = self.db.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port,
-                    install_cmd, build_cmd, start_cmd, health_url, health_cmd, health_timeout_s,
-                    stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention,
-                    persistent_paths, current_release_id, deployed_sha, last_poll_at, app_status,
-                    app_pid, app_started_at, domains, ssl_enabled, ssl_email, nginx_configured,
-                    created_at, updated_at
-             FROM projects ORDER BY id DESC",
-        )?;
+        let query = format!("SELECT {} FROM projects ORDER BY id DESC", SELECT_PROJECT_FIELDS);
+        let mut stmt = conn.prepare(&query)?;
 
-        let rows = stmt.query_map([], |r| {
-            let p_paths_str: String = r.get(21)?;
-            let p_paths: Vec<String> = serde_json::from_str(&p_paths_str).unwrap_or_default();
-            let domains_str: String = r.get(28)?;
-            let domains: Vec<String> = serde_json::from_str(&domains_str).unwrap_or_default();
-
-            Ok(Project {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                slug: r.get(2)?,
-                repo_url: r.get(3)?,
-                branch: r.get(4)?,
-                project_type: r.get(5)?,
-                deploy_method: r.get(6)?,
-                deploy_dir: r.get(7)?,
-                port: r.get::<_, Option<u32>>(8)?.map(|p| p as u16),
-                install_cmd: r.get(9)?,
-                build_cmd: r.get(10)?,
-                start_cmd: r.get(11)?,
-                health_url: r.get(12)?,
-                health_cmd: r.get(13)?,
-                health_timeout_s: r.get(14)?,
-                stability_s: r.get(15)?,
-                preflight: r.get::<_, i64>(16)? != 0,
-                auto_deploy: r.get::<_, i64>(17)? != 0,
-                poll_interval_s: r.get(18)?,
-                webhook_secret: r.get(19)?,
-                retention: r.get(20)?,
-                persistent_paths: p_paths,
-                current_release_id: r.get(22)?,
-                deployed_sha: r.get(23)?,
-                last_poll_at: r.get(24)?,
-                app_status: r.get(25)?,
-                app_pid: r.get::<_, Option<u32>>(26)?,
-                app_started_at: r.get(27)?,
-                domains,
-                ssl_enabled: r.get::<_, i64>(29)? != 0,
-                ssl_email: r.get(30)?,
-                nginx_configured: r.get::<_, i64>(31)? != 0,
-                created_at: r.get(32)?,
-                updated_at: r.get(33)?,
-            })
-        })?;
+        let rows = stmt.query_map([], row_to_project)?;
 
         let mut list = Vec::new();
         for r in rows {
@@ -200,59 +203,10 @@ impl Projects {
 
     pub fn get(&self, id: i64) -> Result<Option<Project>, rusqlite::Error> {
         let conn = self.db.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port,
-                    install_cmd, build_cmd, start_cmd, health_url, health_cmd, health_timeout_s,
-                    stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention,
-                    persistent_paths, current_release_id, deployed_sha, last_poll_at, app_status,
-                    app_pid, app_started_at, domains, ssl_enabled, ssl_email, nginx_configured,
-                    created_at, updated_at
-             FROM projects WHERE id = ?",
-        )?;
+        let query = format!("SELECT {} FROM projects WHERE id = ?", SELECT_PROJECT_FIELDS);
+        let mut stmt = conn.prepare(&query)?;
 
-        let res = stmt.query_row(params![id], |r| {
-            let p_paths_str: String = r.get(21)?;
-            let p_paths: Vec<String> = serde_json::from_str(&p_paths_str).unwrap_or_default();
-            let domains_str: String = r.get(28)?;
-            let domains: Vec<String> = serde_json::from_str(&domains_str).unwrap_or_default();
-
-            Ok(Project {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                slug: r.get(2)?,
-                repo_url: r.get(3)?,
-                branch: r.get(4)?,
-                project_type: r.get(5)?,
-                deploy_method: r.get(6)?,
-                deploy_dir: r.get(7)?,
-                port: r.get::<_, Option<u32>>(8)?.map(|p| p as u16),
-                install_cmd: r.get(9)?,
-                build_cmd: r.get(10)?,
-                start_cmd: r.get(11)?,
-                health_url: r.get(12)?,
-                health_cmd: r.get(13)?,
-                health_timeout_s: r.get(14)?,
-                stability_s: r.get(15)?,
-                preflight: r.get::<_, i64>(16)? != 0,
-                auto_deploy: r.get::<_, i64>(17)? != 0,
-                poll_interval_s: r.get(18)?,
-                webhook_secret: r.get(19)?,
-                retention: r.get(20)?,
-                persistent_paths: p_paths,
-                current_release_id: r.get(22)?,
-                deployed_sha: r.get(23)?,
-                last_poll_at: r.get(24)?,
-                app_status: r.get(25)?,
-                app_pid: r.get::<_, Option<u32>>(26)?,
-                app_started_at: r.get(27)?,
-                domains,
-                ssl_enabled: r.get::<_, i64>(29)? != 0,
-                ssl_email: r.get(30)?,
-                nginx_configured: r.get::<_, i64>(31)? != 0,
-                created_at: r.get(32)?,
-                updated_at: r.get(33)?,
-            })
-        }).optional()?;
+        let res = stmt.query_row(params![id], row_to_project).optional()?;
 
         Ok(res)
     }

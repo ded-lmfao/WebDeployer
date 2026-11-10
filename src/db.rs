@@ -53,6 +53,22 @@ pub fn open_db(data_dir: &Path) -> Result<DbPool, Box<dyn std::error::Error + Se
     Ok(Arc::new(Mutex::new(conn)))
 }
 
+fn get_table_columns(conn: &Connection, table: &str) -> Vec<String> {
+    if let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({table})")) {
+        stmt.query_map([], |r| r.get::<_, String>(1))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+fn ensure_column(conn: &Connection, table: &str, cols: &[String], col: &str, col_def: &str) {
+    if !cols.iter().any(|c| c.eq_ignore_ascii_case(col)) {
+        let _ = conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {col_def};"));
+    }
+}
+
 fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "
@@ -73,41 +89,19 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         .unwrap_or(false);
 
     if has_users {
-        let cols: Vec<String> = {
-            let mut stmt = conn.prepare("PRAGMA table_info(users)")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
-            rows.flatten().collect()
-        };
-        if !cols.contains(&"password_hash".to_string()) && cols.contains(&"pass_hash".to_string()) {
-            conn.execute_batch("ALTER TABLE users RENAME COLUMN pass_hash TO password_hash;")?;
+        let cols = get_table_columns(conn, "users");
+        if !cols.iter().any(|c| c == "password_hash") && cols.iter().any(|c| c == "pass_hash") {
+            let _ = conn.execute_batch("ALTER TABLE users RENAME COLUMN pass_hash TO password_hash;");
         }
-        if !cols.contains(&"salt".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN salt TEXT NOT NULL DEFAULT '';")?;
-        }
-        if !cols.contains(&"disabled".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;")?;
-        }
-        if !cols.contains(&"permissions".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL DEFAULT '[\"*\"]';")?;
-        }
-        if !cols.contains(&"allowed_projects".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]';")?;
-        }
-        if !cols.contains(&"totp_secret".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_secret TEXT;")?;
-        }
-        if !cols.contains(&"totp_pending_secret".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_pending_secret TEXT;")?;
-        }
-        if !cols.contains(&"totp_enabled".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")?;
-        }
-        if !cols.contains(&"totp_backup_codes".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN totp_backup_codes TEXT NOT NULL DEFAULT '[]';")?;
-        }
-        if !cols.contains(&"password_changed_at".to_string()) {
-            conn.execute_batch("ALTER TABLE users ADD COLUMN password_changed_at INTEGER;")?;
-        }
+        ensure_column(conn, "users", &cols, "salt", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(conn, "users", &cols, "disabled", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column(conn, "users", &cols, "permissions", "TEXT NOT NULL DEFAULT '[\"*\"]'");
+        ensure_column(conn, "users", &cols, "allowed_projects", "TEXT NOT NULL DEFAULT '[\"*\"]'");
+        ensure_column(conn, "users", &cols, "totp_secret", "TEXT");
+        ensure_column(conn, "users", &cols, "totp_pending_secret", "TEXT");
+        ensure_column(conn, "users", &cols, "totp_enabled", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column(conn, "users", &cols, "totp_backup_codes", "TEXT NOT NULL DEFAULT '[]'");
+        ensure_column(conn, "users", &cols, "password_changed_at", "INTEGER");
     }
 
     let has_sessions: bool = conn
@@ -119,12 +113,8 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         .unwrap_or(false);
 
     if has_sessions {
-        let cols: Vec<String> = {
-            let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
-            rows.flatten().collect()
-        };
-        if cols.contains(&"token_hash".to_string()) && !cols.contains(&"id".to_string()) {
+        let cols = get_table_columns(conn, "sessions");
+        if cols.iter().any(|c| c == "token_hash") && !cols.iter().any(|c| c == "id") {
             conn.execute_batch(
                 "DROP TABLE sessions;
                  CREATE TABLE sessions (
@@ -146,40 +136,26 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         .unwrap_or(false);
 
     if has_projects {
-        let cols: Vec<String> = {
-            let mut stmt = conn.prepare("PRAGMA table_info(projects)")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
-            rows.flatten().collect()
-        };
-        if !cols.contains(&"webhook_secret".to_string()) {
-            if cols.contains(&"webhook_secret_enc".to_string()) {
-                conn.execute_batch("ALTER TABLE projects RENAME COLUMN webhook_secret_enc TO webhook_secret;")?;
+        let cols = get_table_columns(conn, "projects");
+        if !cols.iter().any(|c| c == "webhook_secret") {
+            if cols.iter().any(|c| c == "webhook_secret_enc") {
+                let _ = conn.execute_batch("ALTER TABLE projects RENAME COLUMN webhook_secret_enc TO webhook_secret;");
             } else {
-                conn.execute_batch("ALTER TABLE projects ADD COLUMN webhook_secret TEXT;")?;
+                ensure_column(conn, "projects", &cols, "webhook_secret", "TEXT");
             }
         }
-        if !cols.contains(&"app_started_at".to_string()) {
-            if cols.contains(&"app_status_at".to_string()) {
-                conn.execute_batch("ALTER TABLE projects RENAME COLUMN app_status_at TO app_started_at;")?;
+        if !cols.iter().any(|c| c == "app_started_at") {
+            if cols.iter().any(|c| c == "app_status_at") {
+                let _ = conn.execute_batch("ALTER TABLE projects RENAME COLUMN app_status_at TO app_started_at;");
             } else {
-                conn.execute_batch("ALTER TABLE projects ADD COLUMN app_started_at INTEGER;")?;
+                ensure_column(conn, "projects", &cols, "app_started_at", "INTEGER");
             }
         }
-        if !cols.contains(&"app_pid".to_string()) {
-            conn.execute_batch("ALTER TABLE projects ADD COLUMN app_pid INTEGER;")?;
-        }
-        if !cols.contains(&"domains".to_string()) {
-            conn.execute_batch("ALTER TABLE projects ADD COLUMN domains TEXT NOT NULL DEFAULT '[]';")?;
-        }
-        if !cols.contains(&"ssl_enabled".to_string()) {
-            conn.execute_batch("ALTER TABLE projects ADD COLUMN ssl_enabled INTEGER NOT NULL DEFAULT 0;")?;
-        }
-        if !cols.contains(&"ssl_email".to_string()) {
-            conn.execute_batch("ALTER TABLE projects ADD COLUMN ssl_email TEXT DEFAULT '';")?;
-        }
-        if !cols.contains(&"nginx_configured".to_string()) {
-            conn.execute_batch("ALTER TABLE projects ADD COLUMN nginx_configured INTEGER NOT NULL DEFAULT 0;")?;
-        }
+        ensure_column(conn, "projects", &cols, "app_pid", "INTEGER");
+        ensure_column(conn, "projects", &cols, "domains", "TEXT NOT NULL DEFAULT '[]'");
+        ensure_column(conn, "projects", &cols, "ssl_enabled", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column(conn, "projects", &cols, "ssl_email", "TEXT DEFAULT ''");
+        ensure_column(conn, "projects", &cols, "nginx_configured", "INTEGER NOT NULL DEFAULT 0");
     }
 
     let version: i32 = conn
@@ -363,20 +339,9 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         )?;
     }
 
-    // Ensure persistent tables for backups and deploy keys always exist
+    // Ensure persistent tables for deploy keys and passkeys always exist
     conn.execute_batch(
         "
-        CREATE TABLE IF NOT EXISTS backups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            release_id INTEGER,
-            kind TEXT NOT NULL DEFAULT 'full-snapshot',
-            path TEXT NOT NULL DEFAULT '',
-            size_bytes INTEGER NOT NULL DEFAULT 0,
-            note TEXT DEFAULT '',
-            created_at INTEGER NOT NULL DEFAULT 0
-        );
-
         CREATE TABLE IF NOT EXISTS project_keys (
             project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
             public_key TEXT NOT NULL,
@@ -405,76 +370,39 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
 
     // Dynamically align existing backups table columns (migrating from legacy schema if needed)
-    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(backups)") {
-        let b_cols: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(1))
-            .map(|it| it.flatten().collect())
-            .unwrap_or_default();
-        if !b_cols.contains(&"release_id".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN release_id INTEGER;").ok();
-        }
-        if !b_cols.contains(&"kind".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN kind TEXT NOT NULL DEFAULT 'full-snapshot';").ok();
-        }
-        if !b_cols.contains(&"path".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN path TEXT NOT NULL DEFAULT '';").ok();
-        }
-        if !b_cols.contains(&"dir".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN dir TEXT NOT NULL DEFAULT '';").ok();
-        }
-        if !b_cols.contains(&"size_bytes".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;").ok();
-            if b_cols.contains(&"size".to_string()) {
-                conn.execute_batch("UPDATE backups SET size_bytes = COALESCE(size, 0);").ok();
-            }
-        }
-        if !b_cols.contains(&"size".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN size INTEGER NOT NULL DEFAULT 0;").ok();
-        }
-        if !b_cols.contains(&"note".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN note TEXT DEFAULT '';").ok();
-        }
-        if !b_cols.contains(&"status".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN status TEXT NOT NULL DEFAULT 'ok';").ok();
-        }
-        if !b_cols.contains(&"created_at".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;").ok();
-            if b_cols.contains(&"ts".to_string()) {
-                conn.execute_batch("UPDATE backups SET created_at = COALESCE(ts, 0);").ok();
-            }
-        }
-        if !b_cols.contains(&"ts".to_string()) {
-            conn.execute_batch("ALTER TABLE backups ADD COLUMN ts INTEGER NOT NULL DEFAULT 0;").ok();
+    let b_cols = get_table_columns(conn, "backups");
+    ensure_column(conn, "backups", &b_cols, "release_id", "INTEGER");
+    ensure_column(conn, "backups", &b_cols, "kind", "TEXT NOT NULL DEFAULT 'full-snapshot'");
+    ensure_column(conn, "backups", &b_cols, "path", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "backups", &b_cols, "dir", "TEXT NOT NULL DEFAULT ''");
+    if !b_cols.iter().any(|c| c.eq_ignore_ascii_case("size_bytes")) {
+        let _ = conn.execute_batch("ALTER TABLE backups ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;");
+        if b_cols.iter().any(|c| c.eq_ignore_ascii_case("size")) {
+            let _ = conn.execute_batch("UPDATE backups SET size_bytes = COALESCE(size, 0);");
         }
     }
+    ensure_column(conn, "backups", &b_cols, "size", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "backups", &b_cols, "note", "TEXT DEFAULT ''");
+    ensure_column(conn, "backups", &b_cols, "status", "TEXT NOT NULL DEFAULT 'ok'");
+    if !b_cols.iter().any(|c| c.eq_ignore_ascii_case("created_at")) {
+        let _ = conn.execute_batch("ALTER TABLE backups ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;");
+        if b_cols.iter().any(|c| c.eq_ignore_ascii_case("ts")) {
+            let _ = conn.execute_batch("UPDATE backups SET created_at = COALESCE(ts, 0);");
+        }
+    }
+    ensure_column(conn, "backups", &b_cols, "ts", "INTEGER NOT NULL DEFAULT 0");
 
     // Dynamically ensure releases table has deployment_id, build_status, and health_status columns
-    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(releases)") {
-        let r_cols: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(1))
-            .map(|it| it.flatten().collect())
-            .unwrap_or_default();
-        if !r_cols.contains(&"deployment_id".to_string()) {
-            conn.execute_batch("ALTER TABLE releases ADD COLUMN deployment_id INTEGER;").ok();
-        }
-        if !r_cols.contains(&"build_status".to_string()) {
-            conn.execute_batch("ALTER TABLE releases ADD COLUMN build_status TEXT DEFAULT 'success';").ok();
-        }
-        if !r_cols.contains(&"health_status".to_string()) {
-            conn.execute_batch("ALTER TABLE releases ADD COLUMN health_status TEXT DEFAULT 'healthy';").ok();
-        }
-    }
+    let r_cols = get_table_columns(conn, "releases");
+    ensure_column(conn, "releases", &r_cols, "deployment_id", "INTEGER");
+    ensure_column(conn, "releases", &r_cols, "build_status", "TEXT DEFAULT 'success'");
+    ensure_column(conn, "releases", &r_cols, "health_status", "TEXT DEFAULT 'healthy'");
 
     // Dynamically ensure audit table has project_id for per-website activity logs
-    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(audit)") {
-        let a_cols: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(1))
-            .map(|it| it.flatten().collect())
-            .unwrap_or_default();
-        if !a_cols.contains(&"project_id".to_string()) {
-            conn.execute_batch("ALTER TABLE audit ADD COLUMN project_id INTEGER;").ok();
-        }
-        conn.execute_batch(
+    let a_cols = get_table_columns(conn, "audit");
+    ensure_column(conn, "audit", &a_cols, "project_id", "INTEGER");
+    if !a_cols.iter().any(|c| c.eq_ignore_ascii_case("project_id")) {
+        let _ = conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_audit_proj ON audit(project_id, id DESC);
              UPDATE audit SET project_id = (
                  SELECT p.id FROM projects p
@@ -483,8 +411,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                     OR CAST(p.id AS TEXT) = audit.target
                  LIMIT 1
              ) WHERE project_id IS NULL AND target IS NOT NULL;",
-        )
-        .ok();
+        );
     }
 
     // Auto-seed github_token into SQLite settings if not yet configured

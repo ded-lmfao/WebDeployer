@@ -364,7 +364,7 @@
                 <button class="pill" data-filter="running">Running (<span id="filter-count-running">0</span>)</button>
                 <button class="pill" data-filter="stopped">Stopped (<span id="filter-count-stopped">0</span>)</button>
               </div>
-              <input type="text" id="projects-search-input" class="form-control" placeholder="Search websites or domains..." style="width: 220px;">
+              <input type="text" id="projects-search-input" class="form-control" placeholder="Search websites or domains..." style="width: 220px;" aria-label="Search websites or domains">
             </div>
           </div>
 
@@ -588,7 +588,7 @@
                   <span style="width: 10px; height: 10px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
                   <span style="width: 10px; height: 10px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
                 </div>
-                <select id="log-channel-filter" class="form-control" style="width: 130px; padding: 4px 8px; font-size: 12px;">
+                <select id="log-channel-filter" class="form-control" style="width: 130px; padding: 4px 8px; font-size: 12px;" aria-label="Filter logs by channel">
                   <option value="">All Channels</option>
                   <option value="deployment">Deployment</option>
                   <option value="build">Build</option>
@@ -597,13 +597,13 @@
                   <option value="rollback">Rollback</option>
                   <option value="github">GitHub</option>
                 </select>
-                <select id="log-level-filter" class="form-control" style="width: 110px; padding: 4px 8px; font-size: 12px;">
+                <select id="log-level-filter" class="form-control" style="width: 110px; padding: 4px 8px; font-size: 12px;" aria-label="Filter logs by level">
                   <option value="">All Levels</option>
                   <option value="info">Info</option>
                   <option value="warn">Warn</option>
                   <option value="error">Error</option>
                 </select>
-                <input type="text" id="log-search-input" class="form-control" placeholder="Search log lines..." style="width: 180px; padding: 4px 8px; font-size: 12px;">
+                <input type="text" id="log-search-input" class="form-control" placeholder="Search log lines..." style="width: 180px; padding: 4px 8px; font-size: 12px;" aria-label="Search log lines">
               </div>
               <div style="display: flex; align-items: center; gap: 12px;">
                 <label style="font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer;">
@@ -627,7 +627,7 @@
               <p>Add, edit a single variable inline, edit multiple variables at once, or manage as a raw <code>.env</code> file. Encrypted with AES-256-GCM.</p>
             </div>
             <div class="view-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <input type="file" id="env-file-upload-input" accept=".env,text/plain" style="display: none;" onchange="handleEnvFileUpload(event)">
+              <input type="file" id="env-file-upload-input" accept=".env,text/plain" style="display: none;" onchange="handleEnvFileUpload(event)" aria-label="Upload .env file">
               <button class="btn btn-secondary btn-sm" onclick="document.getElementById('env-file-upload-input').click()" title="Upload a .env file from your computer">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                 <span>Import .env</span>
@@ -655,13 +655,13 @@
                 <input type="text" id="env-quick-val-input" class="form-control env-mono-input" placeholder="e.g. your-secret-value" autocomplete="off">
               </div>
               <div class="env-quick-field env-quick-type">
-                <label class="env-quick-label">Visibility</label>
+                <span class="env-quick-label">Visibility</span>
                 <button type="button" id="env-quick-secret-toggle" class="env-visibility-btn is-secret" onclick="toggleQuickAddSecret()" title="Click to toggle between Masked Secret and Public Plaintext">
                   <span id="env-quick-secret-label">Secret (Masked)</span>
                 </button>
               </div>
               <div class="env-quick-field env-quick-submit">
-                <label class="env-quick-label">&nbsp;</label>
+                <span class="env-quick-label">&nbsp;</span>
                 <button type="submit" class="btn btn-primary" id="env-quick-add-btn">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   <span>Add Variable</span>
@@ -690,7 +690,7 @@
 
               <!-- Toolbar for Key-Value List Mode -->
               <div id="env-list-toolbar" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <input type="text" id="env-search-input" class="form-control" placeholder="Filter keys or values..." style="width: 190px; padding: 4px 10px; font-size: 12px;" oninput="renderEnvTableFromState()">
+                <input type="text" id="env-search-input" class="form-control" placeholder="Filter keys or values..." style="width: 190px; padding: 4px 10px; font-size: 12px;" oninput="renderEnvTableFromState()" aria-label="Filter keys or values">
                 <button type="button" class="btn btn-secondary btn-sm" id="env-toggle-all-reveal-btn" onclick="toggleRevealAllEnv()">
                   Show All Values
                 </button>
@@ -726,7 +726,7 @@
                   <thead>
                     <tr>
                       <th style="width: 36px; text-align: center;">
-                        <input type="checkbox" id="env-select-all-check" onchange="toggleSelectAllEnvVars(this.checked)" title="Select all variables">
+                        <input type="checkbox" id="env-select-all-check" onchange="toggleSelectAllEnvVars(this.checked)" title="Select all variables" aria-label="Select all variables">
                       </th>
                       <th style="width: 28%;">Key Name</th>
                       <th>Value</th>
@@ -788,7 +788,7 @@
                   </label>
                 </div>
               </div>
-              <textarea id="env-raw-editor-textarea" class="form-control env-raw-textarea" rows="16" spellcheck="false" placeholder="# Paste or edit your .env variables here&#10;PORT=3000&#10;NODE_ENV=production&#10;JWT_SECRET=your-secret-key"></textarea>
+              <textarea id="env-raw-editor-textarea" class="form-control env-raw-textarea" rows="16" spellcheck="false" placeholder="# Paste or edit your .env variables here&#10;PORT=3000&#10;NODE_ENV=production&#10;JWT_SECRET=your-secret-key" aria-label="Raw .env editor"></textarea>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 10px;">
                 <span id="env-raw-line-stats" style="font-size: 12px; color: var(--text-dim);">0 variables detected</span>
                 <div style="display: flex; gap: 8px;">
@@ -913,7 +913,7 @@
                 <!-- GitHub Personal Access Tokens First (The most relevant configuration) -->
                 <div class="form-group" style="margin-bottom: 20px;">
                   <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;">
-                    <label class="form-label" style="margin: 0; font-size: 13px;">GitHub Access Tokens</label>
+                    <span class="form-label" style="margin: 0; font-size: 13px;">GitHub Access Tokens</span>
                     <div style="display: flex; align-items: center; gap: 8px;">
                       <span id="github-token-status-badge" style="font-size: 11px;"></span>
                       <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()">+ Add Token</button>
@@ -1000,7 +1000,7 @@
               <p id="audit-view-subtitle">Complete timeline of who deployed, started/stopped, edited .env, or took snapshots on this website</p>
             </div>
             <div class="view-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <select id="audit-category-filter" class="form-control" style="width: 155px; font-size: 12.5px;">
+              <select id="audit-category-filter" class="form-control" style="width: 155px; font-size: 12.5px;" aria-label="Filter activity by category">
                 <option value="">All Activity</option>
                 <option value="deploy">Deployments</option>
                 <option value="rollback">Rollbacks</option>
@@ -1011,7 +1011,7 @@
                 <option value="git">Git &amp; Webhooks</option>
                 <option value="domains">Domains &amp; SSL</option>
               </select>
-              <input type="text" id="audit-search-input" class="form-control" placeholder="Search user, activity, or detail..." style="width: 220px;">
+              <input type="text" id="audit-search-input" class="form-control" placeholder="Search user, activity, or detail..." style="width: 220px;" aria-label="Search user, activity, or detail">
               <button class="btn btn-secondary btn-sm" id="audit-refresh-btn" onclick="loadAuditView()">Refresh</button>
             </div>
           </div>
@@ -1125,7 +1125,7 @@
                 <a href="javascript:void(0)" id="browse-github-repos-btn" style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse Repos &nearr;</a>
               </div>
               <input type="text" id="website-repo" class="form-control" placeholder="https://github.com/owner/repo.git" required>
-              <select id="github-repos-select" class="form-control" style="display: none; margin-top: 6px; font-size: 12px;"></select>
+              <select id="github-repos-select" class="form-control" style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
             </div>
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="website-domains">Custom Domains <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
@@ -1150,8 +1150,8 @@
           </div>
 
           <!-- Hidden defaults: auto-deploy disabled by default, slug and deploy dir auto-derived -->
-          <input type="checkbox" id="website-auto-deploy" style="display: none;">
-          <input type="checkbox" id="website-auto-backup" checked style="display: none;">
+          <input type="checkbox" id="website-auto-deploy" style="display: none;" aria-label="Enable auto deploy">
+          <input type="checkbox" id="website-auto-backup" checked style="display: none;" aria-label="Enable auto backup">
           <input type="hidden" id="website-slug">
           <input type="hidden" id="website-deploy-dir">
           <input type="hidden" id="website-deploy-method" value="managed">
