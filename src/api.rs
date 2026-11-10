@@ -311,6 +311,112 @@ fn log_audit(state: &AppState, actor: &str, action: &str, target: Option<&str>, 
     log_audit_project(state, None, actor, action, target, detail);
 }
 
+fn create_authenticated_response(
+    state: &AppState,
+    user: User,
+) -> Result<Response, (StatusCode, String)> {
+    let session = state
+        .auth
+        .create_session(user.id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
+
+    let active_sessions = state.auth.count_active_sessions(user.id);
+    let passkey_count = state.auth.count_user_passkeys(user.id);
+    let cookie_val = format!(
+        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+        session.id, state.auth.session_ttl_s
+    );
+
+    let body = Json(LoginResponse {
+        user,
+        csrf: session.csrf_token,
+        active_sessions,
+        passkey_count,
+    });
+
+    let mut res = body.into_response();
+    if let Ok(cookie_hdr) = HeaderValue::from_str(&cookie_val) {
+        res.headers_mut().insert(header::SET_COOKIE, cookie_hdr);
+    }
+    Ok(res)
+}
+
+fn check_api_cache(cache: &crate::cache::AppCache, cache_key: &str) -> Option<Response> {
+    if let Some(cached_val) = cache.get(cache_key) {
+        let mut res = Json(cached_val).into_response();
+        res.headers_mut().insert("x-cache", HeaderValue::from_static("HIT"));
+        Some(res)
+    } else {
+        None
+    }
+}
+
+fn fetch_project(
+    projects: &crate::projects::Projects,
+    id: i64,
+) -> Result<crate::projects::Project, (StatusCode, String)> {
+    projects
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))
+}
+
+fn verify_current_user_password(
+    state: &AppState,
+    user: &User,
+    password: &str,
+) -> Result<(), (StatusCode, String)> {
+    let (_, current_hash) = state
+        .auth
+        .get_user_by_username(&user.username)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
+
+    if !verify_password(password, &current_hash) {
+        return Err((StatusCode::BAD_REQUEST, "Incorrect password".to_string()));
+    }
+    Ok(())
+}
+
+fn apply_2fa_state_change(
+    state: &AppState,
+    username: &str,
+    audit_desc: &str,
+) {
+    state.auth.invalidate_sessions();
+    state.cache.invalidate_all();
+    log_audit(
+        state,
+        username,
+        "user.update",
+        Some(username),
+        Some(audit_desc),
+    );
+}
+
+fn insert_success_release(
+    conn: &rusqlite::Connection,
+    project_id: i64,
+    sha: &str,
+    short_sha: &str,
+    message: &str,
+    author: &str,
+    dir: &str,
+    ts: i64,
+) -> rusqlite::Result<i64> {
+    conn.execute(
+        "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, build_status, health_status, created_at, deployed_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?, 'succeeded', 'success', 'ok', ?, ?)",
+        rusqlite::params![project_id, sha, short_sha, message, author, ts, dir, ts, ts],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn trigger_background_deploy(deployer: Arc<crate::deployer::Deployer>, project_id: i64, dep_id: i64) {
+    tokio::spawn(async move {
+        deployer.run_deploy(project_id, dep_id).await;
+    });
+}
+
 fn log_audit_project(
     state: &AppState,
     project_id: Option<i64>,
@@ -415,32 +521,7 @@ async fn login_handler(
     }
 
     log_audit(&state, &user.username, "auth.login", Some(&user.username), Some("User signed in"));
-
-    let session = state
-        .auth
-        .create_session(user.id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
-
-    let active_sessions = state.auth.count_active_sessions(user.id);
-    let passkey_count = state.auth.count_user_passkeys(user.id);
-    let cookie_val = format!(
-        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
-        session.id, state.auth.session_ttl_s
-    );
-
-    let body = Json(LoginResponse {
-        user,
-        csrf: session.csrf_token,
-        active_sessions,
-        passkey_count,
-    });
-
-    let mut res = body.into_response();
-    res.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie_val).unwrap(),
-    );
-    Ok(res)
+    create_authenticated_response(&state, user)
 }
 
 #[derive(Deserialize)]
@@ -512,31 +593,7 @@ async fn verify_2fa_login_handler(
         Some("User signed in with 2FA verification"),
     );
 
-    let session = state
-        .auth
-        .create_session(user.id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
-
-    let active_sessions = state.auth.count_active_sessions(user.id);
-    let passkey_count = state.auth.count_user_passkeys(user.id);
-    let cookie_val = format!(
-        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
-        session.id, state.auth.session_ttl_s
-    );
-
-    let body = Json(LoginResponse {
-        user,
-        csrf: session.csrf_token,
-        active_sessions,
-        passkey_count,
-    });
-
-    let mut res = body.into_response();
-    res.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie_val).unwrap(),
-    );
-    Ok(res)
+    create_authenticated_response(&state, user)
 }
 
 async fn logout_handler(
@@ -684,15 +741,7 @@ async fn setup_2fa_handler(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let user = current_user(&state, &headers)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
-
-    let (_, current_hash) = state
-        .auth
-        .get_user_by_username(&user.username)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
-
-    if !verify_password(&payload.password, &current_hash) {
-        return Err((StatusCode::BAD_REQUEST, "Incorrect password".to_string()));
-    }
+    verify_current_user_password(&state, &user, &payload.password)?;
 
     let secret = generate_totp_secret();
     {
@@ -778,16 +827,7 @@ async fn enable_2fa_handler(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to enable 2FA".to_string()))?;
     }
 
-    state.auth.invalidate_sessions();
-    state.cache.invalidate_all();
-
-    log_audit(
-        &state,
-        &user.username,
-        "user.update",
-        Some(&user.username),
-        Some("Enabled Two-Factor Authentication (2FA)"),
-    );
+    apply_2fa_state_change(&state, &user.username, "Enabled Two-Factor Authentication (2FA)");
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -808,15 +848,7 @@ async fn disable_2fa_handler(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let user = current_user(&state, &headers)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
-
-    let (_, current_hash) = state
-        .auth
-        .get_user_by_username(&user.username)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
-
-    if !verify_password(&payload.password, &current_hash) {
-        return Err((StatusCode::BAD_REQUEST, "Incorrect password".to_string()));
-    }
+    verify_current_user_password(&state, &user, &payload.password)?;
 
     if !state.auth.verify_user_2fa(user.id, &payload.code) {
         return Err((
@@ -834,16 +866,7 @@ async fn disable_2fa_handler(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to disable 2FA".to_string()))?;
     }
 
-    state.auth.invalidate_sessions();
-    state.cache.invalidate_all();
-
-    log_audit(
-        &state,
-        &user.username,
-        "user.update",
-        Some(&user.username),
-        Some("Disabled Two-Factor Authentication (2FA)"),
-    );
+    apply_2fa_state_change(&state, &user.username, "Disabled Two-Factor Authentication (2FA)");
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -1120,31 +1143,7 @@ async fn passkey_login_finish_handler(
         Some(&format!("User signed in via Passkey / Biometrics ({})", passkey_name)),
     );
 
-    let session = state
-        .auth
-        .create_session(user.id)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create session".to_string()))?;
-
-    let active_sessions = state.auth.count_active_sessions(user.id);
-    let passkey_count = state.auth.count_user_passkeys(user.id);
-    let cookie_val = format!(
-        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
-        session.id, state.auth.session_ttl_s
-    );
-
-    let body = Json(LoginResponse {
-        user,
-        csrf: session.csrf_token,
-        active_sessions,
-        passkey_count,
-    });
-
-    let mut res = body.into_response();
-    res.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie_val).unwrap(),
-    );
-    Ok(res)
+    create_authenticated_response(&state, user)
 }
 
 // ---------------------------------------------------------------------------
@@ -1565,12 +1564,7 @@ async fn deploy_project_handler(
         Some(&p.name),
         Some(&format!("Triggered deployment #{} on branch '{}'", dep_id, p.branch)),
     );
-    let deployer = state.deployer.clone();
-
-    // Async task executes deployment in background
-    tokio::spawn(async move {
-        deployer.run_deploy(p.id, dep_id).await;
-    });
+    trigger_background_deploy(state.deployer.clone(), p.id, dep_id);
 
     Ok(Json(ActionResponse { deployment_id: dep_id }))
 }
@@ -1829,22 +1823,17 @@ async fn create_release_handler(
 
         let rel_id = {
             let conn = state.db.lock().unwrap();
-            conn.execute(
-                "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, build_status, health_status, created_at, deployed_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, 'succeeded', 'success', 'ok', ?, ?)",
-                rusqlite::params![
-                    id,
-                    sha,
-                    short_sha,
-                    format!("Release: {}", note),
-                    actor.username,
-                    ts,
-                    rel_dir.to_str().unwrap_or(""),
-                    ts,
-                    ts
-                ],
-            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            conn.last_insert_rowid()
+            insert_success_release(
+                &conn,
+                id,
+                &sha,
+                &short_sha,
+                &format!("Release: {}", note),
+                &actor.username,
+                rel_dir.to_str().unwrap_or(""),
+                ts,
+            )
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         };
 
         // Also record in backups so it appears in Backups tab
@@ -1869,10 +1858,7 @@ async fn create_release_handler(
     } else {
         // Trigger a new deployment which builds and creates a live release
         let dep_id = state.deployer.create_deployment(&p, "deploy", &actor.username, "manual");
-        let deployer = state.deployer.clone();
-        tokio::spawn(async move {
-            deployer.run_deploy(p.id, dep_id).await;
-        });
+        trigger_background_deploy(state.deployer.clone(), p.id, dep_id);
 
         Ok(Json(serde_json::json!({
             "ok": true,
@@ -2183,10 +2169,7 @@ async fn github_webhook_handler(
         .deployer
         .create_deployment(&p, "deploy", "github-webhook", "webhook");
 
-    let deployer = state.deployer.clone();
-    tokio::spawn(async move {
-        deployer.run_deploy(p.id, dep_id).await;
-    });
+    trigger_background_deploy(state.deployer.clone(), p.id, dep_id);
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -2265,10 +2248,7 @@ async fn overview_handler(
     let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
     let cache_key = format!("overview:u{}", uid);
 
-    if let Some(cached_val) = state.cache.get(&cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
@@ -2333,10 +2313,7 @@ async fn monitor_handler(
     let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
     let cache_key = format!("monitor:u{}", uid);
 
-    if let Some(cached_val) = state.cache.get(&cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
@@ -2489,6 +2466,19 @@ struct AuditItem {
     ip: Option<String>,
 }
 
+fn row_to_audit_item(r: &rusqlite::Row, default_target: Option<String>) -> rusqlite::Result<AuditItem> {
+    Ok(AuditItem {
+        id: r.get(0)?,
+        project_id: r.get(1)?,
+        ts: r.get(2)?,
+        actor: r.get(3)?,
+        action: r.get(4)?,
+        target: r.get::<_, Option<String>>(5)?.or(default_target),
+        detail: r.get(6)?,
+        ip: r.get(7)?,
+    })
+}
+
 #[derive(Deserialize)]
 struct AuditQuery {
     #[serde(rename = "projectId")]
@@ -2510,10 +2500,7 @@ async fn audit_handler(
         uid,
         max_limit
     );
-    if let Some(cached_val) = state.cache.get(&cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
@@ -2546,16 +2533,7 @@ async fn audit_handler(
         let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let rows = stmt
             .query_map(rusqlite::params![pid, p_name, p_slug], |r| {
-                Ok(AuditItem {
-                    id: r.get(0)?,
-                    project_id: Some(pid),
-                    ts: r.get(2)?,
-                    actor: r.get(3)?,
-                    action: r.get(4)?,
-                    target: r.get::<_, Option<String>>(5)?.or_else(|| Some(p_name.clone())),
-                    detail: r.get(6)?,
-                    ip: r.get(7)?,
-                })
+                row_to_audit_item(r, Some(p_name.clone()))
             })
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         for r in rows.flatten() {
@@ -2687,18 +2665,7 @@ async fn audit_handler(
         );
         let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let rows = stmt
-            .query_map([], |r| {
-                Ok(AuditItem {
-                    id: r.get(0)?,
-                    project_id: r.get(1)?,
-                    ts: r.get(2)?,
-                    actor: r.get(3)?,
-                    action: r.get(4)?,
-                    target: r.get(5)?,
-                    detail: r.get(6)?,
-                ip: r.get(7)?,
-                })
-            })
+            .query_map([], |r| row_to_audit_item(r, None))
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         for r in rows.flatten() {
             if let Some(ref user) = u {
@@ -3105,11 +3072,7 @@ async fn project_commits_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
 ) -> Result<Response, (StatusCode, String)> {
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let p = fetch_project(&state.projects, id)?;
 
     let cache_key = format!(
         "commits:p{}:{}:{}",
@@ -3117,10 +3080,7 @@ async fn project_commits_handler(
         p.deployed_sha.as_deref().unwrap_or("none"),
         p.last_poll_at.unwrap_or(0)
     );
-    if let Some(cached_val) = state.cache.get(&cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
@@ -3183,11 +3143,7 @@ async fn project_check_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<CheckGitResponse>, (StatusCode, String)> {
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     let repo_url = p.repo_url.clone();
@@ -3230,11 +3186,7 @@ async fn project_fetch_handler(
     let actor = current_user(&state, &headers)
         .map(|u| u.username)
         .unwrap_or_else(|| "system".to_string());
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     let repo_url = p.repo_url.clone();
@@ -3303,11 +3255,7 @@ async fn detect_project_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<DetectProjectResponse>, (StatusCode, String)> {
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
     if !repo_dir.exists() {
@@ -3587,10 +3535,7 @@ async fn list_backups_handler(
     AxPath(id): AxPath<i64>,
 ) -> Result<Response, StatusCode> {
     let cache_key = format!("backups:p{}:list", id);
-    if let Some(cached_val) = state.cache.get(&cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
@@ -3723,22 +3668,16 @@ async fn create_backup_handler(
             backup_path_str.clone()
         };
 
-        conn.execute(
-            "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, build_status, health_status, created_at, deployed_at)
-             VALUES(?, ?, ?, ?, ?, ?, ?, 'succeeded', 'success', 'ok', ?, ?)",
-            rusqlite::params![
-                id,
-                sha,
-                short_sha,
-                format!("Snapshot: {}", note),
-                actor.username,
-                ts,
-                release_files_dir,
-                ts,
-                ts
-            ],
-        ).ok();
-        conn.last_insert_rowid()
+        insert_success_release(
+            &conn,
+            id,
+            &sha,
+            &short_sha,
+            &format!("Snapshot: {}", note),
+            &actor.username,
+            &release_files_dir,
+            ts,
+        ).unwrap_or(0)
     };
 
     let backup_id = {

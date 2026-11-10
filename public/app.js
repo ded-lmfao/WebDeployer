@@ -612,6 +612,15 @@ async function onAuthenticated(isFreshLogin = false) {
   startPolling();
 }
 
+async function applyAuthSuccess(res) {
+  state.pendingMfaToken = null;
+  state.user = res.user;
+  state.csrf = res.csrf;
+  state.activeSessions = res.activeSessions || 1;
+  state.passkeyCount = res.passkeyCount || 0;
+  await onAuthenticated(true);
+}
+
 // ============================================================================
 // Router, Website Card Workspace & Navigation
 // ============================================================================
@@ -2920,6 +2929,21 @@ function toggleMultiEditRowSecret(idx) {
 }
 window.toggleMultiEditRowSecret = toggleMultiEditRowSecret;
 
+async function finishEnvSave(p, countMsg, andRestart) {
+  toast(countMsg, 'success');
+  setEnvViewMode('list');
+  await loadEnvView();
+  if (andRestart) {
+    await restartProject(p.id);
+  }
+}
+
+function setBtnLoading(btn, loading, defaultText, loadingText = 'Saving...') {
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.textContent = loading ? loadingText : defaultText;
+}
+
 async function saveMultiEditEnv(andRestart = false) {
   const p = getSelectedProject();
   if (!p) return;
@@ -2934,10 +2958,7 @@ async function saveMultiEditEnv(andRestart = false) {
     .filter((r) => r.key.length > 0);
 
   const btn = document.getElementById('env-multi-save-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-  }
+  setBtnLoading(btn, true, 'Save All Changes');
 
   try {
     const res = await api(`/api/projects/${p.id}/env/bulk`, {
@@ -2947,19 +2968,11 @@ async function saveMultiEditEnv(andRestart = false) {
         replace_all: true,
       },
     });
-    toast(`Saved ${res.count ?? items.length} environment variable(s) for ${p.name}!`, 'success');
-    setEnvViewMode('list');
-    await loadEnvView();
-    if (andRestart) {
-      await restartProject(p.id);
-    }
+    await finishEnvSave(p, `Saved ${res.count ?? items.length} environment variable(s) for ${p.name}!`, andRestart);
   } catch (err) {
     toast(`Failed to save variables: ${err.message}`, 'error');
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Save All Changes';
-    }
+    setBtnLoading(btn, false, 'Save All Changes');
   }
 }
 window.saveMultiEditEnv = saveMultiEditEnv;
@@ -2990,29 +3003,18 @@ async function saveInlineRawEnv(andRestart = false) {
   const is_secret = document.getElementById('env-raw-secret-check')?.checked ?? true;
 
   const btn = document.getElementById('env-raw-save-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-  }
+  setBtnLoading(btn, true, 'Save .env');
 
   try {
     const res = await api(`/api/projects/${p.id}/env/bulk`, {
       method: 'POST',
       body: { content, is_secret, replace_all },
     });
-    toast(`Saved ${res.count || 0} variables from .env editor!`, 'success');
-    setEnvViewMode('list');
-    await loadEnvView();
-    if (andRestart) {
-      await restartProject(p.id);
-    }
+    await finishEnvSave(p, `Saved ${res.count || 0} variables from .env editor!`, andRestart);
   } catch (err) {
     toast(`Failed to save .env: ${err.message}`, 'error');
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Save .env';
-    }
+    setBtnLoading(btn, false, 'Save .env');
   }
 }
 window.saveInlineRawEnv = saveInlineRawEnv;
@@ -4216,12 +4218,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
       return;
     }
 
-    state.pendingMfaToken = null;
-    state.user = res.user;
-    state.csrf = res.csrf;
-    state.activeSessions = res.activeSessions || 1;
-    state.passkeyCount = res.passkeyCount || 0;
-    await onAuthenticated(true);
+    await applyAuthSuccess(res);
   } catch (err) {
     toast(err.message, 'error');
   } finally {
@@ -4244,12 +4241,7 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
       method: 'POST',
       body: { mfaToken: state.pendingMfaToken, code },
     });
-    state.pendingMfaToken = null;
-    state.user = res.user;
-    state.csrf = res.csrf;
-    state.activeSessions = res.activeSessions || 1;
-    state.passkeyCount = res.passkeyCount || 0;
-    await onAuthenticated(true);
+    await applyAuthSuccess(res);
     toast('Two-Factor Authentication verified!', 'success');
   } catch (err) {
     toast(err.message, 'error');
@@ -4313,17 +4305,21 @@ function getDialogElements() {
   };
 }
 
+function prepareDialogModal({ title, message, confirmText = 'Confirm', danger = false }) {
+  const elems = getDialogElements();
+  elems.titleEl.textContent = title;
+  elems.msgEl.textContent = message;
+  elems.cancelBtn.style.display = '';
+  elems.cancelBtn.textContent = 'Cancel';
+  elems.confirmBtn.textContent = confirmText;
+  elems.confirmBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+  return elems;
+}
+
 function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {
-    const { modal, titleEl, msgEl, inputWrap, confirmBtn, cancelBtn, closeBtn } = getDialogElements();
-
-    titleEl.textContent = title;
-    msgEl.textContent = message;
+    const { modal, inputWrap, confirmBtn, cancelBtn, closeBtn } = prepareDialogModal({ title, message, confirmText, danger });
     inputWrap.style.display = 'none';
-    cancelBtn.style.display = '';
-    cancelBtn.textContent = 'Cancel';
-    confirmBtn.textContent = confirmText;
-    confirmBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
 
     const cleanup = (result) => {
       modal.classList.remove('active');
@@ -4342,18 +4338,11 @@ function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText
 
 function showPromptDialog({ title = 'Input Required', message = '', placeholder = '', defaultValue = '', confirmText = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {
-    const { modal, titleEl, msgEl, inputWrap, inputEl, confirmBtn, cancelBtn, closeBtn } = getDialogElements();
-
-    titleEl.textContent = title;
-    msgEl.textContent = message;
+    const { modal, inputWrap, inputEl, confirmBtn, cancelBtn, closeBtn } = prepareDialogModal({ title, message, confirmText, danger });
     inputWrap.style.display = 'block';
     inputEl.readOnly = false;
     inputEl.value = defaultValue;
     inputEl.placeholder = placeholder;
-    cancelBtn.style.display = '';
-    cancelBtn.textContent = 'Cancel';
-    confirmBtn.textContent = confirmText;
-    confirmBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
 
     const cleanup = (result) => {
       modal.classList.remove('active');
@@ -4786,12 +4775,7 @@ async function loginWithPasskey() {
       },
     });
 
-    state.pendingMfaToken = null;
-    state.user = res.user;
-    state.csrf = res.csrf;
-    state.activeSessions = res.activeSessions || 1;
-    state.passkeyCount = res.passkeyCount || 0;
-    await onAuthenticated(true);
+    await applyAuthSuccess(res);
     toast('Signed in with Passkey / Biometrics!', 'success');
   } catch (err) {
     if (err.name === 'NotAllowedError') {

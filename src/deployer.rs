@@ -55,12 +55,12 @@ pub struct Release {
 }
 
 pub struct Deployer {
+    data_dir: PathBuf,
     db: DbPool,
+    cache: Arc<AppCache>,
     logs: Logs,
     projects: Arc<Projects>,
     runtime: Arc<Runtime>,
-    cache: Arc<AppCache>,
-    data_dir: PathBuf,
     /// Global FIFO concurrency limit: allows only 1 deployment/rollback at a time to protect 1 GB VPS RAM
     queue_semaphore: Arc<Semaphore>,
     /// Tracks active or queued deployment ID per project_id to prevent duplicate concurrent deployments for the same website
@@ -336,6 +336,11 @@ impl Deployer {
         self.cache.invalidate_prefix("deployments:");
     }
 
+    pub fn fail_deployment_step(&self, dep_id: i64, project_id: i64, channel: &str, error: &str) {
+        self.logs.add(Some(project_id), Some(dep_id), channel, "error", error);
+        self.finish_deployment(dep_id, "failed", Some(error));
+    }
+
     pub fn finish_deployment(&self, dep_id: i64, status: &str, error: Option<&str>) {
         let ts = now();
         let conn = self.db.lock().unwrap();
@@ -574,27 +579,20 @@ impl Deployer {
             p.build_cmd.clone()
         } else {
             let pkg_path = release_dir.join("package.json");
-            if pkg_path.exists() {
-                if let Ok(pkg_txt) = tokio::fs::read_to_string(&pkg_path).await {
-                    if pkg_txt.contains("\"build\"") {
-                        "npm run build".to_string()
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
+            let mut detected = String::new();
+            if let Ok(pkg_txt) = tokio::fs::read_to_string(&pkg_path).await {
+                if pkg_txt.contains("\"build\"") {
+                    detected = "npm run build".to_string();
                 }
-            } else {
-                String::new()
             }
+            detected
         };
 
         if !effective_build_cmd.trim().is_empty() {
             self.update_stage(dep_id, "building");
             self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running build: {}", effective_build_cmd));
             if let Err(e) = run_shell_cmd(&effective_build_cmd, &release_dir, &self.logs, p.id, dep_id).await {
-                self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Build failed: {}", e));
-                self.finish_deployment(dep_id, "failed", Some(&e));
+                self.fail_deployment_step(dep_id, p.id, "build", &format!("Build failed: {}", e));
                 return;
             }
         }
@@ -626,8 +624,7 @@ impl Deployer {
         self.update_stage(dep_id, "health_checking");
         let env_map = self.projects.get_env_map(p.id);
         if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
-            self.logs.add(Some(p.id), Some(dep_id), "app", "error", &format!("Start failed: {}", e));
-            self.finish_deployment(dep_id, "failed", Some(&e));
+            self.fail_deployment_step(dep_id, p.id, "app", &format!("Start failed: {}", e));
             return;
         }
 
@@ -636,8 +633,7 @@ impl Deployer {
             let resolved_health_url = p.health_url.replace("{{PORT}}", &port_str);
             self.logs.add(Some(p.id), Some(dep_id), "health", "info", &format!("Probing health check URL: {}", resolved_health_url));
             if let Err(e) = self.runtime.health_check(&resolved_health_url, p.health_timeout_s as u64).await {
-                self.logs.add(Some(p.id), Some(dep_id), "health", "error", &format!("Health check failed: {}", e));
-                self.finish_deployment(dep_id, "failed", Some(&e));
+                self.fail_deployment_step(dep_id, p.id, "health", &format!("Health check failed: {}", e));
                 return;
             }
         }
@@ -746,8 +742,7 @@ impl Deployer {
         self.update_stage(dep_id, "health_checking");
         let env_map = self.projects.get_env_map(p.id);
         if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
-            self.logs.add(Some(p.id), Some(dep_id), "rollback", "error", &format!("Start failed: {}", e));
-            self.finish_deployment(dep_id, "failed", Some(&e));
+            self.fail_deployment_step(dep_id, p.id, "rollback", &format!("Start failed: {}", e));
             drop(permit);
             return;
         }
