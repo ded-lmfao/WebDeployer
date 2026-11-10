@@ -2835,30 +2835,10 @@ async fn list_users_handler(
     headers: HeaderMap,
 ) -> Result<Json<Vec<User>>, (StatusCode, String)> {
     let _actor = verify_main_admin(&state, &headers)?;
-    let conn = state.db.lock().unwrap();
-    let mut stmt = conn
-        .prepare("SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users ORDER BY id ASC")
+    let list = state
+        .auth
+        .list_users()
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
-
-    let rows = stmt
-        .query_map([], |r| {
-            Ok(User::from_db(
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
-                r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
-                r.get::<_, Option<i64>>(6)?.unwrap_or(0),
-                r.get(7)?,
-            ))
-        })
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
-
-    let mut list = Vec::new();
-    for r in rows.flatten() {
-        list.push(r);
-    }
     Ok(Json(list))
 }
 

@@ -84,6 +84,19 @@ impl User {
         }
     }
 
+    pub fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Self::from_db(
+            r.get(0)?,
+            r.get(1)?,
+            r.get(2)?,
+            r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
+            r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
+            r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+            r.get(7)?,
+        ))
+    }
+
     pub fn has_power(&self, power: &str) -> bool {
         if self.is_main_admin {
             return true;
@@ -726,20 +739,16 @@ impl Auth {
         conn.query_row(
             "SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users WHERE id = ?",
             params![id],
-            |r| {
-                Ok(User::from_db(
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                    r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
-                    r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
-                    r.get::<_, Option<i64>>(6)?.unwrap_or(0),
-                    r.get(7)?,
-                ))
-            },
+            User::from_row,
         )
         .ok()
+    }
+
+    pub fn list_users(&self) -> rusqlite::Result<Vec<User>> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users ORDER BY id ASC")?;
+        let rows = stmt.query_map([], User::from_row)?;
+        Ok(rows.flatten().collect())
     }
 
     pub fn get_user_by_username(&self, username: &str) -> Option<(User, String)> {
@@ -747,21 +756,7 @@ impl Auth {
         conn.query_row(
             "SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at, password_hash FROM users WHERE LOWER(username) = LOWER(?)",
             params![username],
-            |r| {
-                Ok((
-                    User::from_db(
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                        r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
-                        r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
-                        r.get::<_, Option<i64>>(6)?.unwrap_or(0),
-                        r.get(7)?,
-                    ),
-                    r.get(8)?,
-                ))
-            },
+            |r| Ok((User::from_row(r)?, r.get(8)?)),
         )
         .ok()
     }

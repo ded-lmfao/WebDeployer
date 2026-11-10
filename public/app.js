@@ -4052,19 +4052,28 @@ document.getElementById('nginx-certbot-btn')?.addEventListener('click', async ()
 // ============================================================================
 // Direct Process Controls (Start / Stop / Restart)
 // ============================================================================
+async function refreshCurrentViewsAfterLifecycle() {
+  await loadProjects();
+  if (state.currentView === 'projects') renderProjectsList();
+  if (state.currentView === 'overview') await loadOverview();
+  if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+}
+
+function handleAutoDeployedRedirect(res, projectId) {
+  if (res && res.autoDeployed) {
+    toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
+    navigateTo('deployments', projectId);
+    return true;
+  }
+  return false;
+}
+
 async function startProject(projectId) {
   try {
     const res = await api(`/api/projects/${projectId}/start`, { method: 'POST' });
-    if (res && res.autoDeployed) {
-      toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
-      navigateTo('deployments', projectId);
-      return;
-    }
+    if (handleAutoDeployedRedirect(res, projectId)) return;
     toast('Process started.', 'success');
-    await loadProjects();
-    if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') await loadOverview();
-    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+    await refreshCurrentViewsAfterLifecycle();
   } catch (err) {
     toast(`Start failed: ${err.message}`, 'error');
   }
@@ -4075,10 +4084,7 @@ async function stopProject(projectId) {
   try {
     await api(`/api/projects/${projectId}/stop`, { method: 'POST' });
     toast('Process stopped.', 'info');
-    await loadProjects();
-    if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') await loadOverview();
-    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+    await refreshCurrentViewsAfterLifecycle();
   } catch (err) {
     toast(`Stop failed: ${err.message}`, 'error');
   }
@@ -4093,10 +4099,7 @@ async function toggleMaintenanceMode(projectId) {
     } else {
       toast('Maintenance Mode disabled — live website resumed!', 'success');
     }
-    await loadProjects();
-    if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') await loadOverview();
-    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+    await refreshCurrentViewsAfterLifecycle();
   } catch (err) {
     toast(`Maintenance toggle failed: ${err.message}`, 'error');
   }
@@ -4106,16 +4109,9 @@ window.toggleMaintenanceMode = toggleMaintenanceMode;
 async function restartProject(projectId) {
   try {
     const res = await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
-    if (res && res.autoDeployed) {
-      toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
-      navigateTo('deployments', projectId);
-      return;
-    }
+    if (handleAutoDeployedRedirect(res, projectId)) return;
     toast('Application restarted.', 'success');
-    await loadProjects();
-    if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') await loadOverview();
-    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+    await refreshCurrentViewsAfterLifecycle();
   } catch (err) {
     toast(`Restart failed: ${err.message}`, 'error');
   }
