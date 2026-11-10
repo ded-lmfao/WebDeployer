@@ -362,6 +362,26 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
         CREATE INDEX IF NOT EXISTS idx_user_passkeys_user ON user_passkeys(user_id, id DESC);
 
+        CREATE TABLE IF NOT EXISTS databases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            engine TEXT NOT NULL DEFAULT 'postgres',
+            db_name TEXT NOT NULL,
+            db_user TEXT NOT NULL,
+            db_password TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            is_superuser INTEGER NOT NULL DEFAULT 0,
+            access_mode TEXT NOT NULL DEFAULT 'local',
+            allowed_ips TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'stopped',
+            container_id TEXT,
+            data_dir TEXT NOT NULL DEFAULT '',
+            linked_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_databases_port ON databases(port);
+
         INSERT OR IGNORE INTO settings(key, value) VALUES ('min_free_mb', '500');
         INSERT OR IGNORE INTO settings(key, value) VALUES ('default_retention', '10');
         INSERT OR IGNORE INTO settings(key, value) VALUES ('step_timeout_s', '900');

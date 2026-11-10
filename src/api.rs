@@ -43,6 +43,7 @@ pub struct AppState {
     pub runtime: Arc<Runtime>,
     pub deployer: Arc<Deployer>,
     pub cache: Arc<AppCache>,
+    pub databases: Arc<crate::databases::Databases>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -128,6 +129,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/users", get(list_users_handler).post(create_user_handler))
         .route("/api/users/:id", put(update_user_handler).patch(update_user_handler).delete(delete_user_handler))
         .route("/api/users/:id/reset-2fa", post(admin_reset_user_2fa_handler))
+        // Managed Databases (PostgreSQL)
+        .route("/api/databases", get(list_databases_handler).post(create_database_handler))
+        .route("/api/databases/:id", get(get_database_handler).delete(delete_database_handler))
+        .route("/api/databases/:id/start", post(start_database_handler))
+        .route("/api/databases/:id/stop", post(stop_database_handler))
+        .route("/api/databases/:id/restart", post(restart_database_handler))
+        .route("/api/databases/:id/access", put(update_database_access_handler))
+        .route("/api/databases/:id/link", post(link_database_handler))
+        .route("/api/databases/:id/unlink", post(unlink_database_handler))
+        .route("/api/databases/:id/logs", get(get_database_logs_handler))
         .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
         // Static assets fallback
         .fallback(axum_static_fallback)
@@ -255,9 +266,12 @@ fn current_user(state: &AppState, headers: &HeaderMap) -> Option<User> {
     state.auth.get_session(&sid).map(|(_, u)| u)
 }
 
+fn require_current_user(state: &AppState, headers: &HeaderMap) -> Result<User, (StatusCode, String)> {
+    current_user(state, headers).ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))
+}
+
 fn verify_main_admin(state: &AppState, headers: &HeaderMap) -> Result<User, (StatusCode, String)> {
-    let u = current_user(state, headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized session".to_string()))?;
+    let u = require_current_user(state, headers)?;
     if !u.is_main_admin {
         return Err((
             StatusCode::FORBIDDEN,
@@ -3936,4 +3950,192 @@ async fn caddy_status_handler(State(state): State<AppState>) -> Response {
     res.headers_mut()
         .insert("x-cache", HeaderValue::from_static("MISS"));
     res
+}
+
+// ---------------------------------------------------------------------------
+// Managed Databases (PostgreSQL)
+// ---------------------------------------------------------------------------
+async fn list_databases_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::databases::ManagedDatabase>>, (StatusCode, String)> {
+    let _user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let list = state.databases.list().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(list))
+}
+
+async fn get_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+    let _user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    Ok(Json(db))
+}
+
+async fn create_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<crate::databases::CreateDatabaseInput>,
+) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let db = state.databases.create(payload)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    log_audit(&state, &user.username, "database.create", Some(&db.name), Some(&format!("Created PostgreSQL database '{}' on port {}", db.db_name, db.port)));
+    Ok(Json(db))
+}
+
+async fn perform_database_action<F>(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: i64,
+    action_name: &str,
+    audit_desc: &str,
+    f: F,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)>
+where
+    F: std::future::Future<Output = Result<(), String>>,
+{
+    let user = require_current_user(state, headers)?;
+    f.await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    log_audit(state, &user.username, action_name, Some(&format!("DB #{}", id)), Some(audit_desc));
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn start_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    state.databases.start(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    log_audit(&state, &user.username, "database.start", Some(&format!("DB #{}", id)), Some("Started database container"));
+    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    Ok(Json(updated))
+}
+
+async fn stop_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    state.databases.stop(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    log_audit(&state, &user.username, "database.stop", Some(&format!("DB #{}", id)), Some("Stopped database container"));
+    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    Ok(Json(updated))
+}
+
+async fn restart_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    state.databases.restart(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    log_audit(&state, &user.username, "database.restart", Some(&format!("DB #{}", id)), Some("Restarted database container"));
+    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    Ok(Json(updated))
+}
+
+async fn update_database_access_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<crate::databases::UpdateDatabaseAccessInput>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    state.databases.update_access(id, payload).await.map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    log_audit(&state, &user.username, "database.access", Some(&format!("DB #{}", id)), Some("Updated database network access rules"));
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn delete_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    perform_database_action(&state, &headers, id, "database.delete", "Deleted database container", state.databases.delete(id)).await
+}
+
+#[derive(Deserialize)]
+struct LinkDbPayload {
+    #[serde(alias = "projectId", alias = "project_id")]
+    project_id: i64,
+}
+
+async fn link_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<LinkDbPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+
+    let p = fetch_project(&state.projects, payload.project_id)?;
+    let raw_pass = db.db_password.unwrap_or_default();
+    let internal_url = format!("postgresql://{}:{}@127.0.0.1:{}/{}", db.db_user, raw_pass, db.port, db.db_name);
+
+    state.projects.set_env_var(p.id, "DATABASE_URL", &internal_url, true).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.projects.set_env_var(p.id, "PGHOST", "127.0.0.1", false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.projects.set_env_var(p.id, "PGPORT", &db.port.to_string(), false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.projects.set_env_var(p.id, "PGUSER", &db.db_user, false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.projects.set_env_var(p.id, "PGPASSWORD", &raw_pass, true).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.projects.set_env_var(p.id, "PGDATABASE", &db.db_name, false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    state.databases.set_linked_project(id, Some(p.id)).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_project(p.id);
+
+    log_audit(&state, &user.username, "database.link", Some(&db.name), Some(&format!("Linked database '{}' to website '{}'", db.name, p.name)));
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "message": format!("Database linked to {} and environment variables injected!", p.name)
+    })))
+}
+
+async fn unlink_database_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    perform_database_action(&state, &headers, id, "database.unlink", "Unlinked database from website", async {
+        state.databases.set_linked_project(id, None)
+    }).await
+}
+
+async fn get_database_logs_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let _user = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+
+    let log_content = state.databases.get_logs(id)
+        .unwrap_or_else(|e| format!("Error reading log file: {}", e));
+
+    Ok(Json(serde_json::json!({
+        "id": db.id,
+        "name": db.name,
+        "status": db.status,
+        "port": db.port,
+        "logs": log_content
+    })))
 }

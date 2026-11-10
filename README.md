@@ -53,6 +53,15 @@ Say goodbye to complex Kubernetes clusters, slow Docker-in-Docker orchestrators,
 - **Granular RBAC**: Assign granular powers (`deploy`, `env`, `domains`, `process`, `terminal`, `logs`, `users`) with strict website-level isolation.
 - **Tamper-Evident Audit Logging**: Every deployment, credential change, environment update, and lifecycle action is immutably logged with actor, timestamp, and IP address.
 
+### 🐘 Managed PostgreSQL Databases & Remote Access Control
+- **Zero-Docker Isolated Process Containers**: Runs as lightweight native process containers with dedicated filesystem clusters (`initdb`, `pg_ctl`), saving hundreds of megabytes of RAM on low-spec VPS servers.
+- **1-Click Database Provisioning**: Deploy isolated PostgreSQL 16 database instances with custom database names, usernames, passwords, and optional superuser privileges.
+- **Granular Network Connection Policies**:
+  - 🔒 **Localhost Only (`127.0.0.1`)**: Restrict database strictly to hosted applications on the local VPS.
+  - 🛡️ **Specific Remote IP Allowlist (`CIDR`)**: Connect safely from a separate remote VPS, office IP, or dev machine. WebDep automatically configures kernel-level firewall rules (`ufw allow proto tcp from <IP> to any port <PORT>`).
+  - 🌐 **Public Access (`0.0.0.0`)**: Open port to external networks with strong password authentication and SSL encryption.
+- **1-Click Website Credential Injection**: Automatically populate `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, and `PGDATABASE` directly into any hosted website's encrypted vault without manual copy-pasting.
+
 ### 📊 Real-Time Observability & Monitoring
 - **Live SSE Log Streaming**: Real-time server-sent events stream build, application, system, and webhooks logs with sub-millisecond latency.
 - **System Metrics**: Live CPU utilization, physical memory breakdown, storage capacity, and process monitoring.

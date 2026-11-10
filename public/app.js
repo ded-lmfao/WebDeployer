@@ -14,6 +14,7 @@ const state = {
   currentView: 'overview',
   selectedProjectId: null,
   projects: [],
+  databases: [],
   overview: null,
   activeDeployment: null,
   activeDepPollTimer: null,
@@ -161,22 +162,6 @@ const PRESETS = {
     start_cmd: 'java -jar target/*.jar --server.port={{PORT}}',
     health_url: 'http://127.0.0.1:8080/',
   },
-  docker: {
-    port: 8080,
-    deploy_method: 'docker',
-    install_cmd: '',
-    build_cmd: '',
-    start_cmd: '',
-    health_url: 'http://127.0.0.1:8080/',
-  },
-  'docker-compose': {
-    port: 8080,
-    deploy_method: 'compose',
-    install_cmd: '',
-    build_cmd: '',
-    start_cmd: '',
-    health_url: 'http://127.0.0.1:8080/',
-  },
   custom: {
     port: 5000,
     deploy_method: 'managed',
@@ -227,6 +212,7 @@ function persistCacheToSession() {
 function getCacheTtlMs(path) {
   if (path.startsWith('/api/auth/')) return 0; // Always verify live authentication state with server
   if (path.startsWith('/api/logs')) return 0; // Live logs use SSE stream
+  if (path.startsWith('/api/databases')) return 0; // Live database status
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 2500;
   if (path.startsWith('/api/deployments')) return 4000;
   if (path.startsWith('/api/audit')) return 8000;
@@ -245,10 +231,16 @@ window.hasCachedApi = hasCachedApi;
 function invalidateClientCache(prefix = '') {
   if (!prefix) {
     clientCache.clear();
+    inflightGets.clear();
   } else {
     for (const k of clientCache.keys()) {
       if (k.startsWith(prefix) || k.includes(prefix)) {
         clientCache.delete(k);
+      }
+    }
+    for (const k of inflightGets.keys()) {
+      if (k.startsWith(prefix) || k.includes(prefix)) {
+        inflightGets.delete(k);
       }
     }
   }
@@ -283,6 +275,9 @@ async function networkFetch(path, options = {}) {
     headers['X-CSRF-Token'] = state.csrf;
   }
   const fetchOpts = { ...options };
+  if (fetchOpts.noCache) {
+    fetchOpts.cache = 'no-store';
+  }
   if (fetchOpts.body && typeof fetchOpts.body === 'object' && !(fetchOpts.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
     fetchOpts.body = JSON.stringify(fetchOpts.body);
@@ -715,6 +710,7 @@ function updateBreadcrumbs() {
     const globalLabels = {
       overview: 'System Overview',
       projects: 'Hosted Websites',
+      databases: 'Managed Databases',
       settings: 'Platform Settings',
     };
     secEl.textContent = globalLabels[state.currentView] || state.currentView;
@@ -950,6 +946,7 @@ function renderCurrentView() {
   switch (state.currentView) {
     case 'overview': void loadOverview(); break;
     case 'projects': renderProjectsList(); break;
+    case 'databases': void loadDatabasesView(); break;
     case 'github': void loadGithubView(); break;
     case 'deployments': void loadDeploymentsView(); break;
     case 'releases': void loadReleasesView(); break;
@@ -1638,10 +1635,12 @@ window.loadDeploymentsView = loadDeploymentsView;
 // ============================================================================
 const waterPipelines = {};
 
-function initWaterPipelineDOM(container, containerId) {
+function initWaterPipelineDOM(container, containerId, stages = PIPELINE_STAGES) {
+  const isCompact = container.classList.contains('card-pipeline-track') || containerId.startsWith('db-pipeline-track') || container.closest('.card') !== null;
+  const wrapperClass = isCompact ? 'water-pipeline-wrapper compact' : 'water-pipeline-wrapper';
   container.innerHTML = `
-    <div class="water-pipeline-wrapper" id="water-wrapper-${containerId}">
-      ${PIPELINE_STAGES.map((s, idx) => `
+    <div class="${wrapperClass}" id="water-wrapper-${containerId}">
+      ${stages.map((s, idx) => `
         <div class="water-stage-unit" data-unit-idx="${idx}">
           <div class="water-node-vial" data-vial-idx="${idx}">
             <div class="water-vial-bg"></div>
@@ -1663,7 +1662,7 @@ function initWaterPipelineDOM(container, containerId) {
             <div class="water-node-name">${s.label}</div>
             <div class="water-node-sub">Queued</div>
           </div>
-          ${idx < PIPELINE_STAGES.length - 1 ? `
+          ${idx < stages.length - 1 ? `
             <div class="water-pipe-segment" data-pipe-idx="${idx}">
               <div class="water-pipe-glass">
                 <div class="water-pipe-liquid" style="width: 0%;">
@@ -1682,13 +1681,15 @@ function updateWaterDOM(pipeline) {
   const container = document.getElementById(pipeline.containerId);
   if (!container) return;
 
+  const stages = pipeline.stages || PIPELINE_STAGES;
+  const maxP = stages.length;
   const P = pipeline.currentProgress;
   const isFailed = pipeline.status === 'failed';
   const isSuccess = pipeline.status === 'success';
   const activeIdx = pipeline.activeStageIdx ?? -1;
   const failedIdx = isFailed ? pipeline.failedStageIdx : -1;
 
-  PIPELINE_STAGES.forEach((s, idx) => {
+  stages.forEach((s, idx) => {
     const unit = container.querySelector(`.water-stage-unit[data-unit-idx="${idx}"]`);
     if (!unit) return;
 
@@ -1761,7 +1762,7 @@ function updateWaterDOM(pipeline) {
 
     // Pipe fill level (pipe idx connects stage idx to stage idx + 1):
     // Pipe idx fills between P = idx + 0.6 and P = idx + 1.0
-    if (idx < PIPELINE_STAGES.length - 1) {
+    if (idx < stages.length - 1) {
       const pipeLiquid = unit.querySelector('.water-pipe-liquid');
       const meniscus = unit.querySelector('.water-pipe-meniscus');
       if (pipeLiquid) {
@@ -1784,19 +1785,21 @@ function updateWaterDOM(pipeline) {
     }
   });
 
-  // When all 7 stages are filled and deployment succeeded, mark pipeline status deployed!
-  if (isSuccess && P >= 6.95) {
-    const badge = document.getElementById('pipeline-status-badge');
-    if (badge && !badge.textContent.includes('DEPLOYED')) {
-      badge.textContent = 'DEPLOYED (LIVE)';
-      badge.className = 'badge badge-success';
+  // When all stages are filled and operation succeeded, mark pipeline status deployed!
+  if (isSuccess && P >= maxP - 0.05) {
+    if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
+      const badge = document.getElementById('pipeline-status-badge');
+      if (badge && !badge.textContent.includes('DEPLOYED')) {
+        badge.textContent = 'DEPLOYED (LIVE)';
+        badge.className = 'badge badge-success';
+      }
+      const overviewBadge = document.getElementById('active-dep-kind');
+      if (overviewBadge && !overviewBadge.textContent.includes('LIVE')) {
+        overviewBadge.textContent = 'DEPLOYED';
+        overviewBadge.className = 'badge badge-success';
+      }
+      renderWebsiteWorkspaceHeader();
     }
-    const overviewBadge = document.getElementById('active-dep-kind');
-    if (overviewBadge && !overviewBadge.textContent.includes('LIVE')) {
-      overviewBadge.textContent = 'DEPLOYED';
-      overviewBadge.className = 'badge badge-success';
-    }
-    renderWebsiteWorkspaceHeader();
   }
 }
 
@@ -1813,14 +1816,15 @@ function startWaterLoop(pipeline) {
 
     const diff = pipeline.targetProgress - pipeline.currentProgress;
 
-    // Organic, steady water pouring pace (~2.3s per stage at 60fps)
-    const speed = 0.007;
+    // Organic, steady water pouring pace (~3.8s total for database cards, ~5.5s for deployments)
+    const isCard = pipeline.containerId.startsWith('db-pipeline-track') || container.classList.contains('card-pipeline-track');
+    const speed = isCard ? 0.018 : 0.014;
 
     if (Math.abs(diff) > 0.0005) {
       if (diff > 0) {
         pipeline.currentProgress = Math.min(pipeline.targetProgress, pipeline.currentProgress + speed);
       } else {
-        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed * 3);
+        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed * 1.6);
       }
       updateWaterDOM(pipeline);
       requestAnimationFrame(step);
@@ -1834,15 +1838,18 @@ function startWaterLoop(pipeline) {
   requestAnimationFrame(step);
 }
 
-function renderPipelineStages(containerId, currentStage, currentStatus, depId = null) {
+function renderPipelineStages(containerId, currentStage, currentStatus, depId = null, stages = PIPELINE_STAGES) {
   const container = document.getElementById(containerId);
   if (!container) return;
+
+  const maxP = stages.length;
 
   // Initialize persistent DOM structure once (never destroy innerHTML on polling ticks!)
   const createPipelineObj = () => ({
     containerId,
-    currentProgress: (currentStatus === 'success' ? 7.0 : 0.0),
-    targetProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+    stages,
+    currentProgress: (currentStatus === 'success' ? maxP : 0.0),
+    targetProgress: (currentStatus === 'success' ? maxP : 0.0),
     status: currentStatus,
     activeStageIdx: -1,
     failedStageIdx: -1,
@@ -1850,8 +1857,9 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
     isLooping: false,
   });
 
-  if (!container.querySelector('.water-pipeline-wrapper')) {
-    initWaterPipelineDOM(container, containerId);
+  const existingWrapper = container.querySelector('.water-pipeline-wrapper');
+  if (!existingWrapper || waterPipelines[containerId]?.stages !== stages) {
+    initWaterPipelineDOM(container, containerId, stages);
     waterPipelines[containerId] = createPipelineObj();
   }
 
@@ -1860,6 +1868,7 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
     pipeline = createPipelineObj();
     waterPipelines[containerId] = pipeline;
   }
+  pipeline.stages = stages;
 
   // If a new deployment started with different depId, reset water to start
   if (depId && pipeline.lastDeploymentId && pipeline.lastDeploymentId !== depId && (currentStatus === 'running' || currentStatus === 'pending')) {
@@ -1870,7 +1879,7 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
   }
 
   pipeline.status = currentStatus;
-  const currentIndex = PIPELINE_STAGES.findIndex((s) => s.id === currentStage);
+  const currentIndex = stages.findIndex((s) => s.id === currentStage);
 
   if (currentStatus === 'idle') {
     pipeline.targetProgress = 0.0;
@@ -1881,9 +1890,9 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
     pipeline.activeStageIdx = pipeline.failedStageIdx;
     pipeline.targetProgress = pipeline.failedStageIdx + 0.6;
   } else if (currentStatus === 'success') {
-    pipeline.activeStageIdx = PIPELINE_STAGES.length - 1;
+    pipeline.activeStageIdx = stages.length - 1;
     pipeline.failedStageIdx = -1;
-    pipeline.targetProgress = 7.0;
+    pipeline.targetProgress = maxP;
   } else {
     // Stage in progress: water flows smoothly up to this stage and holds firmly in its vial!
     pipeline.activeStageIdx = currentIndex >= 0 ? currentIndex : 0;
@@ -4119,6 +4128,704 @@ async function restartProject(projectId) {
 window.restartProject = restartProject;
 
 // ============================================================================
+// Managed Databases (PostgreSQL)
+// ============================================================================
+async function loadDatabases() {
+  try {
+    state.databases = await api(`/api/databases?_t=${Date.now()}`, { noCache: true });
+    const badge = document.getElementById('badge-databases-count');
+    if (badge) badge.textContent = state.databases.length;
+  } catch (err) {
+    console.error('Failed to load databases:', err);
+  }
+}
+
+// Managed Databases (PostgreSQL) Pipeline Stages (Compact 5-Step Pipeline)
+const DB_PIPELINE_STAGES = [
+  { id: 'sandbox', label: 'Port' },
+  { id: 'initdb', label: 'Cluster' },
+  { id: 'security', label: 'Security' },
+  { id: 'spawning', label: 'Engine' },
+  { id: 'healthy', label: 'Ready' },
+];
+
+function renderSingleDatabasePipeline(dbId, currentStage, currentStatus, detailText = '') {
+  const containerId = `db-pipeline-track-${dbId}`;
+  const container = document.getElementById(containerId);
+  const badge = document.getElementById(`db-pipeline-badge-${dbId}`);
+  if (!container) return;
+
+  if (badge) {
+    if (currentStatus === 'idle') {
+      badge.textContent = 'IDLE';
+      badge.className = 'badge badge-neutral';
+      badge.onclick = null;
+      badge.style.cursor = 'default';
+    } else if (currentStatus === 'failed') {
+      badge.textContent = `FAILED (${currentStage.toUpperCase()}) — Click to View Logs`;
+      badge.className = 'badge badge-danger';
+      badge.style.cursor = 'pointer';
+      badge.onclick = () => showDatabaseLogs(dbId);
+    } else if (currentStatus === 'success') {
+      badge.textContent = detailText ? detailText.toUpperCase() : 'ONLINE (READY)';
+      badge.className = 'badge badge-success';
+      badge.onclick = null;
+      badge.style.cursor = 'default';
+    } else {
+      badge.textContent = detailText ? detailText.toUpperCase() : `STARTING (${currentStage.toUpperCase()})`;
+      badge.className = 'badge badge-warning';
+      badge.onclick = null;
+      badge.style.cursor = 'default';
+    }
+  }
+
+  renderPipelineStages(containerId, currentStage, currentStatus, dbId, DB_PIPELINE_STAGES);
+}
+window.renderSingleDatabasePipeline = renderSingleDatabasePipeline;
+window.renderDatabasePipeline = (stage, status, text, id) => {
+  if (id) renderSingleDatabasePipeline(id, stage, status, text);
+};
+
+async function loadDatabasesView() {
+  await loadDatabases();
+  renderDatabasesList();
+}
+window.loadDatabasesView = loadDatabasesView;
+
+function renderDatabasesList() {
+  const container = document.getElementById('databases-cards-container');
+  if (!container) return;
+
+  if (!state.databases || state.databases.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius-lg);">
+        <div style="font-size: 38px; margin-bottom: 12px;">🐘</div>
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">No PostgreSQL Databases Yet</h3>
+        <p style="font-size: 13.5px; color: var(--text-muted); max-width: 440px; margin: 0 auto 18px auto; line-height: 1.5;">
+          Deploy a fast, isolated PostgreSQL database on this VPS with customized database names, passwords, and remote IP access controls.
+        </p>
+        <button class="btn btn-primary" onclick="openCreateDatabaseModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>Create First Database</span>
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = state.databases.map((db) => {
+    const isRunning = db.status === 'running';
+    const isError = db.status === 'error';
+    const statusClass = isRunning ? 'badge-success' : (isError ? 'badge-danger' : 'badge-neutral');
+    const statusText = isRunning ? 'RUNNING' : (isError ? 'ERROR' : 'STOPPED');
+
+    let accessBadge = '<span class="badge badge-neutral" style="font-size: 11px;">🔒 Localhost Only (127.0.0.1)</span>';
+    if (db.accessMode === 'allowlist') {
+      const ipList = db.allowedIps ? db.allowedIps.split(/[,;\n]/).filter(Boolean).length : 0;
+      accessBadge = `<span class="badge badge-primary" style="font-size: 11px;">🛡️ Remote Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
+    } else if (db.accessMode === 'public') {
+      accessBadge = '<span class="badge badge-warning" style="font-size: 11px;">🌐 Public (0.0.0.0)</span>';
+    }
+
+    const linkedBadge = db.linkedProjectId
+      ? `<span class="badge badge-success" style="font-size: 11px; cursor: pointer;" onclick="openWebsiteWorkspace(${db.linkedProjectId}, 'env')">🔗 Linked to ${escapeHtml(db.linkedProjectName || 'Website')}</span>`
+      : `<span class="badge badge-neutral" style="font-size: 11px;">Standalone</span>`;
+
+    return `
+      <div class="card project-card" id="db-card-${db.id}" style="display: flex; flex-direction: column; justify-content: space-between; position: relative;">
+        <div>
+          <div class="project-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(51, 103, 145, 0.15); color: #336791; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                🐘
+              </div>
+              <div>
+                <h3 style="font-size: 15px; font-weight: 600; margin: 0;">${escapeHtml(db.name)}</h3>
+                <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(db.dbName)} (${escapeHtml(db.dbUser)})</span>
+              </div>
+            </div>
+            <span class="badge ${statusClass}" id="db-card-status-badge-${db.id}">${statusText}</span>
+          </div>
+
+          <!-- Per-Database Dedicated Organic Fluid Water Pipeline Track -->
+          <div style="margin: 6px 0 10px 0; padding: 8px 10px; background: var(--bg-alt); border-radius: var(--radius-md); border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);">Lifecycle Pipeline</span>
+              <span class="badge ${isRunning ? 'badge-success' : (isError ? 'badge-danger' : 'badge-neutral')}" id="db-pipeline-badge-${db.id}" style="font-size: 9.5px; padding: 2px 7px;">
+                ${isRunning ? 'ONLINE (READY)' : (isError ? 'FAILED — VIEW LOGS' : 'IDLE')}
+              </span>
+            </div>
+            <div class="pipeline-track card-pipeline-track" id="db-pipeline-track-${db.id}" style="min-height: auto;">
+              <!-- Rendered with fluid animated water vials and pipes -->
+            </div>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+            ${accessBadge}
+            ${linkedBadge}
+            <span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);">Port ${db.port}</span>
+            ${db.isSuperuser ? '<span class="badge badge-primary" style="font-size: 11px;">Superuser</span>' : ''}
+          </div>
+
+          <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 14px; word-break: break-all;">
+            <span style="color: var(--text-dim);">Internal:</span> <span style="color: var(--text-main); font-weight: 500;">postgresql://${escapeHtml(db.dbUser)}:••••@127.0.0.1:${db.port}/${escapeHtml(db.dbName)}</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px;">
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="showDatabaseDetails(${db.id})">
+              <span>Details</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="showDatabaseLogs(${db.id})" title="View PostgreSQL server output logs">
+              <span>Logs</span>
+            </button>
+            <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${db.id}" onclick="toggleDatabaseState(${db.id})" title="${isRunning ? 'Stop Database' : 'Start Database'}">
+              <span>${isRunning ? 'Stop' : 'Start'}</span>
+            </button>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openDatabaseAccessModal(${db.id})">
+              <span>Access & IPs</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openDatabaseLinkModal(${db.id})">
+              <span>${db.linkedProjectId ? 'Change Link' : 'Link to Web'}</span>
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="deleteDatabase(${db.id}, '${escapeHtml(db.name)}')" title="Delete Database">
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Hydrate each card's dedicated water pipeline
+  (state.databases || []).forEach((db) => {
+    const isRunning = db.status === 'running';
+    const isError = db.status === 'error';
+    if (isRunning) {
+      renderSingleDatabasePipeline(db.id, 'healthy', 'success', 'ONLINE (READY)');
+    } else if (isError) {
+      renderSingleDatabasePipeline(db.id, 'spawning', 'failed', 'ERROR');
+    } else {
+      renderSingleDatabasePipeline(db.id, 'sandbox', 'idle');
+    }
+  });
+}
+window.renderDatabasesList = renderDatabasesList;
+
+function openCreateDatabaseModal() {
+  const modal = document.getElementById('modal-create-database');
+  if (!modal) return;
+
+  const projSelect = document.getElementById('db-create-link-project');
+  if (projSelect) {
+    projSelect.innerHTML = '<option value="">Do not link (Standalone database)</option>' +
+      (state.projects || []).map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  }
+
+  const portInput = document.getElementById('db-create-port');
+  if (portInput) {
+    const usedPorts = new Set((state.databases || []).map((d) => d.port));
+    let nextPort = 5432;
+    while (usedPorts.has(nextPort)) nextPort++;
+    portInput.value = nextPort;
+  }
+
+  generateRandomDbPassword('db-create-password');
+
+  document.getElementById('db-create-name').value = '';
+  document.getElementById('db-create-dbname').value = '';
+  document.getElementById('db-create-user').value = 'app_user';
+  document.getElementById('db-create-superuser').checked = false;
+  document.getElementById('db-create-access-mode').value = 'local';
+  document.getElementById('db-create-allowed-ips').value = '';
+  toggleDatabaseAccessIpFields('db-create-access-mode', 'db-create-allowed-ips-wrap');
+
+  modal.classList.add('active');
+}
+window.openCreateDatabaseModal = openCreateDatabaseModal;
+
+function generateRandomDbPassword(targetInputId) {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_=+';
+  const array = new Uint8Array(24);
+  window.crypto.getRandomValues(array);
+  let pass = '';
+  for (let i = 0; i < array.length; i++) {
+    pass += chars[array[i] % chars.length];
+  }
+  const input = document.getElementById(targetInputId);
+  if (input) {
+    input.value = pass;
+    input.type = 'text';
+    setTimeout(() => { input.type = 'password'; }, 3000);
+  }
+}
+window.generateRandomDbPassword = generateRandomDbPassword;
+
+function togglePasswordVisibility(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+window.togglePasswordVisibility = togglePasswordVisibility;
+
+function toggleDatabaseAccessIpFields(selectId, wrapId) {
+  const sel = document.getElementById(selectId);
+  const wrap = document.getElementById(wrapId);
+  if (!sel || !wrap) return;
+  wrap.style.display = sel.value === 'allowlist' ? 'block' : 'none';
+}
+window.toggleDatabaseAccessIpFields = toggleDatabaseAccessIpFields;
+
+async function handleCreateDatabaseSubmit(e) {
+  e.preventDefault();
+  const btn = document.getElementById('db-create-submit-btn');
+  const name = document.getElementById('db-create-name').value.trim();
+  const db_name = document.getElementById('db-create-dbname').value.trim();
+  const db_user = document.getElementById('db-create-user').value.trim();
+  const db_password = document.getElementById('db-create-password').value.trim();
+  const port = Number(document.getElementById('db-create-port').value);
+  const is_superuser = document.getElementById('db-create-superuser').checked;
+  const access_mode = document.getElementById('db-create-access-mode').value;
+  const allowed_ips = document.getElementById('db-create-allowed-ips').value.trim();
+  const link_proj = document.getElementById('db-create-link-project').value;
+
+  if (access_mode === 'allowlist' && !allowed_ips) {
+    toast('Please specify at least one remote IP or CIDR for the allowlist.', 'warning');
+    return;
+  }
+
+  const progressBox = document.getElementById('db-create-progress-container');
+  const progressStep = document.getElementById('db-create-progress-step');
+  const progressBar = document.getElementById('db-create-progress-bar');
+  const progressDetail = document.getElementById('db-create-progress-detail');
+
+  if (progressBox) {
+    progressBox.style.display = 'block';
+    if (progressBar) {
+      progressBar.className = 'progress-fill green';
+      progressBar.style.width = '20%';
+    }
+    if (progressStep) progressStep.textContent = 'Stage 1/5';
+    if (progressDetail) progressDetail.textContent = 'Allocating dedicated TCP port and preparing cluster directory...';
+  }
+
+  const pPipe = waterPipelines['database-pipeline-track'];
+  if (pPipe) pPipe.currentProgress = 0.0;
+  renderDatabasePipeline('sandbox', 'running', 'Allocating Port & Sandbox');
+
+  const t1 = setTimeout(() => {
+    renderDatabasePipeline('initdb', 'running', 'Running initdb');
+    if (progressBar) progressBar.style.width = '45%';
+    if (progressStep) progressStep.textContent = 'Stage 2/5';
+    if (progressDetail) progressDetail.textContent = 'Initializing cluster via initdb with SCRAM-SHA-256 credentials...';
+  }, 750);
+
+  const t2 = setTimeout(() => {
+    renderDatabasePipeline('security', 'running', 'Applying HBA Rules');
+    if (progressBar) progressBar.style.width = '70%';
+    if (progressStep) progressStep.textContent = 'Stage 3/5';
+    if (progressDetail) progressDetail.textContent = 'Configuring pg_hba.conf client auth & UFW firewall rules...';
+  }, 1600);
+
+  const t3 = setTimeout(() => {
+    renderDatabasePipeline('spawning', 'running', 'Spawning pg_ctl Engine');
+    if (progressBar) progressBar.style.width = '90%';
+    if (progressStep) progressStep.textContent = 'Stage 4/5';
+    if (progressDetail) progressDetail.textContent = 'Spawning isolated PostgreSQL process container via pg_ctl...';
+  }, 2500);
+
+  setBtnLoading(btn, true, 'Create & Start Database', 'Provisioning...');
+  try {
+    const created = await api('/api/databases', {
+      method: 'POST',
+      timeoutMs: 60000,
+      body: {
+        name,
+        dbName: db_name,
+        dbUser: db_user,
+        dbPassword: db_password,
+        port,
+        isSuperuser: is_superuser,
+        accessMode: access_mode,
+        allowedIps: allowed_ips,
+        linkedProjectId: link_proj ? Number(link_proj) : null,
+      },
+    });
+
+    if (link_proj) {
+      await api(`/api/databases/${created.id}/link`, {
+        method: 'POST',
+        timeoutMs: 30000,
+        body: { projectId: Number(link_proj) },
+      });
+    }
+
+    clearTimeout(t1);
+    clearTimeout(t2);
+    clearTimeout(t3);
+
+    renderDatabasePipeline('healthy', 'success', `ONLINE (${created.name.toUpperCase()})`);
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressStep) {
+      progressStep.textContent = 'Ready (5/5)';
+      progressStep.className = 'badge badge-success';
+    }
+    if (progressDetail) progressDetail.textContent = `PostgreSQL database '${created.name}' listening on port ${created.port}!`;
+
+    toast(`PostgreSQL database '${created.name}' provisioned and started on port ${created.port}!`, 'success');
+
+    setTimeout(() => {
+      document.getElementById('modal-create-database')?.classList.remove('active');
+      if (progressBox) progressBox.style.display = 'none';
+    }, 700);
+
+    await loadDatabases();
+    renderDatabasesList();
+  } catch (err) {
+    clearTimeout(t1);
+    clearTimeout(t2);
+    clearTimeout(t3);
+    renderDatabasePipeline('initdb', 'failed', 'PROVISIONING FAILED');
+    if (progressBar) {
+      progressBar.style.width = '100%';
+      progressBar.className = 'progress-fill red';
+    }
+    if (progressStep) {
+      progressStep.textContent = 'Failed';
+      progressStep.className = 'badge badge-danger';
+    }
+    if (progressDetail) progressDetail.textContent = `Error: ${err.message}`;
+    toast(`Database creation failed: ${err.message}`, 'error');
+  } finally {
+    setBtnLoading(btn, false, 'Create & Start Database');
+  }
+}
+window.handleCreateDatabaseSubmit = handleCreateDatabaseSubmit;
+
+function showDatabaseDetails(id) {
+  const db = (state.databases || []).find((d) => d.id === Number(id));
+  if (!db) return;
+
+  const modal = document.getElementById('modal-database-details');
+  if (!modal) return;
+
+  document.getElementById('db-details-title').textContent = `Connection Details — ${db.name}`;
+  document.getElementById('db-detail-internal-url').value = db.internalUrl || '';
+  document.getElementById('db-detail-external-url').value = db.externalUrl || '';
+  document.getElementById('db-detail-dbname').value = db.dbName || '';
+  document.getElementById('db-detail-user').value = db.dbUser || '';
+  document.getElementById('db-detail-port').value = db.port || 5432;
+  document.getElementById('db-detail-password').value = db.dbPassword || '';
+  document.getElementById('db-detail-psql').value = db.psqlCommand || '';
+
+  const extWrap = document.getElementById('db-detail-external-url-wrap');
+  if (extWrap) {
+    extWrap.style.display = db.accessMode === 'local' ? 'none' : 'block';
+  }
+
+  modal.classList.add('active');
+}
+window.showDatabaseDetails = showDatabaseDetails;
+
+let currentViewedDbId = null;
+
+async function showDatabaseLogs(id) {
+  currentViewedDbId = id;
+  const modal = document.getElementById('modal-database-logs');
+  const title = document.getElementById('db-logs-title');
+  const badge = document.getElementById('db-logs-badge');
+  const pre = document.getElementById('db-logs-content');
+  if (!modal || !pre) return;
+
+  const db = (state.databases || []).find((d) => d.id === Number(id));
+  if (title) title.textContent = db ? `🐘 ${db.name} — Server Logs` : `Database #${id} Logs`;
+  if (badge) {
+    badge.textContent = db ? db.status.toUpperCase() : 'LOGS';
+    badge.className = db?.status === 'running' ? 'badge badge-success' : (db?.status === 'error' ? 'badge badge-danger' : 'badge badge-neutral');
+  }
+
+  pre.textContent = 'Loading PostgreSQL server logs...';
+  modal.classList.add('active');
+
+  try {
+    const data = await api(`/api/databases/${id}/logs`, { noCache: true });
+    pre.textContent = data.logs || 'Log file is empty.';
+    pre.scrollTop = pre.scrollHeight;
+  } catch (err) {
+    pre.textContent = `Failed to load logs: ${err.message}`;
+  }
+}
+window.showDatabaseLogs = showDatabaseLogs;
+
+async function refreshCurrentDatabaseLogs() {
+  if (currentViewedDbId) {
+    await showDatabaseLogs(currentViewedDbId);
+  }
+}
+window.refreshCurrentDatabaseLogs = refreshCurrentDatabaseLogs;
+
+function copyDatabaseLogs() {
+  const pre = document.getElementById('db-logs-content');
+  if (pre) {
+    copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard!');
+  }
+}
+window.copyDatabaseLogs = copyDatabaseLogs;
+
+function syncDatabaseCardState(id, status) {
+  const isRunning = status === 'running';
+  const isStarting = status === 'starting';
+  const isStopping = status === 'stopping';
+  const isError = status === 'error';
+
+  // 1. Card Status Badge
+  const cardBadge = document.getElementById(`db-card-status-badge-${id}`);
+  if (cardBadge) {
+    if (isRunning) {
+      cardBadge.textContent = 'RUNNING';
+      cardBadge.className = 'badge badge-success';
+    } else if (isStarting) {
+      cardBadge.textContent = 'STARTING...';
+      cardBadge.className = 'badge badge-warning';
+    } else if (isStopping) {
+      cardBadge.textContent = 'STOPPING...';
+      cardBadge.className = 'badge badge-warning';
+    } else if (isError) {
+      cardBadge.textContent = 'ERROR';
+      cardBadge.className = 'badge badge-danger';
+    } else {
+      cardBadge.textContent = 'STOPPED';
+      cardBadge.className = 'badge badge-neutral';
+    }
+  }
+
+  // 2. Toggle Start/Stop Button
+  const toggleBtn = document.getElementById(`btn-db-toggle-${id}`);
+  if (toggleBtn) {
+    toggleBtn.disabled = isStarting || isStopping;
+    const span = toggleBtn.querySelector('span') || toggleBtn;
+    if (isRunning) {
+      span.textContent = 'Stop';
+      toggleBtn.title = 'Stop Database';
+      toggleBtn.className = 'btn btn-danger btn-sm';
+    } else if (isStarting) {
+      span.textContent = 'Starting...';
+      toggleBtn.title = 'Starting Database...';
+      toggleBtn.className = 'btn btn-secondary btn-sm';
+    } else if (isStopping) {
+      span.textContent = 'Stopping...';
+      toggleBtn.title = 'Stopping Database...';
+      toggleBtn.className = 'btn btn-secondary btn-sm';
+    } else {
+      span.textContent = 'Start';
+      toggleBtn.title = 'Start Database';
+      toggleBtn.className = 'btn btn-success btn-sm';
+    }
+  }
+}
+window.syncDatabaseCardState = syncDatabaseCardState;
+
+async function toggleDatabaseState(id) {
+  const dbIndex = (state.databases || []).findIndex((d) => d.id === Number(id));
+  const currentDb = dbIndex !== -1 ? state.databases[dbIndex] : null;
+  if (!currentDb) return;
+
+  const isCurrentlyRunning = currentDb.status === 'running';
+
+  if (!isCurrentlyRunning) {
+    // STARTING FLOW
+    currentDb.status = 'starting';
+    syncDatabaseCardState(id, 'starting');
+
+    const trackId = `db-pipeline-track-${id}`;
+    if (waterPipelines[trackId]) {
+      waterPipelines[trackId].currentProgress = 0.0;
+    }
+    // Launch backend start in background
+    const startPromise = api(`/api/databases/${id}/start`, { method: 'POST', timeoutMs: 25000 });
+
+    // Smooth, organic 5-stage fluid progression (~750ms per stage, ~3.8s total)
+    renderSingleDatabasePipeline(id, 'sandbox', 'running', 'CHECKING PORT');
+    const t1 = setTimeout(() => renderSingleDatabasePipeline(id, 'initdb', 'running', 'DATA CLUSTER'), 750);
+    const t2 = setTimeout(() => renderSingleDatabasePipeline(id, 'security', 'running', 'SECURITY RULES'), 1500);
+    const t3 = setTimeout(() => renderSingleDatabasePipeline(id, 'spawning', 'running', 'SPAWNING ENGINE'), 2250);
+
+    try {
+      const updatedDb = await startPromise;
+      if (updatedDb && updatedDb.id) {
+        Object.assign(currentDb, updatedDb);
+      }
+
+      // Smooth step through verifying health to complete online ready
+      setTimeout(() => {
+        renderSingleDatabasePipeline(id, 'healthy', 'running', 'VERIFYING HEALTH');
+      }, 3000);
+
+      setTimeout(() => {
+        currentDb.status = 'running';
+        syncDatabaseCardState(id, 'running');
+        renderSingleDatabasePipeline(id, 'healthy', 'success', 'ONLINE (READY)');
+        toast(`PostgreSQL database '${currentDb.name || '#' + id}' is online and ready!`, 'success');
+      }, 3800);
+
+    } catch (err) {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      currentDb.status = 'error';
+      syncDatabaseCardState(id, 'error');
+      renderSingleDatabasePipeline(id, 'spawning', 'failed', 'START FAILED');
+      toast(`Failed to start database: ${err.message}`, 'error');
+    }
+  } else {
+    // STOPPING FLOW
+    currentDb.status = 'stopping';
+    syncDatabaseCardState(id, 'stopping');
+    renderSingleDatabasePipeline(id, 'spawning', 'running', 'STOPPING ENGINE');
+
+    try {
+      const updatedDb = await api(`/api/databases/${id}/stop`, { method: 'POST', timeoutMs: 15000 });
+      if (updatedDb && updatedDb.id) {
+        Object.assign(currentDb, updatedDb);
+      }
+
+      setTimeout(() => {
+        currentDb.status = 'stopped';
+        syncDatabaseCardState(id, 'stopped');
+        renderSingleDatabasePipeline(id, 'sandbox', 'idle', 'IDLE');
+        toast(`Database '${currentDb.name || '#' + id}' stopped successfully!`, 'info');
+      }, 800);
+
+    } catch (err) {
+      currentDb.status = 'error';
+      syncDatabaseCardState(id, 'error');
+      renderSingleDatabasePipeline(id, 'spawning', 'failed', 'STOP FAILED');
+      toast(`Failed to stop database: ${err.message}`, 'error');
+    }
+  }
+
+  await loadDatabases();
+}
+window.toggleDatabaseState = toggleDatabaseState;
+
+function openDatabaseAccessModal(id) {
+  const db = (state.databases || []).find((d) => d.id === Number(id));
+  if (!db) return;
+
+  const modal = document.getElementById('modal-database-access');
+  if (!modal) return;
+
+  document.getElementById('db-access-id').value = db.id;
+  document.getElementById('db-access-mode').value = db.accessMode || 'local';
+  document.getElementById('db-access-allowed-ips').value = db.allowedIps || '';
+  toggleDatabaseAccessIpFields('db-access-mode', 'db-access-allowed-ips-wrap');
+
+  modal.classList.add('active');
+}
+window.openDatabaseAccessModal = openDatabaseAccessModal;
+
+async function handleUpdateDatabaseAccessSubmit(e) {
+  e.preventDefault();
+  const id = Number(document.getElementById('db-access-id').value);
+  const access_mode = document.getElementById('db-access-mode').value;
+  const allowed_ips = document.getElementById('db-access-allowed-ips').value.trim();
+
+  try {
+    await api(`/api/databases/${id}/access`, {
+      method: 'PUT',
+      body: {
+        accessMode: access_mode,
+        allowedIps: allowed_ips,
+      },
+    });
+    toast('Network access and firewall rules updated successfully!', 'success');
+    document.getElementById('modal-database-access')?.classList.remove('active');
+    await loadDatabases();
+    renderDatabasesList();
+  } catch (err) {
+    toast(`Failed to update access: ${err.message}`, 'error');
+  }
+}
+window.handleUpdateDatabaseAccessSubmit = handleUpdateDatabaseAccessSubmit;
+
+function openDatabaseLinkModal(id) {
+  const db = (state.databases || []).find((d) => d.id === Number(id));
+  if (!db) return;
+
+  const modal = document.getElementById('modal-database-link');
+  if (!modal) return;
+
+  document.getElementById('db-link-id').value = db.id;
+  const select = document.getElementById('db-link-project-select');
+  if (select) {
+    select.innerHTML = '<option value="">-- Choose Website to Link --</option>' +
+      (state.projects || []).map((p) => {
+        const selected = p.id === db.linkedProjectId ? 'selected' : '';
+        return `<option value="${p.id}" ${selected}>${escapeHtml(p.name)}</option>`;
+      }).join('');
+  }
+
+  modal.classList.add('active');
+}
+window.openDatabaseLinkModal = openDatabaseLinkModal;
+
+async function handleLinkDatabaseSubmit(e) {
+  e.preventDefault();
+  const id = Number(document.getElementById('db-link-id').value);
+  const projectId = document.getElementById('db-link-project-select').value;
+
+  try {
+    if (!projectId) {
+      await api(`/api/databases/${id}/unlink`, { method: 'POST' });
+      toast('Database unlinked from website.', 'info');
+    } else {
+      const res = await api(`/api/databases/${id}/link`, {
+        method: 'POST',
+        body: { projectId: Number(projectId) },
+      });
+      toast(res.message || 'Database linked and credentials injected into website .env!', 'success');
+    }
+    document.getElementById('modal-database-link')?.classList.remove('active');
+    await loadDatabases();
+    renderDatabasesList();
+  } catch (err) {
+    toast(`Link failed: ${err.message}`, 'error');
+  }
+}
+window.handleLinkDatabaseSubmit = handleLinkDatabaseSubmit;
+
+async function deleteDatabase(id, name) {
+  const ok = await showConfirmDialog({
+    title: 'Delete PostgreSQL Database',
+    message: `Are you sure you want to delete database '${name}' (#${id})?\n\nThis will stop and remove its container, delete all its physical data on disk, and revoke associated firewall rules. This action CANNOT be undone!`,
+    confirmText: 'Delete Database',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    toast(`Deleting database '${name}'...`, 'info');
+    await api(`/api/databases/${id}`, { method: 'DELETE' });
+    toast(`Database '${name}' deleted successfully!`, 'success');
+    await loadDatabases();
+    renderDatabasesList();
+  } catch (err) {
+    toast(`Failed to delete database: ${err.message}`, 'error');
+  }
+}
+window.deleteDatabase = deleteDatabase;
+
+function copyElementValue(elemId) {
+  const el = document.getElementById(elemId);
+  if (!el) return;
+  copyTextToClipboard(el.value, 'Copied to clipboard!');
+}
+window.copyElementValue = copyElementValue;
+
+// ============================================================================
 // Global Polling & Live Updates
 // ============================================================================
 let pollInFlight = false;
@@ -4147,6 +4854,16 @@ function startPolling() {
         await loadProjects();
         renderWebsiteWorkspaceHeader();
         await loadRollbacksView();
+      } else if (state.currentView === 'databases') {
+        const anyLooping = Object.values(waterPipelines).some((p) => p && p.isLooping);
+        if (!anyLooping) {
+          const oldSig = (state.databases || []).map((d) => `${d.id}:${d.status}:${d.updated_at}`).join('|');
+          await loadDatabases();
+          const newSig = (state.databases || []).map((d) => `${d.id}:${d.status}:${d.updated_at}`).join('|');
+          if (oldSig !== newSig) {
+            renderDatabasesList();
+          }
+        }
       } else if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
         await loadProjects();
         renderWebsiteWorkspaceHeader();

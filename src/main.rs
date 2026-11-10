@@ -5,6 +5,7 @@ mod auth;
 mod cache;
 mod caddy;
 mod config;
+mod databases;
 mod db;
 mod deployer;
 mod git;
@@ -73,6 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         cache.clone(),
         config.data_dir.clone(),
     ));
+    let databases = Arc::new(crate::databases::Databases::new(
+        db.clone(),
+        vault.clone(),
+        (*logs).clone(),
+        &config.data_dir,
+    ));
 
     // Auto-resume any websites marked 'running' in SQLite on platform startup,
     // and ensure any websites marked 'stopped' have no orphan processes left on their ports
@@ -130,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         runtime,
         deployer: deployer.clone(),
         cache,
+        databases,
     };
 
     let app = create_router(state);

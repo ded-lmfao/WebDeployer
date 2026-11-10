@@ -856,22 +856,7 @@ impl Runtime {
             Self::kill_pid_tree(pid).await;
         }
 
-        // 5. If Docker / Docker Compose is used, stop container as well
-        if p.deploy_method == "docker" || p.deploy_method == "compose" {
-            let docker_name = format!("webdep-{}", container.slug);
-            let _ = tokio::time::timeout(
-                Duration::from_secs(3),
-                tokio::process::Command::new("docker")
-                    .args(["rm", "-f", &docker_name])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status(),
-            )
-            .await;
-        }
-
-        // 6. Verify the website's port is completely freed (retry up to 1.5s if child processes re-bound)
+        // Verify the website's port is completely freed (retry up to 1.5s if child processes re-bound)
         if let Some(port) = p.port {
             for _ in 0..12 {
                 let remaining_pids = Self::find_pids_on_port(port);
