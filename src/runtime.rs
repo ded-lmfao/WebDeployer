@@ -482,14 +482,10 @@ impl Runtime {
     }
 
     /// Delete all on-disk directories, releases, git clones, backups, isolated container DB/cache/storage,
-    /// and deploy keys associated with a deleted website.
-    pub fn cleanup_project_files(&self, p: &Project) {
+    /// and deploy keys associated with a deleted website, after verifying no other active website shares them.
+    pub fn cleanup_project_files(&self, p: &Project, remaining_projects: &[Project]) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let safe_slug = if p.slug.trim().is_empty() {
-            format!("site-{}", p.id)
-        } else {
-            p.slug.trim().to_string()
-        };
+        let safe_slug = p.slug.trim().to_string();
 
         // 1. Clean up in-memory runtime maps for this project
         if let Ok(mut map) = self.processes.lock() {
@@ -502,7 +498,24 @@ impl Runtime {
             map.remove(&p.id);
         }
 
-        // 2. Remove isolated container directory (`data/containers/<slug>` including `db/`, `cache/`, `storage/`, `tmp/`, `home/`, `run/`)
+        // 2. Remove SSH deploy keys specific to this project ID (`data/keys/deploy_key_<id>*`)
+        let key_dir = cwd.join("data").join("keys");
+        let _ = std::fs::remove_file(key_dir.join(format!("deploy_key_{}", p.id)));
+        let _ = std::fs::remove_file(key_dir.join(format!("deploy_key_{}.pub", p.id)));
+
+        if safe_slug.is_empty() || safe_slug.contains("..") || safe_slug.contains('/') || safe_slug.contains('\\') {
+            return;
+        }
+
+        // Ensure no other remaining website shares the same slug before deleting slug-based directories
+        let slug_shared = remaining_projects
+            .iter()
+            .any(|other| other.id != p.id && other.slug.trim().eq_ignore_ascii_case(&safe_slug));
+        if slug_shared {
+            return;
+        }
+
+        // 3. Remove isolated container directory (`data/containers/<slug>` including `db/`, `cache/`, `storage/`, `tmp/`, `home/`, `run/`)
         let container_root = cwd.join("data").join("containers").join(&safe_slug);
         if container_root.exists() {
             let _ = std::fs::remove_dir_all(&container_root);
@@ -512,16 +525,21 @@ impl Runtime {
             let _ = std::fs::remove_dir_all(&legacy_app_data);
         }
 
-        // 3. Remove SSH deploy keys (`data/keys/deploy_key_<id>*`)
-        let key_dir = cwd.join("data").join("keys");
-        let _ = std::fs::remove_file(key_dir.join(format!("deploy_key_{}", p.id)));
-        let _ = std::fs::remove_file(key_dir.join(format!("deploy_key_{}.pub", p.id)));
-
-        // 4. Remove deployment directory (`p.deploy_dir` and `data/sites/<slug>`)
+        // 4. Remove deployment directory (`data/sites/<slug>` and `p.deploy_dir` if it specifically ends with `/<slug>`)
         let mut dirs_to_remove = vec![cwd.join("data").join("sites").join(&safe_slug)];
         let dep_trimmed = p.deploy_dir.trim();
-        if !dep_trimmed.is_empty() && dep_trimmed != "/" && dep_trimmed != "." && dep_trimmed != "./" {
-            dirs_to_remove.push(PathBuf::from(dep_trimmed));
+        if !dep_trimmed.is_empty() {
+            let dep_path = PathBuf::from(dep_trimmed);
+            let ends_with_slug = dep_path
+                .file_name()
+                .map(|n| n.to_string_lossy().eq_ignore_ascii_case(&safe_slug))
+                .unwrap_or(false);
+            let dir_shared = remaining_projects
+                .iter()
+                .any(|other| other.id != p.id && other.deploy_dir.trim() == dep_trimmed);
+            if ends_with_slug && !dir_shared && dep_path.components().count() >= 3 {
+                dirs_to_remove.push(dep_path);
+            }
         }
 
         for dir in dirs_to_remove {

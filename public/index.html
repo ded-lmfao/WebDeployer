@@ -16,7 +16,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.6.0">
+  <link rel="stylesheet" href="/style.css?v=3.7.0">
 </head>
 <body>
 
@@ -196,29 +196,25 @@
             </button>
             <button class="ws-tab-item" data-ws-tab="github" onclick="switchWebsiteTab('github')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg>
-              <span>GitHub &amp; Commits</span>
+              <span>Commits</span>
             </button>
             <button class="ws-tab-item" data-ws-tab="logs" onclick="switchWebsiteTab('logs')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-              <span>Live Logs</span>
+              <span>Logs</span>
             </button>
             <button class="ws-tab-item" data-ws-tab="env" onclick="switchWebsiteTab('env')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-6 6l7 7a2 2 0 0 1-2.83 2.83l-7-7m-6-6L2 8l4 4 4-4-2-2z"></path></svg>
-              <span>Environment (.env)</span>
+              <span>Environment</span>
             </button>
             <button class="ws-tab-item" data-ws-tab="releases" onclick="switchWebsiteTab('releases')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
               <span>Releases</span>
             </button>
-            <button class="ws-tab-item" data-ws-tab="rollbacks" onclick="switchWebsiteTab('rollbacks')">
+            <button class="ws-tab-item" data-ws-tab="rollbacks" onclick="switchWebsiteTab('rollbacks')" style="display: none;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
               <span>Rollbacks</span>
             </button>
-            <button class="ws-tab-item" data-ws-tab="backups" onclick="switchWebsiteTab('backups')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-              <span>Backups</span>
-            </button>
-            <button class="ws-tab-item" data-ws-tab="monitor" onclick="switchWebsiteTab('monitor')">
+            <button class="ws-tab-item" data-ws-tab="monitor" onclick="switchWebsiteTab('monitor')" style="display: none;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
               <span>Monitoring</span>
             </button>
@@ -231,49 +227,36 @@
 
         <!-- ==================== 1. OVERVIEW VIEW ==================== -->
         <section id="view-overview" class="view-section active">
-          <div class="view-header">
-            <div class="view-title-group">
-              <h1>System Overview</h1>
-              <p>Global VM health, deployed websites, and recent deployment activity</p>
-            </div>
-            <div class="view-actions">
-              <button class="btn btn-secondary btn-sm" id="overview-refresh-btn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                <span>Refresh</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Server Stats Row -->
-          <div class="stats-grid">
+          <!-- Compact Quick Stats Strip -->
+          <div class="stats-grid overview-stats-grid">
             <div class="stat-card">
-              <div class="stat-label">Total Websites <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></div>
+              <div class="stat-label">Websites</div>
               <div class="stat-value" id="stat-total-projects">0</div>
               <div class="stat-meta"><span id="stat-online-count" style="color: var(--success); font-weight: 600;">0</span> online &bull; <span id="stat-offline-count">0</span> stopped</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">CPU Usage <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg></div>
+              <div class="stat-label">CPU</div>
               <div class="stat-value" id="stat-cpu-pct">0%</div>
               <div class="progress-bar"><div class="progress-fill green" id="stat-cpu-bar" style="width: 0%;"></div></div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Memory Usage <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon></svg></div>
+              <div class="stat-label">RAM</div>
               <div class="stat-value" id="stat-mem-pct">0%</div>
               <div class="progress-bar"><div class="progress-fill green" id="stat-mem-bar" style="width: 0%;"></div></div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Disk Free <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><path d="M22 12H2"></path><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></div>
+              <div class="stat-label">Disk Free</div>
               <div class="stat-value" id="stat-disk-free">-- GB</div>
               <div class="stat-meta" id="stat-disk-meta">-- total</div>
             </div>
           </div>
 
-          <!-- Quick Actions & Pipeline -->
+          <!-- Active Deployment Pipeline (Only visible when a deployment is active) -->
           <div id="overview-active-deployment-box" style="display: none;" class="card">
             <div class="card-header">
               <span class="card-title">
                 <span class="status-dot building"></span>
-                Active Deployment in Progress: <strong id="active-dep-project-name">...</strong>
+                Deploying: <strong id="active-dep-project-name">...</strong>
               </span>
               <span class="badge badge-warning" id="active-dep-kind">DEPLOY</span>
             </div>
@@ -288,24 +271,22 @@
           <div class="card">
             <div class="card-header">
               <span class="card-title">Hosted Websites</span>
-              <button class="btn btn-secondary btn-sm" onclick="navigateTo('projects')">View All Websites &rarr;</button>
+              <button class="btn btn-secondary btn-sm" onclick="navigateTo('projects')">All Websites &rarr;</button>
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
                 <table class="table tbl-overview-projects">
                   <thead>
                     <tr>
-                      <th>Project</th>
-                      <th>Domains</th>
+                      <th>Website</th>
+                      <th>URL / Port</th>
                       <th>Status</th>
-                      <th>Deployed SHA</th>
-                      <th>Behind / Ahead</th>
-                      <th>Last Deployment</th>
+                      <th>Commit</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="overview-projects-table">
-                    <tr><td colspan="7" style="text-align: center; padding: 24px;">No websites created yet. Click "Add Website" to get started.</td></tr>
+                    <tr><td colspan="5" style="text-align: center; padding: 24px;">No websites created yet. Click "Add Website" to get started.</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -316,7 +297,6 @@
           <div class="card">
             <div class="card-header">
               <span class="card-title">Recent Deployments</span>
-              <button class="btn btn-secondary btn-sm" onclick="navigateTo('projects')">Manage Websites &rarr;</button>
             </div>
             <div class="card-body" style="padding: 0;">
               <div class="table-responsive">
@@ -324,9 +304,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Project</th>
-                      <th>Kind</th>
-                      <th>Trigger</th>
+                      <th>Website</th>
                       <th>Commit</th>
                       <th>Duration</th>
                       <th>Status</th>
@@ -335,7 +313,7 @@
                     </tr>
                   </thead>
                   <tbody id="overview-recent-table">
-                    <tr><td colspan="9" style="text-align: center; padding: 24px;">No recent deployments recorded.</td></tr>
+                    <tr><td colspan="7" style="text-align: center; padding: 24px;">No recent deployments recorded.</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -374,10 +352,6 @@
               <p>Remote repository synchronization, webhooks, and commit history</p>
             </div>
             <div class="view-actions">
-              <button class="btn btn-secondary btn-sm" id="github-check-btn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span>Check GitHub</span>
-              </button>
               <button class="btn btn-primary btn-sm" id="github-fetch-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
                 <span>Fetch Updates</span>
@@ -385,28 +359,9 @@
             </div>
           </div>
 
-          <div class="form-row" style="margin-bottom: 20px;">
-            <div class="card" style="margin-bottom: 0;">
-              <div class="card-header"><span class="card-title">Repository Configuration</span></div>
-              <div class="card-body" id="github-repo-details">
-                <p style="color: var(--text-dim);">Select a project to inspect GitHub configuration.</p>
-              </div>
-            </div>
-
-            <div class="card" style="margin-bottom: 0;">
-              <div class="card-header">
-                <span class="card-title">GitHub Webhook (Instant Deploys)</span>
-              </div>
-              <div class="card-body" id="github-webhook-details">
-                <p style="color: var(--text-dim);">Select a project to view webhook URL and secret.</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Commits list -->
           <div class="card">
             <div class="card-header">
-              <span class="card-title">Commit History (Remote Mirror)</span>
+              <span class="card-title">Recent Commits</span>
               <span class="badge badge-neutral" id="github-branch-badge">main</span>
             </div>
             <div class="card-body" style="padding: 0;">
@@ -439,12 +394,6 @@
               <h1>Deployments Pipeline</h1>
               <p>Automated zero-downtime deployment pipelines and operation history</p>
             </div>
-            <div class="view-actions">
-              <button class="btn btn-primary" id="trigger-deploy-btn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                <span>Deploy Latest</span>
-              </button>
-            </div>
           </div>
 
           <!-- Visual Stage Progression Container -->
@@ -471,9 +420,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Project</th>
                       <th>Kind</th>
-                      <th>Trigger</th>
                       <th>Commit</th>
                       <th>Duration</th>
                       <th>Status</th>
@@ -482,7 +429,7 @@
                     </tr>
                   </thead>
                   <tbody id="deployments-table-body">
-                    <tr><td colspan="9" style="text-align: center; padding: 24px;">Loading deployments...</td></tr>
+                    <tr><td colspan="7" style="text-align: center; padding: 24px;">Loading deployments...</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -825,48 +772,6 @@
           </div>
         </section>
 
-        <!-- ==================== 9. BACKUPS VIEW ==================== -->
-        <section id="view-backups" class="view-section">
-          <div class="view-header">
-            <div class="view-title-group">
-              <h1>Application Backups</h1>
-              <p>Pre-deployment automated snapshots, persistent directories, and instant recovery points</p>
-            </div>
-            <div class="view-actions">
-              <button class="btn btn-primary" id="create-backup-btn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                <span>Create Backup</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Retained Snapshots</span>
-            </div>
-            <div class="card-body" style="padding: 0;">
-              <div class="table-responsive">
-                <table class="table tbl-backups">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Date</th>
-                      <th>Type</th>
-                      <th>Size</th>
-                      <th>Note</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="backups-table-body">
-                    <tr><td colspan="6" style="text-align: center; padding: 24px;">Select a project to view backups.</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="pagination-bar" id="backups-pagination"></div>
-            </div>
-          </div>
-        </section>
-
         <!-- ==================== 10. SERVER MONITORING VIEW ==================== -->
         <section id="view-monitor" class="view-section">
           <div class="view-header">
@@ -927,44 +832,43 @@
         <section id="view-settings" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
-              <h1>Platform Settings &amp; Security</h1>
-              <p>Account security, Two-Factor Authentication (2FA), global safety thresholds, and user permissions</p>
+              <h1>Settings</h1>
             </div>
           </div>
 
-          <!-- My Account Security Card -->
+          <!-- My Account Security Card (Clean & Compact) -->
           <div class="card">
-            <div class="card-header">
+            <div class="card-header" style="border-bottom: none; padding-bottom: 4px;">
               <div>
-                <span class="card-title">My Account Security — Passkeys / Biometrics, Password, 2FA &amp; Sessions</span>
-                <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">Protect your account with Face ID / Fingerprint Passkeys (WebAuthn), Argon2id password hashing, TOTP 2FA, and session revocation</div>
+                <span class="card-title">Account Security</span>
               </div>
               <span class="badge badge-neutral" id="settings-2fa-status-badge">Checking...</span>
             </div>
-            <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
-              <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
-                <div>
-                  <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">Signed-In Account</div>
-                  <div style="font-size: 14px; font-weight: 700; color: var(--text-main); margin-top: 2px;" id="settings-sec-username">admin</div>
+            <div class="card-body">
+              <div class="settings-sec-summary-row">
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">User</div>
+                  <div class="settings-sec-val" id="settings-sec-username">admin</div>
                 </div>
-                <div>
-                  <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">Passkeys / Biometrics</div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--text-dim); margin-top: 2px;" id="settings-sec-passkeys-text">None Registered</div>
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">Passkeys</div>
+                  <div class="settings-sec-val" id="settings-sec-passkeys-text">None</div>
                 </div>
-                <div>
-                  <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">Two-Factor Auth (TOTP)</div>
-                  <div style="font-size: 13px; font-weight: 600; margin-top: 2px;" id="settings-sec-2fa-text">Not Enabled</div>
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">2FA (TOTP)</div>
+                  <div class="settings-sec-val" id="settings-sec-2fa-text">Disabled</div>
                 </div>
-                <div>
-                  <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">Active Sessions</div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-top: 2px;" id="settings-sec-sessions">1 active session</div>
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">Sessions</div>
+                  <div class="settings-sec-val" id="settings-sec-sessions">1 active</div>
                 </div>
               </div>
-              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button type="button" class="btn btn-primary btn-sm" id="settings-open-passkeys-btn" onclick="openSecurityModal('passkeys')">Passkeys &amp; Biometrics</button>
+
+              <div class="settings-sec-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="settings-open-passkeys-btn" onclick="openSecurityModal('passkeys')">Passkeys</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="openSecurityModal('password')">Change Password</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="settings-open-2fa-btn" onclick="openSecurityModal('2fa')">Configure 2FA</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="revokeOtherSessions()">Revoke Other Sessions</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="revokeOtherSessions()">Revoke Sessions</button>
               </div>
             </div>
           </div>
@@ -972,51 +876,50 @@
           <div class="card" id="settings-global-config-card">
             <div class="card-header">
               <div>
-                <span class="card-title">Global Deployment &amp; GitHub Configuration</span>
-                <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">Default build safety thresholds, release retention, and GitHub authentication persisted in SQLite</div>
+                <span class="card-title">GitHub Tokens &amp; Deploy Defaults</span>
               </div>
             </div>
             <div class="card-body">
               <form id="settings-form">
-                <div class="form-row" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 8px;">
-                  <div class="form-group">
-                    <label class="form-label" for="setting-min-free-mb">Minimum Free Disk Space (MB)</label>
-                    <input type="number" id="setting-min-free-mb" class="form-control" required min="100">
-                    <span class="form-hint">Prevents builds if VM free space is less than this.</span>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" for="setting-default-retention">Default Release Retention Count</label>
-                    <input type="number" id="setting-default-retention" class="form-control" required min="2" max="50">
-                    <span class="form-hint">Number of previous releases kept on disk for rollbacks.</span>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" for="setting-step-timeout">Step Timeout (seconds)</label>
-                    <input type="number" id="setting-step-timeout" class="form-control" required min="30">
-                    <span class="form-hint">Max duration allowed for install or build steps.</span>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" for="setting-deploy-timeout">Total Deploy Timeout (seconds)</label>
-                    <input type="number" id="setting-deploy-timeout" class="form-control" required min="60">
-                    <span class="form-hint">Max total time for a complete deployment pipeline.</span>
-                  </div>
-                </div>
-
-                <div class="form-group" style="margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
-                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px;">
-                    <div>
-                      <label class="form-label" style="margin: 0;">GitHub Personal Access Tokens (Supports Multiple Accounts / Orgs)</label>
-                      <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">Add 1, 2, or more tokens. WebDep automatically aggregates repositories and tries all configured tokens when cloning/fetching.</div>
-                    </div>
+                <!-- GitHub Personal Access Tokens First (The most relevant configuration) -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;">
+                    <label class="form-label" style="margin: 0; font-size: 13px;">GitHub Access Tokens</label>
                     <div style="display: flex; align-items: center; gap: 8px;">
                       <span id="github-token-status-badge" style="font-size: 11px;"></span>
                       <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()">+ Add Token</button>
                     </div>
                   </div>
-                  <div id="github-tokens-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;"></div>
-                  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                    <span class="form-hint" style="margin: 0;">Persisted in SQLite. Enables private repository mirrors across multiple GitHub accounts or organizations.</span>
-                    <button type="submit" class="btn btn-primary" style="white-space: nowrap;">Save Global Settings &amp; Tokens</button>
+                  <div id="github-tokens-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;"></div>
+                </div>
+
+                <!-- Collapsible Build & Safety Thresholds -->
+                <details class="minimal-details" style="margin-bottom: 16px;">
+                  <summary>System Thresholds &amp; Timeouts</summary>
+                  <div class="minimal-details-body">
+                    <div class="form-row" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-min-free-mb">Min Free Disk (MB)</label>
+                        <input type="number" id="setting-min-free-mb" class="form-control" required min="100">
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-default-retention">Keep Releases</label>
+                        <input type="number" id="setting-default-retention" class="form-control" required min="2" max="50">
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-step-timeout">Step Timeout (s)</label>
+                        <input type="number" id="setting-step-timeout" class="form-control" required min="30">
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-deploy-timeout">Deploy Timeout (s)</label>
+                        <input type="number" id="setting-deploy-timeout" class="form-control" required min="60">
+                      </div>
+                    </div>
                   </div>
+                </details>
+
+                <div style="display: flex; justify-content: flex-end; align-items: center;">
+                  <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
                 </div>
               </form>
             </div>
@@ -1024,23 +927,17 @@
 
           <div class="card" id="settings-panel-card">
             <div class="card-header">
-              <div>
-                <span class="card-title">Panel Control</span>
-                <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">Restart the WebDep panel itself. Websites marked running are resumed automatically.</div>
-              </div>
+              <span class="card-title">Server Controls</span>
             </div>
             <div class="card-body" style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button type="button" class="btn btn-secondary" id="restart-panel-btn">Restart Panel</button>
-              <button type="button" class="btn btn-secondary" id="clear-cache-btn">Clear Server Cache</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="restart-panel-btn">Restart Server Panel</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="clear-cache-btn">Clear Server Cache</button>
             </div>
           </div>
 
           <div class="card" id="settings-users-card">
             <div class="card-header">
-              <div>
-                <span class="card-title">User Access, Roles &amp; Website Permissions</span>
-                <div style="font-size: 12px; color: var(--text-dim); margin-top: 2px;">Create users, assign granular powers, restrict access to specific websites, or suspend/remove accounts</div>
-              </div>
+              <span class="card-title">User Permissions</span>
               <button class="btn btn-primary btn-sm" id="create-user-modal-btn">+ Add User</button>
             </div>
             <div class="card-body" style="padding: 0;">
@@ -1048,17 +945,16 @@
                 <table class="table tbl-users">
                   <thead>
                     <tr>
-                      <th>Username</th>
+                      <th>User</th>
                       <th>Role</th>
                       <th>2FA</th>
-                      <th>Website Access</th>
-                      <th>Granted Powers</th>
+                      <th>Websites</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="users-table-body">
-                    <tr><td colspan="7" style="text-align: center; padding: 24px;">Loading users...</td></tr>
+                    <tr><td colspan="6" style="text-align: center; padding: 24px;">Loading users...</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1224,50 +1120,13 @@
             </div>
           </div>
 
-          <!-- Row 4: Toggles -->
-          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 10px 14px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-bottom: 10px;">
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); cursor: pointer;">
-              <input type="checkbox" id="website-auto-deploy">
-              <span>Auto-Deploy on Git Push</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); cursor: pointer;">
-              <input type="checkbox" id="website-auto-backup" checked>
-              <span>Auto-Snapshot Before Deploy</span>
-            </label>
-          </div>
-
-          <!-- Collapsible Advanced & Container Settings -->
-          <details class="minimal-details">
-            <summary>Advanced Container &amp; Health Settings</summary>
-            <div class="minimal-details-body">
-              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="website-slug">Container Slug *</label>
-                  <input type="text" id="website-slug" class="form-control" placeholder="my-saas-api" required>
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="website-deploy-method">Runtime Engine</label>
-                  <select id="website-deploy-method" class="form-control">
-                    <option value="managed">Isolated Container (Built-in)</option>
-                    <option value="docker">Docker Container</option>
-                    <option value="compose">Docker Compose</option>
-                    <option value="pm2">PM2</option>
-                    <option value="systemd">systemd Service</option>
-                  </select>
-                </div>
-              </div>
-              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="website-deploy-dir">Isolated Site Directory *</label>
-                  <input type="text" id="website-deploy-dir" class="form-control" placeholder="./data/sites/my-saas-api" required>
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="website-health-url">Health-Check Endpoint</label>
-                  <input type="text" id="website-health-url" class="form-control" placeholder="http://127.0.0.1:3000/healthz">
-                </div>
-              </div>
-            </div>
-          </details>
+          <!-- Hidden defaults: auto-deploy disabled by default, slug and deploy dir auto-derived -->
+          <input type="checkbox" id="website-auto-deploy" style="display: none;">
+          <input type="checkbox" id="website-auto-backup" checked style="display: none;">
+          <input type="hidden" id="website-slug">
+          <input type="hidden" id="website-deploy-dir">
+          <input type="hidden" id="website-deploy-method" value="managed">
+          <input type="hidden" id="website-health-url">
         </form>
       </div>
       <div class="modal-footer" style="padding: 14px 22px;">
@@ -1456,7 +1315,7 @@
           <div class="form-group">
             <label class="form-label" for="user-new-role">Role Preset</label>
             <select id="user-new-role" class="form-control">
-              <option value="operator">Operator (Deploy, Process, Logs, Backups)</option>
+              <option value="operator">Operator (Deploy, Process, Logs, Releases)</option>
               <option value="developer">Developer (Deploy, Process, Logs, Env Variables)</option>
               <option value="viewer">Viewer (Read-Only Logs & Status)</option>
               <option value="admin">Admin (Full Control)</option>
@@ -1732,36 +1591,6 @@
     </div>
   </div>
 
-  <!-- CREATE BACKUP MODAL -->
-  <div class="modal-overlay" id="modal-create-backup">
-    <div class="modal-container" style="max-width: 460px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Create Application Backup</h3>
-        <button class="modal-close" data-close-modal>&times;</button>
-      </div>
-      <div class="modal-body">
-        <form id="create-backup-form">
-          <div class="form-group">
-            <label class="form-label" for="backup-kind-select">Snapshot Scope</label>
-            <select id="backup-kind-select" class="form-control">
-              <option value="full-snapshot">Full Snapshot (Release Files + SQLite Data + .env)</option>
-              <option value="env-only">Environment & Configuration Only (.env)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="backup-note-input">Backup Note / Label</label>
-            <input type="text" id="backup-note-input" class="form-control" placeholder="e.g. Pre-migration snapshot v1.4">
-            <span class="form-hint">Saved in SQLite and stored in the website's isolated backups directory.</span>
-          </div>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-close-modal>Cancel</button>
-        <button class="btn btn-primary" id="confirm-create-backup-btn">Create Snapshot</button>
-      </div>
-    </div>
-  </div>
-
   <!-- CREATE RELEASE MODAL -->
   <div class="modal-overlay" id="modal-create-release">
     <div class="modal-container" style="max-width: 480px;">
@@ -1821,7 +1650,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.6.0"></script>
+  <script type="module" src="/app.js?v=3.7.0"></script>
 </body>
 </html>
 

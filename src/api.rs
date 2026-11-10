@@ -3205,7 +3205,11 @@ async fn project_commits_handler(
 struct CheckGitResponse {
     #[serde(rename = "needsFetch")]
     needs_fetch: bool,
+    #[serde(rename = "needsDeploy")]
+    needs_deploy: bool,
     remote_sha: String,
+    local_sha: String,
+    deployed_sha: Option<String>,
 }
 
 async fn project_check_handler(
@@ -3230,18 +3234,25 @@ async fn project_check_handler(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    let needs_fetch = !remote_sha.is_empty()
-        && (p.deployed_sha.as_deref() != Some(&remote_sha) || local_head != remote_sha);
+    let needs_fetch = !remote_sha.is_empty() && local_head != remote_sha;
+    let needs_deploy = !local_head.is_empty() && p.deployed_sha.as_deref() != Some(&local_head);
+
     Ok(Json(CheckGitResponse {
         needs_fetch,
+        needs_deploy,
         remote_sha,
+        local_sha: local_head,
+        deployed_sha: p.deployed_sha,
     }))
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FetchGitResponse {
     status: String,
     sha: String,
+    has_new_commits: bool,
+    needs_deploy: bool,
 }
 
 async fn project_fetch_handler(
@@ -3263,13 +3274,18 @@ async fn project_fetch_handler(
     let branch = p.branch.clone();
     let repo_dir_clone = repo_dir.clone();
 
-    let sha = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let (sha, has_new_commits) = tokio::task::spawn_blocking(move || -> Result<(String, bool), String> {
+        let before_sha = crate::git::Git::resolve_head(&repo_dir_clone).unwrap_or_default();
         crate::git::Git::clone_or_fetch(&repo_url, &repo_dir_clone, &branch)?;
-        Ok(crate::git::Git::resolve_head(&repo_dir_clone).unwrap_or_default())
+        let after_sha = crate::git::Git::resolve_head(&repo_dir_clone).unwrap_or_default();
+        let has_new = !after_sha.is_empty() && (before_sha.is_empty() || before_sha != after_sha);
+        Ok((after_sha, has_new))
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    let needs_deploy = !sha.is_empty() && p.deployed_sha.as_deref() != Some(&sha);
 
     {
         let conn = state.db.lock().unwrap();
@@ -3302,6 +3318,8 @@ async fn project_fetch_handler(
     Ok(Json(FetchGitResponse {
         status: "ok".to_string(),
         sha,
+        has_new_commits,
+        needs_deploy,
     }))
 }
 

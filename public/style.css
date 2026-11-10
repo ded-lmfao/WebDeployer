@@ -949,6 +949,106 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 /* Mobile bottom navigation (hidden on desktop) */
 .mobile-bottom-nav { display: none; }
 
+/* ---------- Decluttered Executive Dashboard Layout ---------- */
+.view-title-group p,
+.ws-breadcrumbs,
+.ws-meta-optional {
+  display: none !important;
+}
+
+/* Overview page specific optimizations */
+#view-overview .view-header {
+  display: none !important;
+}
+.overview-stats-grid {
+  margin-top: 4px;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+.overview-stats-grid .stat-card {
+  padding: 12px 14px;
+}
+.overview-stats-grid .stat-value {
+  font-size: 20px;
+}
+.overview-stats-grid .stat-label {
+  font-size: 11px;
+}
+
+/* Modern, Clean Settings Layout */
+.settings-sec-summary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.settings-sec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.settings-sec-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+.settings-sec-val {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-sec-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Inside a Website Workspace, the top banner already displays the site title & primary actions,
+   so hide duplicate big H1 titles inside child tabs and keep only right-aligned action toolbars */
+#view-deployments .view-header,
+#view-rollbacks .view-header,
+#view-monitor .view-header {
+  display: none !important;
+}
+
+#view-github .view-title-group,
+#view-releases .view-title-group,
+#view-logs .view-title-group,
+#view-env .view-title-group,
+#view-audit .view-title-group {
+  display: none !important;
+}
+
+#view-github .view-header,
+#view-releases .view-header,
+#view-logs .view-header,
+#view-env .view-header,
+#view-audit .view-header {
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+/* Hide noisy secondary columns in tables so key information is crisp and scannable */
+.tbl-releases th:nth-child(4),
+.tbl-releases td:nth-child(4),
+.tbl-releases th:nth-child(6),
+.tbl-releases td:nth-child(6),
+.tbl-releases th:nth-child(7),
+.tbl-releases td:nth-child(7),
+.tbl-audit th:nth-child(5),
+.tbl-audit td:nth-child(5) {
+  display: none;
+}
+
 /* ---------- Responsive (Minimal, Uncluttered Mobile & Tablet Layout) ---------- */
 @media (max-width: 1080px) {
   .content-area { padding: 22px 20px 34px; }
