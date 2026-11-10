@@ -69,6 +69,29 @@ pub struct Deployer {
     spawned_deployments: Arc<Mutex<HashSet<i64>>>,
 }
 
+const SELECT_DEPLOYMENT_FIELDS: &str = "\
+    d.id, d.project_id, p.name, d.release_id, d.from_release_id, d.kind, d.status, d.stage, \
+    d.sha, d.trigger, d.actor, d.error, d.started_at, d.finished_at";
+
+fn row_to_deployment(r: &rusqlite::Row) -> Result<Deployment, rusqlite::Error> {
+    Ok(Deployment {
+        id: r.get(0)?,
+        project_id: r.get(1)?,
+        project_name: r.get(2)?,
+        release_id: r.get(3)?,
+        from_release_id: r.get(4)?,
+        kind: r.get(5)?,
+        status: r.get(6)?,
+        stage: r.get(7)?,
+        sha: r.get(8)?,
+        trigger: r.get(9)?,
+        actor: r.get(10)?,
+        error: r.get(11)?,
+        started_at: r.get(12)?,
+        finished_at: r.get(13)?,
+    })
+}
+
 impl Deployer {
     pub fn new(
         db: DbPool,
@@ -130,7 +153,7 @@ impl Deployer {
 
     pub fn list_deployments(&self, project_id: Option<i64>, limit: usize) -> Vec<Deployment> {
         let conn = self.db.lock().unwrap();
-        let mut sql = "SELECT d.id, d.project_id, p.name, d.release_id, d.from_release_id, d.kind, d.status, d.stage, d.sha, d.trigger, d.actor, d.error, d.started_at, d.finished_at FROM deployments d LEFT JOIN projects p ON p.id = d.project_id".to_string();
+        let mut sql = format!("SELECT {} FROM deployments d LEFT JOIN projects p ON p.id = d.project_id", SELECT_DEPLOYMENT_FIELDS);
         let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
 
         if let Some(pid) = project_id {
@@ -145,24 +168,7 @@ impl Deployer {
         };
 
         let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
-        let rows = stmt.query_map(params_slice.as_slice(), |r| {
-            Ok(Deployment {
-                id: r.get(0)?,
-                project_id: r.get(1)?,
-                project_name: r.get(2)?,
-                release_id: r.get(3)?,
-                from_release_id: r.get(4)?,
-                kind: r.get(5)?,
-                status: r.get(6)?,
-                stage: r.get(7)?,
-                sha: r.get(8)?,
-                trigger: r.get(9)?,
-                actor: r.get(10)?,
-                error: r.get(11)?,
-                started_at: r.get(12)?,
-                finished_at: r.get(13)?,
-            })
-        });
+        let rows = stmt.query_map(params_slice.as_slice(), row_to_deployment);
 
         match rows {
             Ok(r) => r.flatten().collect(),
@@ -172,29 +178,8 @@ impl Deployer {
 
     pub fn get_deployment(&self, id: i64) -> Option<Deployment> {
         let conn = self.db.lock().unwrap();
-        conn.query_row(
-            "SELECT d.id, d.project_id, p.name, d.release_id, d.from_release_id, d.kind, d.status, d.stage, d.sha, d.trigger, d.actor, d.error, d.started_at, d.finished_at
-             FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?",
-            rusqlite::params![id],
-            |r| {
-                Ok(Deployment {
-                    id: r.get(0)?,
-                    project_id: r.get(1)?,
-                    project_name: r.get(2)?,
-                    release_id: r.get(3)?,
-                    from_release_id: r.get(4)?,
-                    kind: r.get(5)?,
-                    status: r.get(6)?,
-                    stage: r.get(7)?,
-                    sha: r.get(8)?,
-                    trigger: r.get(9)?,
-                    actor: r.get(10)?,
-                    error: r.get(11)?,
-                    started_at: r.get(12)?,
-                    finished_at: r.get(13)?,
-                })
-            },
-        ).ok()
+        let sql = format!("SELECT {} FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?", SELECT_DEPLOYMENT_FIELDS);
+        conn.query_row(&sql, rusqlite::params![id], row_to_deployment).ok()
     }
 
     pub fn list_releases(&self, project_id: i64) -> Vec<Release> {
@@ -401,6 +386,37 @@ impl Deployer {
         }
     }
 
+    async fn acquire_queue_permit(
+        &self,
+        project_id: i64,
+        dep_id: i64,
+        action_name: &str,
+    ) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        match self.queue_semaphore.clone().try_acquire_owned() {
+            Ok(p) => Some(p),
+            Err(_) => {
+                let action_title = if action_name == "rollback" { "Rollback" } else { "Deployment" };
+                self.logs.add(
+                    Some(project_id),
+                    Some(dep_id),
+                    action_name,
+                    "info",
+                    &format!(
+                        "{} #{} queued — waiting for current active deployment to finish (1-at-a-time concurrency limit)",
+                        action_title, dep_id
+                    ),
+                );
+                match self.queue_semaphore.clone().acquire_owned().await {
+                    Ok(p) => Some(p),
+                    Err(_) => {
+                        self.finish_deployment(dep_id, "failed", Some("Deployment queue closed"));
+                        None
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn run_deploy(self: Arc<Self>, project_id: i64, dep_id: i64) {
         {
             let mut spawned = self.spawned_deployments.lock().unwrap();
@@ -410,27 +426,9 @@ impl Deployer {
             }
         }
 
-        let permit = match self.queue_semaphore.clone().try_acquire_owned() {
-            Ok(p) => p,
-            Err(_) => {
-                self.logs.add(
-                    Some(project_id),
-                    Some(dep_id),
-                    "deployment",
-                    "info",
-                    &format!(
-                        "Deployment #{} queued — waiting for current active deployment to finish (1-at-a-time concurrency limit)",
-                        dep_id
-                    ),
-                );
-                match self.queue_semaphore.clone().acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => {
-                        self.finish_deployment(dep_id, "failed", Some("Deployment queue closed"));
-                        return;
-                    }
-                }
-            }
+        let permit = match self.acquire_queue_permit(project_id, dep_id, "deployment").await {
+            Some(p) => p,
+            None => return,
         };
 
         self.execute_deploy_inner(project_id, dep_id).await;
@@ -689,27 +687,9 @@ impl Deployer {
             }
         }
 
-        let permit = match self.queue_semaphore.clone().try_acquire_owned() {
-            Ok(p) => p,
-            Err(_) => {
-                self.logs.add(
-                    Some(project_id),
-                    Some(dep_id),
-                    "rollback",
-                    "info",
-                    &format!(
-                        "Rollback #{} queued — waiting for current active deployment to finish (1-at-a-time concurrency limit)",
-                        dep_id
-                    ),
-                );
-                match self.queue_semaphore.clone().acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => {
-                        self.finish_deployment(dep_id, "failed", Some("Deployment queue closed"));
-                        return;
-                    }
-                }
-            }
+        let permit = match self.acquire_queue_permit(project_id, dep_id, "rollback").await {
+            Some(p) => p,
+            None => return,
         };
 
         let p = match self.projects.get(project_id) {

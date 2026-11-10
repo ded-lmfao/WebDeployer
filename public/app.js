@@ -258,6 +258,22 @@ function invalidateClientCache(prefix = '') {
 }
 window.invalidateClientCache = invalidateClientCache;
 
+async function copyTextToClipboard(text, msg = 'Copied to clipboard') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(msg, 'success');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast(msg, 'success');
+  }
+}
+window.copyTextToClipboard = copyTextToClipboard;
+
 async function networkFetch(path, options = {}) {
   const headers = {
     'Accept': 'application/json',
@@ -530,17 +546,17 @@ function stopLoginCanvasAnimation() {
 window.startLoginCanvasAnimation = startLoginCanvasAnimation;
 window.stopLoginCanvasAnimation = stopLoginCanvasAnimation;
 
-function toggleLoginPasswordVisibility() {
-  const el = document.getElementById('login-password');
-  const btn = document.getElementById('toggle-pw-visibility');
+function togglePasswordField(inputId, btn) {
+  const el = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
   if (!el || !btn) return;
-  if (el.type === 'password') {
-    el.type = 'text';
-    btn.textContent = 'Hide';
-  } else {
-    el.type = 'password';
-    btn.textContent = 'Show';
-  }
+  const isPass = el.type === 'password';
+  el.type = isPass ? 'text' : 'password';
+  btn.textContent = isPass ? 'Hide' : 'Show';
+}
+window.togglePasswordField = togglePasswordField;
+
+function toggleLoginPasswordVisibility() {
+  togglePasswordField('login-password', document.getElementById('toggle-pw-visibility'));
 }
 window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
 
@@ -1814,32 +1830,25 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
   if (!container) return;
 
   // Initialize persistent DOM structure once (never destroy innerHTML on polling ticks!)
+  const createPipelineObj = () => ({
+    containerId,
+    currentProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+    targetProgress: (currentStatus === 'success' ? 7.0 : 0.0),
+    status: currentStatus,
+    activeStageIdx: -1,
+    failedStageIdx: -1,
+    lastDeploymentId: depId,
+    isLooping: false,
+  });
+
   if (!container.querySelector('.water-pipeline-wrapper')) {
     initWaterPipelineDOM(container, containerId);
-    waterPipelines[containerId] = {
-      containerId,
-      currentProgress: (currentStatus === 'success' ? 7.0 : 0.0),
-      targetProgress: (currentStatus === 'success' ? 7.0 : 0.0),
-      status: currentStatus,
-      activeStageIdx: -1,
-      failedStageIdx: -1,
-      lastDeploymentId: depId,
-      isLooping: false,
-    };
+    waterPipelines[containerId] = createPipelineObj();
   }
 
   let pipeline = waterPipelines[containerId];
   if (!pipeline) {
-    pipeline = {
-      containerId,
-      currentProgress: (currentStatus === 'success' ? 7.0 : 0.0),
-      targetProgress: (currentStatus === 'success' ? 7.0 : 0.0),
-      status: currentStatus,
-      activeStageIdx: -1,
-      failedStageIdx: -1,
-      lastDeploymentId: depId,
-      isLooping: false,
-    };
+    pipeline = createPipelineObj();
     waterPipelines[containerId] = pipeline;
   }
 
@@ -2270,18 +2279,7 @@ document.getElementById('logs-copy-btn')?.addEventListener('click', async () => 
     return;
   }
   const text = state.logLines.map((l) => `[${l.ts ? new Date(l.ts).toLocaleTimeString() : '--:--:--'}] [${(l.channel || 'SYSTEM').toUpperCase()}] [${(l.level || 'INFO').toUpperCase()}] ${l.message}`).join('\n');
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Logs copied to clipboard', 'success');
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast('Logs copied to clipboard', 'success');
-  }
+  await copyTextToClipboard(text, 'Logs copied to clipboard');
 });
 
 // Download logs
@@ -2780,22 +2778,6 @@ function toggleRevealAllEnv() {
   renderEnvTableFromState();
 }
 window.toggleRevealAllEnv = toggleRevealAllEnv;
-
-async function copyTextToClipboard(text, msg = 'Copied to clipboard') {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast(msg, 'success');
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast(msg, 'success');
-  }
-}
-window.copyTextToClipboard = copyTextToClipboard;
 
 function copyEnvVarValue(key) {
   const found = envUiState.vars.find((v) => v.key === key);
@@ -4318,15 +4300,22 @@ function closeModal(modalId) {
 }
 window.closeModal = closeModal;
 
+function getDialogElements() {
+  return {
+    modal: document.getElementById('modal-dialog'),
+    titleEl: document.getElementById('dialog-modal-title'),
+    msgEl: document.getElementById('dialog-modal-message'),
+    inputWrap: document.getElementById('dialog-input-wrapper'),
+    inputEl: document.getElementById('dialog-modal-input'),
+    confirmBtn: document.getElementById('dialog-confirm-btn'),
+    cancelBtn: document.getElementById('dialog-cancel-btn'),
+    closeBtn: document.getElementById('dialog-modal-close'),
+  };
+}
+
 function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {
-    const modal = document.getElementById('modal-dialog');
-    const titleEl = document.getElementById('dialog-modal-title');
-    const msgEl = document.getElementById('dialog-modal-message');
-    const inputWrap = document.getElementById('dialog-input-wrapper');
-    const confirmBtn = document.getElementById('dialog-confirm-btn');
-    const cancelBtn = document.getElementById('dialog-cancel-btn');
-    const closeBtn = document.getElementById('dialog-modal-close');
+    const { modal, titleEl, msgEl, inputWrap, confirmBtn, cancelBtn, closeBtn } = getDialogElements();
 
     titleEl.textContent = title;
     msgEl.textContent = message;
@@ -4353,14 +4342,7 @@ function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText
 
 function showPromptDialog({ title = 'Input Required', message = '', placeholder = '', defaultValue = '', confirmText = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {
-    const modal = document.getElementById('modal-dialog');
-    const titleEl = document.getElementById('dialog-modal-title');
-    const msgEl = document.getElementById('dialog-modal-message');
-    const inputWrap = document.getElementById('dialog-input-wrapper');
-    const inputEl = document.getElementById('dialog-modal-input');
-    const confirmBtn = document.getElementById('dialog-confirm-btn');
-    const cancelBtn = document.getElementById('dialog-cancel-btn');
-    const closeBtn = document.getElementById('dialog-modal-close');
+    const { modal, titleEl, msgEl, inputWrap, inputEl, confirmBtn, cancelBtn, closeBtn } = getDialogElements();
 
     titleEl.textContent = title;
     msgEl.textContent = message;
@@ -4398,14 +4380,7 @@ function showPromptDialog({ title = 'Input Required', message = '', placeholder 
 
 function showCopyDialog({ title = 'Copy Value', message = '', value = '' } = {}) {
   return new Promise((resolve) => {
-    const modal = document.getElementById('modal-dialog');
-    const titleEl = document.getElementById('dialog-modal-title');
-    const msgEl = document.getElementById('dialog-modal-message');
-    const inputWrap = document.getElementById('dialog-input-wrapper');
-    const inputEl = document.getElementById('dialog-modal-input');
-    const confirmBtn = document.getElementById('dialog-confirm-btn');
-    const cancelBtn = document.getElementById('dialog-cancel-btn');
-    const closeBtn = document.getElementById('dialog-modal-close');
+    const { modal, titleEl, msgEl, inputWrap, inputEl, confirmBtn, cancelBtn, closeBtn } = getDialogElements();
 
     titleEl.textContent = title;
     msgEl.textContent = message;
@@ -4426,14 +4401,7 @@ function showCopyDialog({ title = 'Copy Value', message = '', value = '' } = {})
     };
 
     confirmBtn.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(value);
-        toast('Copied to clipboard!', 'success');
-      } catch {
-        inputEl.select();
-        document.execCommand('copy');
-        toast('Copied to clipboard!', 'success');
-      }
+      await copyTextToClipboard(value, 'Copied to clipboard!');
       cleanup();
     };
     cancelBtn.onclick = () => cleanup();
@@ -4843,18 +4811,7 @@ async function loginWithPasskey() {
 }
 window.loginWithPasskey = loginWithPasskey;
 
-function togglePasswordField(inputId, btn) {
-  const el = document.getElementById(inputId);
-  if (!el || !btn) return;
-  if (el.type === 'password') {
-    el.type = 'text';
-    btn.textContent = 'Hide';
-  } else {
-    el.type = 'password';
-    btn.textContent = 'Show';
-  }
-}
-window.togglePasswordField = togglePasswordField;
+
 
 document.getElementById('pwd-next')?.addEventListener('input', (e) => {
   const val = e.target.value || '';

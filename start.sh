@@ -106,8 +106,8 @@ EOF
     sudo systemctl restart webdep
     echo ""
     echo "[+] WebDep is now running 24/7 as a systemd service!"
-    echo "    - Panel URL (HTTP):    http://${PUBLIC_IP}:${PORT}"
-    echo "    - Localhost URL:       http://127.0.0.1:${PORT}"
+    echo "    - Panel Address:       ${PUBLIC_IP}:${PORT}"
+    echo "    - Localhost:           127.0.0.1:${PORT}"
     if [[ "${PUBLIC_IP}" != "127.0.0.1" ]]; then
         echo "    - Secure SSH Tunnel:   ssh -N -L ${PORT}:127.0.0.1:${PORT} ${SERVICE_USER}@${PUBLIC_IP}"
         echo "                           (Recommended: enables encrypted transit & browser Passkey authentication)"
@@ -122,8 +122,8 @@ if [[ "$MODE" == "--daemon" || "$MODE" == "-d" || "$MODE" == "daemon" || "$MODE"
     nohup ./target/release/webdep > data/logs/webdep-server.log 2>&1 &
     PID=$!
     echo "[+] WebDep started in background (PID: ${PID})"
-    echo "    - Panel URL (HTTP):    http://${PUBLIC_IP}:${PORT}"
-    echo "    - Localhost URL:       http://127.0.0.1:${PORT}"
+    echo "    - Panel Address:       ${PUBLIC_IP}:${PORT}"
+    echo "    - Localhost:           127.0.0.1:${PORT}"
     if [[ "${PUBLIC_IP}" != "127.0.0.1" ]]; then
         echo "    - Secure SSH Tunnel:   ssh -N -L ${PORT}:127.0.0.1:${PORT} ${SERVICE_USER}@${PUBLIC_IP}"
         echo "                           (Recommended: enables encrypted transit & browser Passkey authentication)"
@@ -133,8 +133,8 @@ if [[ "$MODE" == "--daemon" || "$MODE" == "-d" || "$MODE" == "daemon" || "$MODE"
     exit 0
 fi
 
-echo "[*] Starting WebDep server on http://${PUBLIC_IP}:${PORT} (0.0.0.0:${PORT})"
-echo "[*] Localhost URL: http://127.0.0.1:${PORT}"
+echo "[*] Starting WebDep server on ${PUBLIC_IP}:${PORT} (0.0.0.0:${PORT})"
+echo "[*] Localhost: 127.0.0.1:${PORT}"
 if [[ "${PUBLIC_IP}" != "127.0.0.1" ]]; then
     echo "[!] Security notice: Direct HTTP over public IP is unencrypted."
     echo "    Recommended for production: route via Caddy/HTTPS domain, or use an SSH tunnel:"

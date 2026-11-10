@@ -292,6 +292,21 @@ fn verify_power(
     Ok(u)
 }
 
+fn get_authorized_project(
+    state: &AppState,
+    headers: &HeaderMap,
+    power: &str,
+    project_id: i64,
+) -> Result<(User, crate::projects::Project), (StatusCode, String)> {
+    let actor = verify_power(state, headers, power, Some(project_id))?;
+    let p = state
+        .projects
+        .get(project_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    Ok((actor, p))
+}
+
 fn log_audit(state: &AppState, actor: &str, action: &str, target: Option<&str>, detail: Option<&str>) {
     log_audit_project(state, None, actor, action, target, detail);
 }
@@ -1235,6 +1250,23 @@ async fn create_project_handler(
     Ok(Json(created))
 }
 
+fn normalize_domain(d: &str) -> String {
+    d.trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .trim()
+        .to_lowercase()
+}
+
+fn sanitize_domains<I: IntoIterator<Item = String>>(domains: I) -> Vec<String> {
+    domains
+        .into_iter()
+        .map(|d| normalize_domain(&d))
+        .filter(|d| !d.is_empty())
+        .collect()
+}
+
 async fn update_project_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1242,19 +1274,7 @@ async fn update_project_handler(
     Json(mut p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
-    p.domains = p
-        .domains
-        .into_iter()
-        .map(|d| {
-            d.trim()
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .trim_end_matches('/')
-                .trim()
-                .to_lowercase()
-        })
-        .filter(|d| !d.is_empty())
-        .collect();
+    p.domains = sanitize_domains(p.domains);
 
     state
         .projects
@@ -1521,12 +1541,7 @@ async fn deploy_project_handler(
     AxPath(id): AxPath<i64>,
     body_bytes: axum::body::Bytes,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "deploy", id)?;
 
     let target_sha = serde_json::from_slice::<DeployPayload>(&body_bytes)
         .ok()
@@ -1573,12 +1588,7 @@ async fn rollback_project_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<RollbackPayload>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "deploy", id)?;
 
     let dep_id = state.deployer.create_deployment(&p, "rollback", &actor.username, "manual");
     let deployer = state.deployer.clone();
@@ -1599,34 +1609,26 @@ async fn rollback_project_handler(
     Ok(Json(ActionResponse { deployment_id: dep_id }))
 }
 
-async fn start_project_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "process", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
-
-    let env = state.projects.get_env_map(id);
-    match state.runtime.start_project(&p, env, None).await {
+async fn start_project_with_audit(
+    state: &AppState,
+    actor: &crate::auth::User,
+    p: &crate::projects::Project,
+    action: &str,
+    action_label: &str,
+) -> Result<u32, (StatusCode, String)> {
+    let env = state.projects.get_env_map(p.id);
+    match state.runtime.start_project(p, env, None).await {
         Ok(pid) => {
             state.cache.invalidate_all();
             log_audit_project(
-                &state,
+                state,
                 Some(p.id),
                 &actor.username,
-                "container.start",
+                action,
                 Some(&p.name),
-                Some(&format!("Started website container (PID {}, Port {})", pid, p.port.unwrap_or(3000))),
+                Some(&format!("{} website container (PID {}, Port {})", action_label, pid, p.port.unwrap_or(3000))),
             );
-            Ok(Json(serde_json::json!({
-                "started": true,
-                "pid": pid
-            })))
+            Ok(pid)
         }
         Err(e) if e == "NOT_DEPLOYED_YET" => Err((
             StatusCode::BAD_REQUEST,
@@ -1636,17 +1638,25 @@ async fn start_project_handler(
     }
 }
 
+async fn start_project_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "process", id)?;
+    let pid = start_project_with_audit(&state, &actor, &p, "container.start", "Started").await?;
+    Ok(Json(serde_json::json!({
+        "started": true,
+        "pid": pid
+    })))
+}
+
 async fn stop_project_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "process", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "process", id)?;
 
     state
         .runtime
@@ -1672,34 +1682,11 @@ async fn restart_project_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "process", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "process", id)?;
 
     let _ = state.runtime.stop_project(&p).await;
-    let env = state.projects.get_env_map(id);
-    match state.runtime.start_project(&p, env, None).await {
-        Ok(pid) => {
-            state.cache.invalidate_all();
-            log_audit_project(
-                &state,
-                Some(p.id),
-                &actor.username,
-                "container.restart",
-                Some(&p.name),
-                Some(&format!("Restarted website container (PID {}, Port {})", pid, p.port.unwrap_or(3000))),
-            );
-            Ok(Json(serde_json::json!({ "started": true, "pid": pid })))
-        }
-        Err(e) if e == "NOT_DEPLOYED_YET" => Err((
-            StatusCode::BAD_REQUEST,
-            format!("Website '{}' has not been deployed yet. Please click 'Deploy' to build and deploy it first.", p.name),
-        )),
-        Err(e) => Err((StatusCode::BAD_REQUEST, e)),
-    }
+    let pid = start_project_with_audit(&state, &actor, &p, "container.restart", "Restarted").await?;
+    Ok(Json(serde_json::json!({ "started": true, "pid": pid })))
 }
 
 #[derive(Deserialize, Default)]
@@ -1713,12 +1700,7 @@ async fn toggle_maintenance_handler(
     AxPath(id): AxPath<i64>,
     payload: Option<Json<MaintenancePayload>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "process", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".into()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "process", id)?;
 
     let target_enabled = payload
         .and_then(|Json(b)| b.enabled)
@@ -1821,12 +1803,7 @@ async fn create_release_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<CreateReleasePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Website not found".to_string()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "deploy", id)?;
 
     let source = payload.source.unwrap_or_else(|| "deploy".to_string());
     let note = payload.note.unwrap_or_else(|| "Manual Release".to_string());
@@ -1956,14 +1933,7 @@ async fn apply_caddy_handler(
                             .map(|part| part.to_string())
                             .collect::<Vec<String>>()
                     })
-                    .map(|d| {
-                        d.trim()
-                            .trim_start_matches("https://")
-                            .trim_start_matches("http://")
-                            .trim_end_matches('/')
-                            .trim()
-                            .to_lowercase()
-                    })
+                    .map(|d| normalize_domain(&d))
                     .filter(|d| !d.is_empty())
                     .collect();
 
@@ -2254,6 +2224,39 @@ struct OverviewResponse {
     monitor: crate::monitor::SystemMetrics,
 }
 
+fn fetch_overview_deployment(
+    conn: &rusqlite::Connection,
+    status_filter: &str,
+    project_id: i64,
+    project_name: &str,
+) -> Option<crate::deployer::Deployment> {
+    let sql = format!(
+        "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at \
+         FROM deployments WHERE project_id = ? AND {} ORDER BY id DESC LIMIT 1",
+        status_filter
+    );
+    conn.query_row(
+        &sql,
+        rusqlite::params![project_id],
+        |r| Ok(crate::deployer::Deployment {
+            id: r.get(0)?,
+            project_id: r.get(1)?,
+            project_name: Some(project_name.to_string()),
+            release_id: r.get(2)?,
+            from_release_id: r.get(3)?,
+            kind: r.get(4)?,
+            status: r.get(5)?,
+            stage: r.get(6)?,
+            sha: r.get(7)?,
+            trigger: r.get(8)?,
+            actor: r.get(9)?,
+            error: r.get(10)?,
+            started_at: r.get(11)?,
+            finished_at: r.get(12)?,
+        }),
+    ).ok()
+}
+
 async fn overview_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -2280,52 +2283,12 @@ async fn overview_handler(
 
         let last_success = {
             let conn = state.db.lock().unwrap();
-            conn.query_row(
-                "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at
-                 FROM deployments WHERE project_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1",
-                rusqlite::params![p.id],
-                |r| Ok(crate::deployer::Deployment {
-                    id: r.get(0)?,
-                    project_id: r.get(1)?,
-                    project_name: Some(p.name.clone()),
-                    release_id: r.get(2)?,
-                    from_release_id: r.get(3)?,
-                    kind: r.get(4)?,
-                    status: r.get(5)?,
-                    stage: r.get(6)?,
-                    sha: r.get(7)?,
-                    trigger: r.get(8)?,
-                    actor: r.get(9)?,
-                    error: r.get(10)?,
-                    started_at: r.get(11)?,
-                    finished_at: r.get(12)?,
-                }),
-            ).ok()
+            fetch_overview_deployment(&conn, "status = 'success'", p.id, &p.name)
         };
 
         let active = {
             let conn = state.db.lock().unwrap();
-            conn.query_row(
-                "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at
-                 FROM deployments WHERE project_id = ? AND status IN ('running', 'pending') ORDER BY id DESC LIMIT 1",
-                rusqlite::params![p.id],
-                |r| Ok(crate::deployer::Deployment {
-                    id: r.get(0)?,
-                    project_id: r.get(1)?,
-                    project_name: Some(p.name.clone()),
-                    release_id: r.get(2)?,
-                    from_release_id: r.get(3)?,
-                    kind: r.get(4)?,
-                    status: r.get(5)?,
-                    stage: r.get(6)?,
-                    sha: r.get(7)?,
-                    trigger: r.get(8)?,
-                    actor: r.get(9)?,
-                    error: r.get(10)?,
-                    started_at: r.get(11)?,
-                    finished_at: r.get(12)?,
-                }),
-            ).ok()
+            fetch_overview_deployment(&conn, "status IN ('running', 'pending')", p.id, &p.name)
         };
 
         items.push(OverviewProjectItem {
@@ -3945,12 +3908,7 @@ async fn delete_release_handler(
     headers: HeaderMap,
     AxPath((id, release_id)): AxPath<(i64, i64)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Website not found".to_string()))?;
+    let (actor, p) = get_authorized_project(&state, &headers, "deploy", id)?;
 
     if p.current_release_id == Some(release_id) {
         return Err((

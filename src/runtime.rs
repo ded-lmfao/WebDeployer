@@ -26,6 +26,20 @@ pub struct WebsiteContainer {
     pub run_dir: PathBuf,
 }
 
+fn copy_dir_files_if_missing(src_dir: &Path, dst_dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(src_dir) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            if src.is_file() {
+                let dst = dst_dir.join(entry.file_name());
+                if !dst.exists() {
+                    let _ = std::fs::copy(&src, &dst);
+                }
+            }
+        }
+    }
+}
+
 pub struct Runtime {
     db: DbPool,
     logs: Logs,
@@ -443,17 +457,7 @@ impl Runtime {
         // Seamless migration from legacy `data/app-data/<slug>` into `data/containers/<slug>/db`
         let legacy_app_data = cwd.join("data").join("app-data").join(&safe_slug);
         if legacy_app_data.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&legacy_app_data) {
-                for entry in entries.flatten() {
-                    let src = entry.path();
-                    if src.is_file() {
-                        let dst = db_dir.join(entry.file_name());
-                        if !dst.exists() {
-                            let _ = std::fs::copy(&src, &dst);
-                        }
-                    }
-                }
-            }
+            copy_dir_files_if_missing(&legacy_app_data, &db_dir);
         }
 
         let port = p.port.unwrap_or(3000);
@@ -564,17 +568,7 @@ impl Runtime {
         // If `work_dir/data` is a real directory (not a symlink/junction), migrate any files inside it first
         if let Ok(meta) = std::fs::symlink_metadata(&data_subdir) {
             if meta.is_dir() && !meta.file_type().is_symlink() {
-                if let Ok(entries) = std::fs::read_dir(&data_subdir) {
-                    for entry in entries.flatten() {
-                        let src = entry.path();
-                        if src.is_file() {
-                            let dst = target_db_dir.join(entry.file_name());
-                            if !dst.exists() {
-                                let _ = std::fs::copy(&src, &dst);
-                            }
-                        }
-                    }
-                }
+                copy_dir_files_if_missing(&data_subdir, target_db_dir);
                 #[cfg(windows)]
                 {
                     let link_str = data_subdir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
@@ -1086,19 +1080,21 @@ impl Runtime {
         Ok(pid)
     }
 
+    fn mark_project_stopped(&self, project_id: i64) {
+        if let Ok(conn) = self.db.lock() {
+            let _ = conn.execute(
+                "UPDATE projects SET app_status='stopped', app_pid=NULL, app_started_at=NULL WHERE id=?",
+                rusqlite::params![project_id],
+            );
+        }
+    }
+
     pub async fn stop_project(&self, p: &Project) -> Result<(), String> {
         // Bump stop_seq first so any in-progress deployment knows Stop was requested
         self.bump_stop_seq(p.id);
 
         // Immediately update SQLite status to stopped
-        {
-            let conn = self.db.lock().unwrap();
-            conn.execute(
-                "UPDATE projects SET app_status='stopped', app_pid=NULL, app_started_at=NULL WHERE id=?",
-                rusqlite::params![p.id],
-            )
-            .ok();
-        }
+        self.mark_project_stopped(p.id);
 
         // Acquire per-project lock and synchronously terminate all processes + port listeners for this website
         let proj_lock = self.get_project_lock(p.id);
@@ -1106,14 +1102,7 @@ impl Runtime {
         self.kill_project_everything(p).await;
 
         // Re-ensure SQLite status is stopped in case a concurrent start finished just before the lock
-        {
-            let conn = self.db.lock().unwrap();
-            conn.execute(
-                "UPDATE projects SET app_status='stopped', app_pid=NULL, app_started_at=NULL WHERE id=?",
-                rusqlite::params![p.id],
-            )
-            .ok();
-        }
+        self.mark_project_stopped(p.id);
 
         self.logs.add(
             Some(p.id),
