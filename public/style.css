@@ -772,13 +772,293 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .toast.toast-info { border-left-color: var(--info); }
 .toast.toast-warning { border-left-color: var(--warning); }
 
-/* ---------- Login ---------- */
-#login-view { position: fixed; inset: 0; background: var(--bg-canvas); display: flex; align-items: center; justify-content: center; z-index: 500; padding: 20px; }
-.login-card { width: 100%; max-width: 360px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); padding: 32px 28px; }
-.login-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 26px; text-align: center; }
-.login-brand .brand-icon { width: 40px; height: 40px; font-size: 15px; border-radius: var(--radius-lg); }
-.login-brand h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
-.login-brand p { font-size: 13px; color: var(--text-muted); }
+/* ---------- Minimalist Pre-Auth & Login View ---------- */
+#login-view {
+  position: fixed;
+  inset: 0;
+  background: #090a0f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  padding: 24px;
+  overflow: hidden;
+}
+
+/* Minimal Ambient Background */
+.login-backdrop-minimal {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.login-glow-top {
+  position: absolute;
+  top: -15%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 700px;
+  height: 450px;
+  background: radial-gradient(ellipse at center, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.02) 45%, transparent 70%);
+  pointer-events: none;
+}
+
+.login-dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse at 50% 40%, rgba(0, 0, 0, 0.75) 15%, transparent 65%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, rgba(0, 0, 0, 0.75) 15%, transparent 65%);
+  pointer-events: none;
+}
+
+/* Centered Minimalist Sign-In Card */
+.login-card-container {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.login-card {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  background: rgba(16, 17, 23, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 32px 28px;
+  box-shadow: 0 20px 45px -15px rgba(0, 0, 0, 0.75);
+}
+
+.login-card-header {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 22px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.login-card-header .brand-icon {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+  flex-shrink: 0;
+}
+
+.login-card-header-text h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f4f4f5;
+  margin: 0 0 2px 0;
+  letter-spacing: -0.02em;
+}
+
+.login-card-header-text p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Clean, Spacious Form Elements (No Clutter) */
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-icon svg {
+  position: absolute;
+  left: 13px;
+  color: var(--text-dim);
+  pointer-events: none;
+  transition: color 0.15s;
+}
+
+.input-with-icon .form-control {
+  padding-left: 38px;
+  height: 42px;
+  font-size: 13.5px;
+  background: rgba(13, 13, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.input-with-icon .form-control:focus {
+  background: rgba(16, 16, 20, 0.95);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+.input-with-icon .form-control:focus + svg,
+.input-with-icon:focus-within svg {
+  color: var(--accent-light);
+}
+
+.form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.btn-text-action {
+  background: none;
+  border: none;
+  color: var(--accent-light);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.btn-text-action:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.btn-login-submit {
+  width: 100%;
+  height: 42px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  background: var(--accent);
+  transition: background 0.15s, transform 0.1s;
+}
+
+.btn-login-submit:hover {
+  background: var(--accent-hover);
+}
+
+.btn-login-submit:active {
+  transform: scale(0.99);
+}
+
+/* Minimalist Passkey Section */
+.login-passkey-wrap {
+  margin-top: 14px;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.login-divider span {
+  padding: 0 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.btn-passkey-sleek {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-passkey-sleek:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* 2FA Challenge */
+.login-2fa-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.login-2fa-banner svg {
+  color: var(--accent-light);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.login-2fa-input {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  letter-spacing: 0.15em;
+  text-align: center;
+  font-weight: 700;
+  height: 46px;
+}
+
+.btn-text-back {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 8px;
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 10px;
+  transition: color 0.15s;
+}
+
+.btn-text-back:hover {
+  color: var(--text-main);
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 26px 20px;
+  }
+}
 
 /* ---------- Website workspace banner ---------- */
 .ws-banner { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); margin-bottom: 22px; overflow: hidden; }

@@ -488,7 +488,10 @@ function showLogin() {
     appEl.setAttribute('aria-hidden', 'true');
   }
   const loginView = document.getElementById('login-view');
-  if (loginView) loginView.style.display = 'flex';
+  if (loginView) {
+    loginView.style.display = 'flex';
+    startLoginCanvasAnimation();
+  }
 
   const lf = document.getElementById('login-form');
   const mf = document.getElementById('login-2fa-form');
@@ -496,10 +499,50 @@ function showLogin() {
   if (mf) mf.style.display = 'none';
 
   const passInput = document.getElementById('login-password');
-  if (passInput) passInput.value = '';
+  if (passInput) {
+    passInput.value = '';
+    passInput.type = 'password';
+  }
+  const toggleBtn = document.getElementById('toggle-pw-visibility');
+  if (toggleBtn) toggleBtn.textContent = 'Show';
   const codeInput = document.getElementById('login-2fa-code');
   if (codeInput) codeInput.value = '';
 }
+
+let loginCanvasAnimId = null;
+let loginCanvasCleanup = null;
+
+function startLoginCanvasAnimation() {
+  // Clean, minimalist pre-auth: 0% CPU, no heavy background animation loops
+  stopLoginCanvasAnimation();
+}
+
+function stopLoginCanvasAnimation() {
+  if (loginCanvasAnimId) {
+    cancelAnimationFrame(loginCanvasAnimId);
+    loginCanvasAnimId = null;
+  }
+  if (loginCanvasCleanup) {
+    loginCanvasCleanup();
+    loginCanvasCleanup = null;
+  }
+}
+window.startLoginCanvasAnimation = startLoginCanvasAnimation;
+window.stopLoginCanvasAnimation = stopLoginCanvasAnimation;
+
+function toggleLoginPasswordVisibility() {
+  const el = document.getElementById('login-password');
+  const btn = document.getElementById('toggle-pw-visibility');
+  if (!el || !btn) return;
+  if (el.type === 'password') {
+    el.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    el.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
 
 function hasPower(power) {
   if (!state.user) return false;
@@ -537,6 +580,7 @@ async function onAuthenticated(isFreshLogin = false) {
   await loadProjects();
 
   document.getElementById('login-view').style.display = 'none';
+  stopLoginCanvasAnimation();
   const appEl = document.getElementById('app');
   if (appEl) {
     appEl.style.display = 'flex';
