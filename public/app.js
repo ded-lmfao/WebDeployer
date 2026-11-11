@@ -953,6 +953,11 @@ function renderWebsiteWorkspaceHeader() {
   };
   const hiddenSecondaryTabs = new Set(['rollbacks', 'monitor']);
 
+  const depTabLabel = document.getElementById('ws-tab-deployments-label');
+  if (depTabLabel) {
+    depTabLabel.textContent = isService ? 'Pipeline' : 'Deployments';
+  }
+
   const tabsBar = document.getElementById('ws-tabs-bar');
   let activeBtn = null;
   document.querySelectorAll('#ws-tabs-bar .ws-tab-item').forEach((btn) => {
@@ -962,7 +967,7 @@ function renderWebsiteWorkspaceHeader() {
     const isLocalService = isService && (!p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink')));
     if (tab === 'files' && !isService) {
       btn.style.display = 'none';
-    } else if (isLocalService && (tab === 'github' || tab === 'deployments' || tab === 'releases' || tab === 'rollbacks')) {
+    } else if (isLocalService && (tab === 'github' || tab === 'releases' || tab === 'rollbacks')) {
       btn.style.display = 'none';
     } else if (tab === 'env' && isService) {
       btn.style.display = 'none';
@@ -1378,6 +1383,13 @@ async function loadOverview() {
     // Render active resources telemetry table
     renderResourceBreakdown(data.resources);
 
+    // Keep service pipelines synchronized with live telemetry & deployments
+    if (state.currentView === 'services') {
+      (state.projects || []).filter((p) => p.project_kind === 'service').forEach((p) => {
+        if (typeof syncServiceCardPipeline === 'function') syncServiceCardPipeline(p);
+      });
+    }
+
     // Active deployment box
     const active = data.projects.find((x) => x.active);
     const actBox = document.getElementById('overview-active-deployment-box');
@@ -1525,6 +1537,108 @@ document.querySelectorAll('#projects-status-filters .pill').forEach((btn) => {
 // ============================================================================
 // View 2.5: Backend Services & Bots
 // ============================================================================
+
+// Backend Services & Bots Pipeline Stages (5-Step Lifecycle & Deployment Pipeline)
+const SERVICE_PIPELINE_STAGES = [
+  { id: 'source', label: 'Source' },
+  { id: 'deps', label: 'Deps' },
+  { id: 'build', label: 'Build' },
+  { id: 'daemon', label: 'Daemon' },
+  { id: 'online', label: 'Online' },
+];
+
+const SERVICE_STAGE_MAP = {
+  pending: 'source',
+  fetching: 'source',
+  pulling: 'source',
+  source: 'source',
+  sandbox: 'source',
+  port: 'source',
+
+  installing: 'deps',
+  install: 'deps',
+  deps: 'deps',
+
+  building: 'build',
+  build: 'build',
+  config: 'build',
+
+  deploying: 'daemon',
+  deploy: 'daemon',
+  spawning: 'daemon',
+  daemon: 'daemon',
+
+  health_checking: 'online',
+  healthy: 'online',
+  online: 'online',
+  success: 'online',
+};
+
+function renderSingleServicePipeline(serviceId, currentStage, currentStatus, detailText = '') {
+  const containerId = `service-pipeline-track-${serviceId}`;
+  const container = document.getElementById(containerId);
+  const badge = document.getElementById(`service-pipeline-badge-${serviceId}`);
+  if (!container) return;
+
+  const mappedStage = SERVICE_STAGE_MAP[currentStage] || 'source';
+
+  if (badge) {
+    if (currentStatus === 'idle') {
+      badge.textContent = detailText ? detailText.toUpperCase() : 'IDLE';
+      badge.className = 'badge badge-neutral';
+      badge.onclick = null;
+      badge.style.cursor = 'default';
+    } else if (currentStatus === 'failed') {
+      badge.textContent = detailText ? detailText.toUpperCase() : `FAILED (${currentStage.toUpperCase()}) — VIEW LOGS`;
+      badge.className = 'badge badge-danger';
+      badge.style.cursor = 'pointer';
+      badge.onclick = (e) => {
+        e.stopPropagation();
+        openWebsiteWorkspace(serviceId, 'logs');
+      };
+    } else if (currentStatus === 'success') {
+      badge.textContent = detailText ? detailText.toUpperCase() : 'ONLINE (READY)';
+      badge.className = 'badge badge-success';
+      badge.onclick = null;
+      badge.style.cursor = 'default';
+    } else {
+      badge.textContent = detailText ? detailText.toUpperCase() : `RUNNING (${currentStage.toUpperCase()})`;
+      badge.className = 'badge badge-warning';
+      badge.onclick = null;
+      badge.style.cursor = 'default';
+    }
+  }
+
+  renderPipelineStages(containerId, mappedStage, currentStatus, serviceId, SERVICE_PIPELINE_STAGES);
+}
+window.renderSingleServicePipeline = renderSingleServicePipeline;
+
+function syncServiceCardPipeline(p) {
+  if (!p) return;
+  const ovItem = (state.overview?.projects || []).find((x) => x.project?.id === p.id);
+  const activeDep = ovItem?.active || (state.activeDeployment && state.activeDeployment.project_id === p.id ? state.activeDeployment : null);
+
+  if (activeDep && (activeDep.status === 'running' || activeDep.status === 'pending')) {
+    const stageLabel = activeDep.stage ? activeDep.stage.toUpperCase() : 'DEPLOYING';
+    renderSingleServicePipeline(p.id, activeDep.stage, activeDep.status, `DEPLOY (${stageLabel})`);
+    return;
+  }
+
+  if (p.app_status === 'starting') {
+    renderSingleServicePipeline(p.id, 'daemon', 'running', 'STARTING DAEMON');
+  } else if (p.app_status === 'stopping') {
+    renderSingleServicePipeline(p.id, 'daemon', 'running', 'STOPPING...');
+  } else if (p.app_status === 'running') {
+    const pidText = p.app_pid ? `ONLINE (PID ${p.app_pid})` : 'ONLINE (READY)';
+    renderSingleServicePipeline(p.id, 'online', 'success', pidText);
+  } else if (p.app_status === 'error' || p.app_status === 'failed') {
+    renderSingleServicePipeline(p.id, 'daemon', 'failed', 'FAILED — VIEW LOGS');
+  } else {
+    renderSingleServicePipeline(p.id, 'source', 'idle', 'STOPPED');
+  }
+}
+window.syncServiceCardPipeline = syncServiceCardPipeline;
+
 function renderServicesList() {
   const container = document.getElementById('services-cards-container');
   if (!container) return;
@@ -1652,6 +1766,19 @@ function renderServicesList() {
           ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">PID ${p.app_pid}</span>` : ''}
         </div>
 
+        <!-- Per-Service Dedicated Organic Fluid Water Pipeline Track -->
+        <div style="margin: 6px 0 10px 0; padding: 8px 10px; background: var(--bg-alt); border-radius: var(--radius-md); border: 1px solid var(--border);" onclick="event.stopPropagation()">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);">Lifecycle Pipeline</span>
+            <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" id="service-pipeline-badge-${p.id}" style="font-size: 9.5px; padding: 2px 7px;">
+              ${isOnline ? 'ONLINE (READY)' : 'IDLE'}
+            </span>
+          </div>
+          <div class="pipeline-track card-pipeline-track" id="service-pipeline-track-${p.id}" style="min-height: auto;">
+            <!-- Rendered with fluid animated water vials and pipes -->
+          </div>
+        </div>
+
         <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;">
           ${accessBadge}
           ${domainBadge}
@@ -1686,6 +1813,11 @@ function renderServicesList() {
       </div>
     `;
   }).join('');
+
+  // Hydrate each service card's dedicated water pipeline
+  filtered.forEach((p) => {
+    syncServiceCardPipeline(p);
+  });
 }
 window.renderServicesList = renderServicesList;
 
@@ -2627,14 +2759,20 @@ async function loadDeploymentsView() {
   const query = p ? `?project=${p.id}&limit=200` : '?limit=200';
   const tbody = document.getElementById('deployments-table-body');
 
+  const isService = p && p.project_kind === 'service';
+  const depTitle = document.getElementById('deployments-view-title');
+  const depDesc = document.getElementById('deployments-view-desc');
+  if (depTitle) {
+    depTitle.textContent = isService ? 'Service Lifecycle & Pipeline' : 'Deployments Pipeline';
+  }
+  if (depDesc) {
+    depDesc.textContent = isService
+      ? 'Automated service daemon lifecycle, health verification, and deployment history'
+      : 'Automated zero-downtime deployment pipelines and operation history';
+  }
+
   try {
     const deployments = await api(`/api/deployments${query}`);
-    if (!deployments.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px;">No deployments found.</td></tr>';
-      const bar = document.getElementById('deployments-pagination');
-      if (bar) bar.innerHTML = '';
-      return;
-    }
 
     // Check if any deployment is active
     const active = deployments.find((d) => d.status === 'running' || d.status === 'pending');
@@ -2643,34 +2781,62 @@ async function loadDeploymentsView() {
     const latest = deployments.length ? deployments[0] : null;
 
     if (active) {
-      badge.textContent = `${active.kind.toUpperCase()} (${active.stage.toUpperCase()})`;
-      badge.className = 'badge badge-warning';
+      if (badge) {
+        badge.textContent = `${active.kind.toUpperCase()} (${active.stage.toUpperCase()})`;
+        badge.className = 'badge badge-warning';
+      }
       renderPipelineStages('main-pipeline-track', active.stage, active.status, active.id);
     } else if (latest) {
-      const p = waterPipelines['main-pipeline-track'];
+      const pWater = waterPipelines['main-pipeline-track'];
       if (latest.status === 'success') {
-        if (p && p.currentProgress < 6.95 && p.lastDeploymentId === latest.id) {
-          badge.textContent = 'FINALIZING DEPLOYMENT...';
-          badge.className = 'badge badge-warning';
+        if (pWater && pWater.currentProgress < 6.95 && pWater.lastDeploymentId === latest.id) {
+          if (badge) {
+            badge.textContent = 'FINALIZING DEPLOYMENT...';
+            badge.className = 'badge badge-warning';
+          }
           renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
         } else {
-          badge.textContent = 'DEPLOYED (LIVE)';
-          badge.className = 'badge badge-success';
+          if (badge) {
+            badge.textContent = 'DEPLOYED (LIVE)';
+            badge.className = 'badge badge-success';
+          }
           renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
         }
       } else if (latest.status === 'failed') {
-        badge.textContent = `FAILED (${latest.stage.toUpperCase()})`;
-        badge.className = 'badge badge-danger';
+        if (badge) {
+          badge.textContent = `FAILED (${latest.stage.toUpperCase()})`;
+          badge.className = 'badge badge-danger';
+        }
         renderPipelineStages('main-pipeline-track', latest.stage, 'failed', latest.id);
       } else {
-        badge.textContent = 'IDLE';
-        badge.className = 'badge badge-neutral';
+        if (badge) {
+          badge.textContent = 'IDLE';
+          badge.className = 'badge badge-neutral';
+        }
         renderPipelineStages('main-pipeline-track', 'idle', 'idle');
       }
+    } else if (p && p.app_status === 'running') {
+      if (badge) {
+        badge.textContent = 'ONLINE (LIVE)';
+        badge.className = 'badge badge-success';
+      }
+      renderPipelineStages('main-pipeline-track', 'health_checking', 'success', null);
     } else {
-      badge.textContent = 'IDLE';
-      badge.className = 'badge badge-neutral';
+      if (badge) {
+        badge.textContent = 'IDLE';
+        badge.className = 'badge badge-neutral';
+      }
       renderPipelineStages('main-pipeline-track', 'idle', 'idle');
+    }
+
+    if (!deployments.length) {
+      const emptyMsg = isService
+        ? 'No deployment records yet. Service is supervised and managed via daemon lifecycle.'
+        : 'No deployments found.';
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 24px;">${emptyMsg}</td></tr>`;
+      const bar = document.getElementById('deployments-pagination');
+      if (bar) bar.innerHTML = '';
+      return;
     }
 
     paginateAndRender(deployments, 'deployments', 'deployments-pagination', (slice) => {
@@ -2688,7 +2854,7 @@ window.loadDeploymentsView = loadDeploymentsView;
 const waterPipelines = {};
 
 function initWaterPipelineDOM(container, containerId, stages = PIPELINE_STAGES) {
-  const isCompact = container.classList.contains('card-pipeline-track') || containerId.startsWith('db-pipeline-track') || container.closest('.card') !== null;
+  const isCompact = container.classList.contains('card-pipeline-track') || containerId.startsWith('db-pipeline-track') || containerId.startsWith('service-pipeline-track') || container.closest('.card') !== null;
   const wrapperClass = isCompact ? 'water-pipeline-wrapper compact' : 'water-pipeline-wrapper';
   container.innerHTML = `
     <div class="${wrapperClass}" id="water-wrapper-${containerId}">
@@ -2949,6 +3115,14 @@ function updateWaterDOM(pipeline) {
       }
       renderWebsiteWorkspaceHeader();
     }
+    const svcMatch = pipeline.containerId.match(/^service-pipeline-track-(\d+)$/);
+    if (svcMatch) {
+      const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
+      if (sBadge && !sBadge.textContent.includes('ONLINE')) {
+        sBadge.textContent = 'ONLINE (READY)';
+        sBadge.className = 'badge badge-success';
+      }
+    }
   } else if (isDraining && P > 0.1) {
     if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
       const badge = document.getElementById('pipeline-status-badge');
@@ -2957,12 +3131,28 @@ function updateWaterDOM(pipeline) {
         badge.className = 'badge badge-warning';
       }
     }
+    const svcMatch = pipeline.containerId.match(/^service-pipeline-track-(\d+)$/);
+    if (svcMatch) {
+      const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
+      if (sBadge && !sBadge.textContent.includes('STOPPING')) {
+        sBadge.textContent = 'STOPPING...';
+        sBadge.className = 'badge badge-warning';
+      }
+    }
   } else if (pipeline.status === 'idle' && P <= 0.05) {
     if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
       const badge = document.getElementById('pipeline-status-badge');
       if (badge && badge.textContent !== 'IDLE') {
         badge.textContent = 'IDLE';
         badge.className = 'badge badge-neutral';
+      }
+    }
+    const svcMatch = pipeline.containerId.match(/^service-pipeline-track-(\d+)$/);
+    if (svcMatch) {
+      const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
+      if (sBadge && sBadge.textContent !== 'STOPPED' && sBadge.textContent !== 'IDLE') {
+        sBadge.textContent = 'STOPPED';
+        sBadge.className = 'badge badge-neutral';
       }
     }
   }
@@ -3168,10 +3358,17 @@ async function deployProject(projectId, sha = null) {
   try {
     resetWaterPipeline('main-pipeline-track');
     resetWaterPipeline('overview-pipeline-track');
+    if (p.project_kind === 'service') {
+      resetWaterPipeline(`service-pipeline-track-${p.id}`);
+      renderSingleServicePipeline(p.id, 'source', 'running', 'DEPLOY (SOURCE)');
+    }
     const res = await api(`/api/projects/${p.id}/deploy`, { method: 'POST', body: sha ? { sha } : {} });
     toast(`Deployment #${res.deploymentId} started for ${p.name}!`, 'success');
     navigateTo('deployments', p.id);
   } catch (err) {
+    if (p.project_kind === 'service') {
+      renderSingleServicePipeline(p.id, 'source', 'failed', 'DEPLOY FAILED');
+    }
     toast(`Deployment failed to start: ${err.message}`, 'error');
     btns.forEach((b) => {
       b.disabled = false;
@@ -5333,15 +5530,36 @@ async function startProject(projectId) {
   });
 
   const proj = state.projects.find((x) => x.id === projectId);
-  if (proj) proj.app_status = 'starting';
+  if (proj) {
+    proj.app_status = 'starting';
+    if (proj.project_kind === 'service') {
+      renderSingleServicePipeline(projectId, 'source', 'running', 'CHECKING FILES & PORT');
+      setTimeout(() => {
+        if (proj.app_status === 'starting') renderSingleServicePipeline(projectId, 'deps', 'running', 'ENVIRONMENT & DEPS');
+      }, 700);
+      setTimeout(() => {
+        if (proj.app_status === 'starting') renderSingleServicePipeline(projectId, 'daemon', 'running', 'SPAWNING DAEMON');
+      }, 1400);
+    }
+  }
 
   try {
     const res = await api(`/api/projects/${projectId}/start`, { method: 'POST' });
     if (handleAutoDeployedRedirect(res, projectId)) return;
-    if (proj) proj.app_status = 'running';
+    if (proj) {
+      proj.app_status = 'running';
+      if (proj.project_kind === 'service') {
+        renderSingleServicePipeline(projectId, 'online', 'success', proj.app_pid ? `ONLINE (PID ${proj.app_pid})` : 'ONLINE (READY)');
+      }
+    }
     toast('Process started successfully.', 'success');
   } catch (err) {
-    if (proj) proj.app_status = 'stopped';
+    if (proj) {
+      proj.app_status = 'stopped';
+      if (proj.project_kind === 'service') {
+        renderSingleServicePipeline(projectId, 'daemon', 'failed', 'START FAILED');
+      }
+    }
     toast(`Start failed: ${err.message}`, 'error');
   } finally {
     state.lastWsBannerSig = null;
@@ -5358,14 +5576,29 @@ async function stopProject(projectId) {
   });
 
   const proj = state.projects.find((x) => x.id === projectId);
-  if (proj) proj.app_status = 'stopping';
+  if (proj) {
+    proj.app_status = 'stopping';
+    if (proj.project_kind === 'service') {
+      renderSingleServicePipeline(projectId, 'daemon', 'running', 'STOPPING...');
+    }
+  }
 
   try {
     await api(`/api/projects/${projectId}/stop`, { method: 'POST' });
-    if (proj) proj.app_status = 'stopped';
+    if (proj) {
+      proj.app_status = 'stopped';
+      if (proj.project_kind === 'service') {
+        renderSingleServicePipeline(projectId, 'source', 'idle', 'STOPPED');
+      }
+    }
     toast('Process stopped successfully.', 'info');
   } catch (err) {
-    if (proj) proj.app_status = 'running';
+    if (proj) {
+      proj.app_status = 'running';
+      if (proj.project_kind === 'service') {
+        renderSingleServicePipeline(projectId, 'online', 'success', 'ONLINE (READY)');
+      }
+    }
     toast(`Stop failed: ${err.message}`, 'error');
   } finally {
     state.lastWsBannerSig = null;
