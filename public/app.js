@@ -833,7 +833,7 @@ function renderWebsiteWorkspaceHeader() {
             <span class="ws-meta-item" title="Listening Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
           ` : ''}
           <span class="ws-meta-sep">&bull;</span>
-          <span class="ws-meta-item" title="Network Access Policy" style="font-size:11px;">${accessText}</span>
+          <span class="ws-meta-item" title="Click to configure Network Access Policy" style="font-size:11px; cursor:pointer;" onclick="openEditServiceModal(${p.id})">${accessText}</span>
           ${p.app_pid ? `
             <span class="ws-meta-sep">&bull;</span>
             <span class="ws-meta-item" title="Process PID">PID <strong style="color:var(--text-main); font-weight:600;">${p.app_pid}</strong></span>
@@ -854,6 +854,10 @@ function renderWebsiteWorkspaceHeader() {
                </a>`
             : '';
 
+        let accessText = '🔒 Localhost';
+        if (p.access_mode === 'allowlist') accessText = '🛡️ Allowlist';
+        else if (p.access_mode === 'public') accessText = '🌐 Public';
+
         links.innerHTML = `
           ${primaryLinkHtml ? `${primaryLinkHtml}<span class="ws-meta-sep">&bull;</span>` : ''}
           <span class="ws-meta-item" title="Git Branch">
@@ -868,6 +872,8 @@ function renderWebsiteWorkspaceHeader() {
             <span class="ws-meta-sep">&bull;</span>
             <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
           ` : ''}
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Click to configure Network Access Policy" style="font-size:11px; cursor:pointer;" onclick="openEditWebsiteModal(${p.id})">${accessText}</span>
         `;
       }
     }
@@ -1424,6 +1430,14 @@ function renderProjectsList() {
 
     const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
 
+    let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost</span>';
+    if (p.access_mode === 'allowlist') {
+      const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
+      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList})</span>`;
+    } else if (p.access_mode === 'public') {
+      accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
+    }
+
     return `
       <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
         <div class="project-card-header">
@@ -1445,6 +1459,9 @@ function renderProjectsList() {
             <span>${sha}</span>
           </div>
           ${p.port ? `<div class="project-meta-item"><span>Port <strong>${p.port}</strong></span></div>` : ''}
+          <div class="project-meta-item">
+            ${accessBadge}
+          </div>
         </div>
 
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
@@ -1696,7 +1713,7 @@ function openAddServiceModal() {
   document.getElementById('service-start-cmd').value = '';
 
   const portInput = document.getElementById('service-port');
-  if (portInput) portInput.value = '';
+  if (portInput) portInput.value = getNextAvailablePort(1112);
   const domainInput = document.getElementById('service-domain');
   if (domainInput) domainInput.value = '';
   const accessInput = document.getElementById('service-access-mode');
@@ -1722,6 +1739,8 @@ function applyServicePreset(preset) {
   const installInput = document.getElementById('service-install-cmd');
   const startInput = document.getElementById('service-start-cmd');
   const portInput = document.getElementById('service-port');
+  const isEditing = Boolean(document.getElementById('service-form-id')?.value);
+  const currentPort = portInput ? portInput.value : '';
 
   switch (preset) {
     case 'lavalink':
@@ -1732,7 +1751,7 @@ function applyServicePreset(preset) {
       }
       if (installInput) installInput.value = '';
       if (startInput) startInput.value = 'java -jar Lavalink.jar';
-      if (portInput) portInput.value = '1112';
+      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(1112);
       break;
     case 'discord-node':
       setServiceSourceMode('git');
@@ -1742,7 +1761,7 @@ function applyServicePreset(preset) {
       }
       if (installInput) installInput.value = 'npm ci';
       if (startInput) startInput.value = 'node index.js';
-      if (portInput) portInput.value = '';
+      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
       break;
     case 'discord-py':
       setServiceSourceMode('git');
@@ -1752,7 +1771,7 @@ function applyServicePreset(preset) {
       }
       if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
       if (startInput) startInput.value = 'python3 -u bot.py';
-      if (portInput) portInput.value = '';
+      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
       break;
     case 'telegram-py':
       setServiceSourceMode('git');
@@ -1762,7 +1781,7 @@ function applyServicePreset(preset) {
       }
       if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
       if (startInput) startInput.value = 'python3 -u main.py';
-      if (portInput) portInput.value = '';
+      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
       break;
     case 'worker-py':
       setServiceSourceMode('manual');
@@ -1772,7 +1791,7 @@ function applyServicePreset(preset) {
       }
       if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
       if (startInput) startInput.value = 'python3 -u worker.py';
-      if (portInput) portInput.value = '';
+      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
       break;
     case 'custom':
       if (nameInput && ['Lavalink', 'Discord Bot', 'Telegram Bot', 'Queue Worker'].includes(nameInput.value)) {
@@ -1781,7 +1800,7 @@ function applyServicePreset(preset) {
       }
       if (installInput) installInput.value = '';
       if (startInput) startInput.value = '';
-      if (portInput) portInput.value = '';
+      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
       break;
   }
 }
@@ -1806,7 +1825,7 @@ function openEditServiceModal(id) {
   setServiceSourceMode(isLocal ? 'manual' : 'git');
 
   const portInput = document.getElementById('service-port');
-  if (portInput) portInput.value = p.port || '';
+  if (portInput) portInput.value = p.port || getNextAvailablePort(8000);
   const domainInput = document.getElementById('service-domain');
   if (domainInput) domainInput.value = (p.domains && p.domains[0]) || '';
   const accessInput = document.getElementById('service-access-mode');
@@ -2184,6 +2203,12 @@ function openAddWebsiteModal() {
   const detectBtn = document.getElementById('website-detect-btn');
   if (detectBtn) detectBtn.style.display = 'none';
 
+  const accessInput = document.getElementById('website-access-mode');
+  if (accessInput) accessInput.value = 'local';
+  const ipsInput = document.getElementById('website-allowed-ips');
+  if (ipsInput) ipsInput.value = '';
+  toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+
   // Apply default preset (node)
   applyPreset('node');
 
@@ -2208,6 +2233,12 @@ async function openEditWebsiteModal(projectId) {
   document.getElementById('website-branch').value = p.branch || 'main';
   document.getElementById('website-domains').value = (p.domains || []).join(', ');
   document.getElementById('website-port').value = p.port || '';
+  const accessInput = document.getElementById('website-access-mode');
+  if (accessInput) accessInput.value = p.access_mode || 'local';
+  const ipsInput = document.getElementById('website-allowed-ips');
+  if (ipsInput) ipsInput.value = p.allowed_ips || '';
+  toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+
   const cleanDeployDir = (!p.deploy_dir || p.deploy_dir.includes('/var/www/') || p.deploy_dir.includes('\\var\\www\\'))
     ? `./data/sites/${p.slug}`
     : p.deploy_dir;
@@ -2253,14 +2284,27 @@ async function detectProjectConfiguration() {
 window.detectProjectConfiguration = detectProjectConfiguration;
 
 function getNextAvailablePort(basePort = 3000) {
-  const used = new Set((state.projects || []).map((p) => Number(p.port)).filter(Boolean));
-  used.add(4600); // Reserve WebDep dashboard port
-  let port = Number(basePort) || 3000;
-  while (used.has(port)) {
+  const used = new Set();
+  // Reserve system & platform daemon ports
+  [22, 80, 443, 4600].forEach((p) => used.add(p));
+
+  // Collect ports from all websites & backend services
+  (state.projects || []).forEach((p) => {
+    if (p.port) used.add(Number(p.port));
+  });
+
+  // Collect ports from all databases
+  (state.databases || []).forEach((d) => {
+    if (d.port) used.add(Number(d.port));
+  });
+
+  let port = Math.max(1024, Number(basePort) || 3000);
+  while (used.has(port) && port < 65535) {
     port++;
   }
   return port;
 }
+window.getNextAvailablePort = getNextAvailablePort;
 
 function applyPreset(type) {
   const conf = PRESETS[type] || PRESETS.node;
@@ -2342,6 +2386,8 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
   const id = document.getElementById('website-form-id').value;
   const domainsStr = document.getElementById('website-domains').value;
   const domains = cleanDomainList(domainsStr);
+  const accessMode = document.getElementById('website-access-mode')?.value || 'local';
+  const allowedIps = document.getElementById('website-allowed-ips')?.value.trim() || '';
 
   const payload = {
     name: document.getElementById('website-name').value.trim(),
@@ -2350,6 +2396,8 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     branch: document.getElementById('website-branch').value.trim() || 'main',
     domains,
     port: document.getElementById('website-port').value ? Number(document.getElementById('website-port').value) : null,
+    access_mode: accessMode,
+    allowed_ips: allowedIps,
     deploy_dir: document.getElementById('website-deploy-dir').value.trim(),
     deploy_method: document.getElementById('website-deploy-method').value,
     health_url: document.getElementById('website-health-url').value.trim(),
@@ -5525,10 +5573,7 @@ function openCreateDatabaseModal() {
 
   const portInput = document.getElementById('db-create-port');
   if (portInput) {
-    const usedPorts = new Set((state.databases || []).map((d) => d.port));
-    let nextPort = 5432;
-    while (usedPorts.has(nextPort)) nextPort++;
-    portInput.value = nextPort;
+    portInput.value = getNextAvailablePort(5432);
   }
 
   generateRandomDbPassword('db-create-password');

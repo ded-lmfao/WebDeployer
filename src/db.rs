@@ -570,3 +570,106 @@ pub fn purge_orphaned_project_data(conn: &Connection) {
         ",
     );
 }
+
+/// Global unified TCP port allocator across all platform workloads:
+/// - Guarantees non-conflicting ports across websites, backend services/bots, and databases
+/// - Protects reserved system & daemon ports (22 SSH, 80 HTTP, 443 HTTPS, 4600 WebDep daemon)
+/// - Probes physical OS socket availability via TcpListener on 127.0.0.1
+/// - Preserves running workload assignments across configuration updates
+pub fn allocate_global_unique_port(
+    conn: &Connection,
+    requested: Option<u16>,
+    default_start: u16,
+    exclude_project_id: Option<i64>,
+    exclude_database_id: Option<i64>,
+) -> Result<u16, String> {
+    // If updating an existing project and keeping its existing port, preserve it directly
+    if let (Some(id), Some(req)) = (exclude_project_id, requested) {
+        if req > 0 {
+            let current_port: Option<u16> = conn
+                .query_row("SELECT port FROM projects WHERE id = ?", [id], |r| r.get(0))
+                .ok()
+                .flatten();
+            if current_port == Some(req) {
+                return Ok(req);
+            }
+        }
+    }
+
+    // If updating an existing database and keeping its existing port, preserve it directly
+    if let (Some(id), Some(req)) = (exclude_database_id, requested) {
+        if req > 0 {
+            let current_port: Option<u16> = conn
+                .query_row("SELECT port FROM databases WHERE id = ?", [id], |r| r.get(0))
+                .ok();
+            if current_port == Some(req) {
+                return Ok(req);
+            }
+        }
+    }
+
+    let mut used = std::collections::HashSet::new();
+    // Well-known and reserved daemon ports
+    used.insert(22);
+    used.insert(80);
+    used.insert(443);
+    used.insert(4600);
+
+    // Query allocated ports from `projects` (websites & services)
+    let sql_proj = match exclude_project_id {
+        Some(id) => format!("SELECT port FROM projects WHERE port IS NOT NULL AND id != {}", id),
+        None => "SELECT port FROM projects WHERE port IS NOT NULL".to_string(),
+    };
+    if let Ok(mut stmt) = conn.prepare(&sql_proj) {
+        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, u16>(0)) {
+            for p in rows.flatten() {
+                used.insert(p);
+            }
+        }
+    }
+
+    // Query allocated ports from `databases`
+    let sql_db = match exclude_database_id {
+        Some(id) => format!("SELECT port FROM databases WHERE port IS NOT NULL AND id != {}", id),
+        None => "SELECT port FROM databases WHERE port IS NOT NULL".to_string(),
+    };
+    if let Ok(mut stmt) = conn.prepare(&sql_db) {
+        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, u16>(0)) {
+            for p in rows.flatten() {
+                used.insert(p);
+            }
+        }
+    }
+
+    // If a specific valid port was requested and is not in use or bound on the OS, assign it
+    if let Some(req) = requested {
+        if req > 0 && req < 65535 && !used.contains(&req) {
+            if std::net::TcpListener::bind(("127.0.0.1", req)).is_ok() {
+                return Ok(req);
+            }
+        }
+    }
+
+    // Search ascending from requested (if > 0) or default_start
+    let start = requested.filter(|&r| r > 0).unwrap_or(default_start).max(1024);
+    for port in start..65535 {
+        if used.contains(&port) {
+            continue;
+        }
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Ok(port);
+        }
+    }
+
+    // Search wrapped lower range 1024..start if upper range exhausted
+    for port in 1024..start {
+        if used.contains(&port) {
+            continue;
+        }
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Ok(port);
+        }
+    }
+
+    Err("No free TCP ports available in range 1024-65535".to_string())
+}

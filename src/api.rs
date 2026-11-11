@@ -1264,22 +1264,18 @@ async fn create_project_handler(
         let _ = tokio::fs::create_dir_all(&p.deploy_dir).await;
     }
 
-    // Ensure non-conflicting port across all hosted websites
-    if is_service {
-        if p.port == Some(0) {
-            p.port = None;
-        }
-    } else if let Ok(existing) = state.projects.list() {
-        let used_ports: std::collections::HashSet<u16> = existing.iter().filter_map(|x| x.port).collect();
-        let mut candidate = p.port.unwrap_or(3000);
-        while used_ports.contains(&candidate) || candidate == 4600 {
-            candidate += 1;
-        }
-        p.port = Some(candidate);
-        if p.health_url.contains(":3000") && candidate != 3000 {
-            p.health_url = p.health_url.replace(":3000", &format!(":{}", candidate));
-        }
+    // Always assign a guaranteed unique port across all workloads (websites, services, databases)
+    let allocated_port = {
+        let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let default_start = if is_service { 8000 } else { 3000 };
+        crate::db::allocate_global_unique_port(&conn, p.port, default_start, None, None)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    };
+
+    if !is_service && p.health_url.contains(":3000") && allocated_port != 3000 {
+        p.health_url = p.health_url.replace(":3000", &format!(":{}", allocated_port));
     }
+    p.port = Some(allocated_port);
 
     let id = state
         .projects
@@ -1288,9 +1284,9 @@ async fn create_project_handler(
 
     let audit_action = if is_service { "service.create" } else { "website.create" };
     let audit_desc = if is_service {
-        format!("Created backend service '{}' (Repo: {})", p.name, p.repo_url)
+        format!("Created backend service '{}' (Port {}, Repo: {})", p.name, allocated_port, p.repo_url)
     } else {
-        format!("Created website '{}' (Port {}, Repo: {})", p.name, p.port.unwrap_or(3000), p.repo_url)
+        format!("Created website '{}' (Port {}, Repo: {})", p.name, allocated_port, p.repo_url)
     };
     log_audit_project(
         &state,
@@ -1349,6 +1345,30 @@ async fn update_project_handler(
     let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
     p.domains = sanitize_domains(p.domains);
 
+    let prev = state.projects.get(id).ok().flatten();
+
+    // Ensure non-conflicting, valid port allocation across all workloads
+    if let Some(port) = p.port {
+        let allocated_port = {
+            let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            crate::db::allocate_global_unique_port(&conn, Some(port), port, Some(id), None)
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Port allocation error: {}", e)))?
+        };
+        p.port = Some(allocated_port);
+    } else if let Some(ref old_p) = prev {
+        if let Some(old_port) = old_p.port {
+            p.port = Some(old_port);
+        } else {
+            let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+            let allocated_port = {
+                let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                crate::db::allocate_global_unique_port(&conn, None, default_start, Some(id), None)
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+            };
+            p.port = Some(allocated_port);
+        }
+    }
+
     state
         .projects
         .update(id, &p)
@@ -1361,7 +1381,7 @@ async fn update_project_handler(
         if p.project_kind == "service" { "service.update" } else { "website.update" },
         Some(&p.name),
         Some(&if p.project_kind == "service" {
-            format!("Updated service settings (Branch '{}', Start '{}')", p.branch, p.start_cmd)
+            format!("Updated service settings (Port {:?}, Branch '{}', Start '{}')", p.port, p.branch, p.start_cmd)
         } else {
             format!(
                 "Updated website settings (Port {}, Branch '{}', Domains {:?})",
@@ -1386,6 +1406,19 @@ async fn update_project_handler(
             let _ = state.caddy.reload();
         }
     }
+
+    // Clean up old firewall rules if port, access mode, or allowed IPs changed
+    if let Some(ref old_p) = prev {
+        if let Some(old_port) = old_p.port {
+            if Some(old_port) != updated.port
+                || old_p.access_mode != updated.access_mode
+                || old_p.allowed_ips != updated.allowed_ips
+            {
+                crate::databases::Databases::remove_firewall_rules(old_port, &old_p.allowed_ips).await;
+            }
+        }
+    }
+
     if let Some(port) = updated.port {
         crate::databases::Databases::sync_firewall_rules(port, &updated.access_mode, &updated.allowed_ips).await;
     }

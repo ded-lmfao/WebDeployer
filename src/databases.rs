@@ -427,24 +427,9 @@ impl Databases {
         let domain = input.domain.unwrap_or_default().trim().to_string();
         let is_superuser = input.is_superuser.unwrap_or(false);
 
-        let port = match input.port {
-            Some(p) if p > 1024 => {
-                let conn = self.db.lock().map_err(|e| e.to_string())?;
-                let in_use: bool = conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM databases WHERE port = ?",
-                        params![p],
-                        |r| r.get::<_, i64>(0),
-                    )
-                    .map(|c| c > 0)
-                    .unwrap_or(false);
-                if in_use || std::net::TcpListener::bind(("127.0.0.1", p)).is_err() {
-                    self.find_next_free_port(p)?
-                } else {
-                    p
-                }
-            }
-            _ => self.find_next_free_port(5432)?,
+        let port = {
+            let conn = self.db.lock().map_err(|e| e.to_string())?;
+            crate::db::allocate_global_unique_port(&conn, input.port, 5432, None, None)?
         };
 
         let enc_password = self
@@ -921,22 +906,7 @@ impl Databases {
     // --- Port Finder Helper ---
     fn find_next_free_port(&self, start: u16) -> Result<u16, String> {
         let conn = self.db.lock().map_err(|e| e.to_string())?;
-        let mut used_ports = Vec::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT port FROM databases") {
-            if let Ok(rows) = stmt.query_map([], |r| r.get::<_, u16>(0)) {
-                used_ports = rows.flatten().collect();
-            }
-        }
-
-        for port in start..65535 {
-            if used_ports.contains(&port) {
-                continue;
-            }
-            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
-                return Ok(port);
-            }
-        }
-        Err("No free ports available".to_string())
+        crate::db::allocate_global_unique_port(&conn, None, start, None, None)
     }
 
     // --- Firewall Synchronization (UFW / iptables) ---
@@ -948,6 +918,7 @@ impl Databases {
             } else if access_mode == "public" {
                 let _ = Command::new("sudo").args(["ufw", "allow", &format!("{}/tcp", port)]).output().await;
             } else if access_mode == "allowlist" {
+                let _ = Command::new("sudo").args(["ufw", "delete", "allow", &format!("{}/tcp", port)]).output().await;
                 for ip in allowed_ips.split(|c| c == ',' || c == '\n' || c == ';') {
                     let ip = ip.trim();
                     if !ip.is_empty() {

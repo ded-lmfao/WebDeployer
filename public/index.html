@@ -1583,6 +1583,24 @@
             </div>
           </div>
 
+          <!-- Row 4: Network Access Policy (Firewall & Direct Access) -->
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" for="website-access-mode">Network Access Policy</label>
+            <select id="website-access-mode" class="form-control" onchange="toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap')">
+              <option value="local">🔒 Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
+              <option value="allowlist">🛡️ Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
+              <option value="public">🌐 Public Access — Open port to external internet with auto firewall rules</option>
+            </select>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+              If a custom domain is configured, HTTPS traffic is reverse-proxied through Caddy automatically. Direct TCP port exposure is governed by this policy.
+            </div>
+          </div>
+          <div class="form-group" id="website-allowed-ips-wrap" style="display: none; margin-bottom: 12px;">
+            <label class="form-label" for="website-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
+            <textarea id="website-allowed-ips" class="form-control" rows="2" placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)" style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port from these remote IPs.</span>
+          </div>
+
           <!-- Hidden defaults: auto-deploy disabled by default, slug and deploy dir auto-derived -->
           <input type="checkbox" id="website-auto-deploy" style="display: none;" aria-label="Enable auto deploy">
           <input type="checkbox" id="website-auto-backup" checked style="display: none;"
@@ -1689,8 +1707,8 @@
           <!-- Row 4: Listening Port & Custom Domain -->
           <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
-              <label class="form-label" for="service-port">Listening Port <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
-              <input type="number" id="service-port" class="form-control" placeholder="e.g. 1112 or 8080" min="1" max="65535">
+              <label class="form-label" for="service-port">Assigned Port *</label>
+              <input type="number" id="service-port" class="form-control" placeholder="e.g. 1112 or 8000" min="1" max="65535" required>
             </div>
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="service-domain">Custom Domain <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
