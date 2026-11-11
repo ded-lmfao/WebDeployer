@@ -2571,6 +2571,10 @@ struct OverviewAppStatus {
     memory_bytes: Option<u64>,
     #[serde(rename = "memoryFormatted")]
     memory_formatted: Option<String>,
+    #[serde(rename = "diskBytes")]
+    disk_bytes: Option<u64>,
+    #[serde(rename = "diskFormatted")]
+    disk_formatted: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -2589,6 +2593,12 @@ pub struct ResourceItem {
     pub memory_formatted: String,
     #[serde(rename = "memoryPct")]
     pub memory_pct: f32,
+    #[serde(rename = "diskBytes")]
+    pub disk_bytes: u64,
+    #[serde(rename = "diskFormatted")]
+    pub disk_formatted: String,
+    #[serde(rename = "diskPct")]
+    pub disk_pct: f32,
     #[serde(rename = "projectId")]
     pub project_id: Option<i64>,
     #[serde(rename = "databaseId")]
@@ -2606,16 +2616,26 @@ pub struct ResourceSummary {
     pub total_managed_memory_formatted: String,
     #[serde(rename = "totalManagedCpu")]
     pub total_managed_cpu: f32,
+    #[serde(rename = "totalManagedDisk")]
+    pub total_managed_disk: u64,
+    #[serde(rename = "totalManagedDiskFormatted")]
+    pub total_managed_disk_formatted: String,
     #[serde(rename = "panelMemory")]
     pub panel_memory: u64,
     #[serde(rename = "panelMemoryFormatted")]
     pub panel_memory_formatted: String,
     #[serde(rename = "panelCpu")]
     pub panel_cpu: f32,
+    #[serde(rename = "panelDisk")]
+    pub panel_disk: u64,
+    #[serde(rename = "panelDiskFormatted")]
+    pub panel_disk_formatted: String,
     #[serde(rename = "systemOverheadMemory")]
     pub system_overhead_memory: u64,
     #[serde(rename = "systemOverheadMemoryFormatted")]
     pub system_overhead_memory_formatted: String,
+    #[serde(rename = "systemOverheadCpu")]
+    pub system_overhead_cpu: f32,
     #[serde(rename = "runningWorkloadsCount")]
     pub running_workloads_count: usize,
     #[serde(rename = "totalWorkloadsCount")]
@@ -2695,7 +2715,10 @@ async fn overview_handler(
 
     let monitor = state.monitor.sample();
     let total_vps_mem = monitor.memory.total.max(1);
+    let total_vps_disk = monitor.disk.as_ref().map(|d| d.total).unwrap_or(1).max(1);
     let num_cores = monitor.cpu.cores.max(1) as f32;
+    let total_vps_cpu = monitor.cpu.pct as f32;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     let panel_pid = std::process::id();
     let mut pids_to_query = vec![panel_pid];
@@ -2736,6 +2759,13 @@ async fn overview_handler(
     let (panel_raw_cpu, panel_mem) = proc_metrics.get(&panel_pid).copied().unwrap_or((0.0, 0));
     let panel_cpu = ((panel_raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0;
     let panel_mem_pct = ((panel_mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0;
+
+    let panel_exe_size = std::env::current_exe().ok().map(|p| crate::monitor::get_path_disk_size(&p)).unwrap_or(0);
+    let panel_db_size = crate::monitor::get_path_disk_size(&cwd.join("data").join("webdep.sqlite"))
+        .saturating_add(crate::monitor::get_path_disk_size(&cwd.join("data").join("webdep.sqlite-wal")));
+    let panel_disk = panel_exe_size.saturating_add(panel_db_size);
+    let panel_disk_pct = ((panel_disk as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
+
     resources.push(ResourceItem {
         id: "panel".to_string(),
         name: "WebDep Control Panel".to_string(),
@@ -2747,6 +2777,9 @@ async fn overview_handler(
         memory_bytes: panel_mem,
         memory_formatted: format_resource_bytes(panel_mem),
         memory_pct: panel_mem_pct,
+        disk_bytes: panel_disk,
+        disk_formatted: format_resource_bytes(panel_disk),
+        disk_pct: panel_disk_pct,
         project_id: None,
         database_id: None,
         commit_sha: None,
@@ -2784,6 +2817,18 @@ async fn overview_handler(
             "0 MB".to_string()
         };
 
+        let deploy_dir = std::path::Path::new(&p.deploy_dir);
+        let deploy_size = crate::monitor::get_path_disk_size(deploy_dir);
+        let container_dir = cwd.join("data").join("containers").join(&p.slug);
+        let container_size = if container_dir.as_path() != deploy_dir {
+            crate::monitor::get_path_disk_size(&container_dir)
+        } else {
+            0
+        };
+        let disk_bytes = deploy_size.saturating_add(container_size);
+        let disk_fmt = format_resource_bytes(disk_bytes);
+        let disk_pct = ((disk_bytes as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
+
         let last_success = {
             let conn = state.db.lock().unwrap();
             fetch_overview_deployment(&conn, "status = 'success'", p.id, &p.name)
@@ -2802,6 +2847,8 @@ async fn overview_handler(
                 cpu_pct: if is_running { Some(cpu) } else { None },
                 memory_bytes: if is_running { Some(mem) } else { None },
                 memory_formatted: if is_running { Some(mem_fmt.clone()) } else { None },
+                disk_bytes: Some(disk_bytes),
+                disk_formatted: Some(disk_fmt.clone()),
             },
             project: p.clone(),
             active,
@@ -2822,6 +2869,9 @@ async fn overview_handler(
             memory_bytes: mem,
             memory_formatted: mem_fmt,
             memory_pct: mem_pct,
+            disk_bytes,
+            disk_formatted: disk_fmt,
+            disk_pct,
             project_id: Some(p.id),
             database_id: None,
             commit_sha: p.deployed_sha.clone(),
@@ -2859,6 +2909,11 @@ async fn overview_handler(
             "0 MB".to_string()
         };
 
+        let db_dir = std::path::Path::new(&db.data_dir);
+        let db_disk = crate::monitor::get_path_disk_size(db_dir);
+        let db_disk_fmt = format_resource_bytes(db_disk);
+        let db_disk_pct = ((db_disk as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
+
         resources.push(ResourceItem {
             id: format!("database-{}", db.id),
             name: format!("PostgreSQL ({})", db.name),
@@ -2870,6 +2925,9 @@ async fn overview_handler(
             memory_bytes: mem,
             memory_formatted: mem_fmt,
             memory_pct: mem_pct,
+            disk_bytes: db_disk,
+            disk_formatted: db_disk_fmt,
+            disk_pct: db_disk_pct,
             project_id: None,
             database_id: Some(db.id),
             commit_sha: None,
@@ -2888,9 +2946,27 @@ async fn overview_handler(
         }
     });
 
-    let total_managed_mem: u64 = resources.iter().map(|r| r.memory_bytes).sum();
-    let total_managed_cpu: f32 = ((resources.iter().map(|r| r.cpu_pct).sum::<f32>()) * 10.0).round() / 10.0;
-    let system_overhead = monitor.memory.used.saturating_sub(total_managed_mem);
+    // Sum of CPU across all workloads (including panel)
+    let sum_all_cpu: f32 = resources.iter().map(|r| r.cpu_pct).sum();
+
+    // Ensure workloads never exceed total VPS CPU due to sampling interval jitter
+    if total_vps_cpu > 0.0 && sum_all_cpu > total_vps_cpu {
+        let scale = total_vps_cpu / sum_all_cpu;
+        for r in &mut resources {
+            r.cpu_pct = ((r.cpu_pct * scale) * 10.0).round() / 10.0;
+        }
+    }
+
+    let final_panel_cpu = resources.iter().find(|r| r.id == "panel").map(|r| r.cpu_pct).unwrap_or(panel_cpu);
+
+    let total_managed_mem: u64 = resources.iter().filter(|r| r.id != "panel").map(|r| r.memory_bytes).sum();
+    let total_managed_disk: u64 = resources.iter().filter(|r| r.id != "panel").map(|r| r.disk_bytes).sum();
+    let total_managed_cpu: f32 = resources.iter().filter(|r| r.id != "panel").map(|r| r.cpu_pct).sum();
+    let total_managed_cpu = (total_managed_cpu * 10.0).round() / 10.0;
+
+    let total_all_mem = panel_mem.saturating_add(total_managed_mem);
+    let system_overhead = monitor.memory.used.saturating_sub(total_all_mem);
+    let system_overhead_cpu = (((total_vps_cpu - (final_panel_cpu + total_managed_cpu)).max(0.0)) * 10.0).round() / 10.0;
     let running_count = resources.iter().filter(|r| r.status == "running").count();
     let total_count = resources.len();
 
@@ -2898,11 +2974,16 @@ async fn overview_handler(
         total_managed_memory: total_managed_mem,
         total_managed_memory_formatted: format_resource_bytes(total_managed_mem),
         total_managed_cpu,
+        total_managed_disk,
+        total_managed_disk_formatted: format_resource_bytes(total_managed_disk),
         panel_memory: panel_mem,
         panel_memory_formatted: format_resource_bytes(panel_mem),
-        panel_cpu,
+        panel_cpu: final_panel_cpu,
+        panel_disk,
+        panel_disk_formatted: format_resource_bytes(panel_disk),
         system_overhead_memory: system_overhead,
         system_overhead_memory_formatted: format_resource_bytes(system_overhead),
+        system_overhead_cpu,
         running_workloads_count: running_count,
         total_workloads_count: total_count,
     };

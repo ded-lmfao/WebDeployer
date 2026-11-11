@@ -779,7 +779,10 @@ function renderWebsiteWorkspaceHeader() {
     }
   }
 
-  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}`;
+  const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+  const diskStr = resItem?.diskFormatted || resItem?.disk_formatted || '';
+
+  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}:${diskStr}`;
   if (state.lastWsBannerSig !== bannerSig) {
     state.lastWsBannerSig = bannerSig;
 
@@ -832,6 +835,10 @@ function renderWebsiteWorkspaceHeader() {
             <span class="ws-meta-sep">&bull;</span>
             <span class="ws-meta-item" title="Listening Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
           ` : ''}
+          ${diskStr ? `
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="On-Disk Storage">Disk <strong style="color:var(--text-main); font-weight:600;">${diskStr}</strong></span>
+          ` : ''}
           <span class="ws-meta-sep">&bull;</span>
           <span class="ws-meta-item" title="Click to configure Network Access Policy" style="font-size:11px; cursor:pointer;" onclick="openEditServiceModal(${p.id})">${accessText}</span>
           ${p.app_pid ? `
@@ -871,6 +878,10 @@ function renderWebsiteWorkspaceHeader() {
           ${p.port ? `
             <span class="ws-meta-sep">&bull;</span>
             <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
+          ` : ''}
+          ${diskStr ? `
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="On-Disk Storage">Disk <strong style="color:var(--text-main); font-weight:600;">${diskStr}</strong></span>
           ` : ''}
           <span class="ws-meta-sep">&bull;</span>
           <span class="ws-meta-item" title="Click to configure Network Access Policy" style="font-size:11px; cursor:pointer;" onclick="openEditWebsiteModal(${p.id})">${accessText}</span>
@@ -1162,7 +1173,7 @@ function renderResourceBreakdown(resources) {
       emptyMsg = 'No managed databases created yet.';
       emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="navigateTo(\'databases\')">Go to Databases &rarr;</button>';
     }
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 32px 16px; color: var(--text-dim);"><div style="font-size: 13.5px;">${emptyMsg}</div>${emptyAction}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 32px 16px; color: var(--text-dim);"><div style="font-size: 13.5px;">${emptyMsg}</div>${emptyAction}</td></tr>`;
     return;
   }
 
@@ -1197,17 +1208,21 @@ function renderResourceBreakdown(resources) {
     const memVal = r.memoryFormatted || '0 MB';
     const memPctVal = (r.memoryPct || 0).toFixed(1);
     const memWarm = r.memoryPct > 30 ? 'hot' : r.memoryPct > 15 ? 'warm' : '';
+    const diskVal = r.diskFormatted || '0 MB';
+    const diskPctVal = (r.diskPct || 0).toFixed(1);
+    const diskWarm = (r.diskPct || 0) > 20 ? 'hot' : (r.diskPct || 0) > 5 ? 'warm' : '';
 
+    const pId = r.projectId ?? r.project_id;
     let actionBtn = '';
     if (r.kind === 'panel') {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'settings\')">Settings &rarr;</button>';
     } else if (r.kind === 'database') {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'databases\')">Databases &rarr;</button>';
-    } else if (r.project_id) {
-      actionBtn = `<button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${r.project_id}, 'deployments')">Manage &rarr;</button>`;
+    } else if (pId) {
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${pId}, 'deployments')">Manage &rarr;</button>`;
     }
 
-    const rowClick = r.project_id ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${r.project_id}, 'deployments')"` : '';
+    const rowClick = pId ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${pId}, 'deployments')"` : '';
 
     return `
       <tr ${rowClick}>
@@ -1245,6 +1260,17 @@ function renderResourceBreakdown(resources) {
             </div>
             <div class="res-mini-bar">
               <div class="res-mini-fill res-mem-fill ${memWarm}" style="width: ${isRunning ? Math.min(100, Math.max(2, r.memoryPct)) : 0}%;"></div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="res-metric-cell">
+            <div class="res-metric-head">
+              <span style="color: var(--text-main); font-weight: 600;">${diskVal}</span>
+              <span style="color: var(--text-dim); font-size: 11px;">${diskPctVal}% Disk</span>
+            </div>
+            <div class="res-mini-bar">
+              <div class="res-mini-fill res-disk-fill ${diskWarm}" style="width: ${Math.min(100, Math.max(2, (r.diskPct || 0) * 2))}%;"></div>
             </div>
           </div>
         </td>
@@ -1337,7 +1363,7 @@ async function loadOverview() {
     }
     const sysUsageEl = document.getElementById('res-system-usage');
     if (sysUsageEl) {
-      sysUsageEl.textContent = sum.systemOverheadMemoryFormatted || '--';
+      sysUsageEl.textContent = `${sum.systemOverheadMemoryFormatted || '--'} • ${(sum.systemOverheadCpu || 0).toFixed(1)}% CPU`;
     }
     const freeMemEl = document.getElementById('res-free-memory');
     if (freeMemEl) {
@@ -1430,6 +1456,9 @@ function renderProjectsList() {
 
     const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
 
+    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+
     let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost</span>';
     if (p.access_mode === 'allowlist') {
       const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
@@ -1459,6 +1488,7 @@ function renderProjectsList() {
             <span>${sha}</span>
           </div>
           ${p.port ? `<div class="project-meta-item"><span>Port <strong>${p.port}</strong></span></div>` : ''}
+          ${diskStr ? `<div class="project-meta-item"><span>Disk <strong>${diskStr}</strong></span></div>` : ''}
           <div class="project-meta-item">
             ${accessBadge}
           </div>
@@ -1579,6 +1609,9 @@ function renderServicesList() {
     const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
     const defaultTab = isLocal ? 'files' : 'deployments';
 
+    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+
         let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
         if (p.access_mode === 'allowlist') {
           const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
@@ -1629,6 +1662,7 @@ function renderServicesList() {
           <div class="project-meta-item">
             <span>${isLocal ? 'Source: <strong style="color:var(--text-main);">📁 Manual Upload</strong>' : `Commit: <strong>${sha}</strong>`}</span>
           </div>
+          ${diskStr ? `<div class="project-meta-item"><span>Disk <strong style="color:var(--text-main);">${diskStr}</strong></span></div>` : ''}
           <div class="project-meta-item">
             <span style="font-size: 11.5px; color: var(--text-muted);">${uptimeText}</span>
           </div>
@@ -5474,6 +5508,9 @@ function renderDatabasesList() {
 
     const accessMode = db.accessMode || db.access_mode || 'local';
     const allowedIps = db.allowedIps || db.allowed_ips || '';
+    const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === db.id || x.database_id === db.id));
+    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+
     let accessBadge = '<span class="badge badge-neutral" style="font-size: 11px;">🔒 Localhost Only (127.0.0.1)</span>';
     if (accessMode === 'allowlist') {
       const ipList = allowedIps ? allowedIps.split(/[,;\n]/).filter(Boolean).length : 0;
@@ -5515,6 +5552,7 @@ function renderDatabasesList() {
             ${accessBadge}
             ${db.domain ? `<span class="badge badge-primary" style="font-size: 11px; font-family: var(--font-mono);">🌐 ${escapeHtml(db.domain)}:${db.port}</span>` : `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);">Port ${db.port}</span>`}
             ${db.isSuperuser ? '<span class="badge badge-primary" style="font-size: 11px;">Superuser</span>' : ''}
+            ${diskStr ? `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);" title="On-Disk PostgreSQL Storage">💾 ${diskStr}</span>` : ''}
           </div>
 
           <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 8px; word-break: break-all;">

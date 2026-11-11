@@ -164,11 +164,9 @@ impl Monitor {
             loop {
                 interval.tick().await;
                 let m = mon.clone();
-                // Refresh processes every 6s (every 2nd tick) for responsive metrics with near-zero overhead
-                let include_procs = tick_count % 2 == 0;
                 tick_count = tick_count.wrapping_add(1);
                 let _ = tokio::task::spawn_blocking(move || {
-                    m.refresh_now(include_procs);
+                    m.refresh_now(true);
                 })
                 .await;
                 if tick_count % 20 == 0 {
@@ -186,17 +184,24 @@ impl Monitor {
 
     /// Returns process tree CPU usage (percentage) and resident memory (bytes)
     /// aggregated for each requested root PID (root process + all descendant children).
+    /// Filters out OS threads so thread pools never multiply CPU or memory metrics.
     /// Performs lock-read on in-memory sysinfo cache, zero OS syscalls or disk I/O.
     pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
         let sys = self.sys.lock().unwrap();
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
-        // Stores (cpu_usage, resident_memory_bytes, is_thread)
-        let mut metrics_map: HashMap<u32, (f32, u64, bool)> = HashMap::new();
+        // Stores (cpu_usage, resident_memory_bytes) for true OS processes
+        let mut metrics_map: HashMap<u32, (f32, u64)> = HashMap::new();
 
         for (pid, p) in sys.processes() {
             let pid_u32 = pid.as_u32();
-            let is_thread = p.thread_kind().is_some();
-            metrics_map.insert(pid_u32, (p.cpu_usage(), p.memory(), is_thread));
+            // On Linux /proc, thread entries have `thread_kind().is_some()`.
+            // Threads share the same address space and their CPU times are already reported
+            // in the thread group leader's `/proc/[pid]/stat`.
+            // Skipping threads prevents multiplying memory and CPU across thread pools!
+            if p.thread_kind().is_some() {
+                continue;
+            }
+            metrics_map.insert(pid_u32, (p.cpu_usage(), p.memory()));
             if let Some(parent) = p.parent() {
                 children_map.entry(parent.as_u32()).or_default().push(pid_u32);
             }
@@ -215,14 +220,9 @@ impl Monitor {
             }
 
             while let Some(curr) = queue.pop_front() {
-                if let Some(&(cpu, mem, is_thread)) = metrics_map.get(&curr) {
+                if let Some(&(cpu, mem)) = metrics_map.get(&curr) {
                     total_cpu += cpu;
-                    // In Linux, threads of a process share the same memory address space.
-                    // Counting memory for every thread entry multiplies the true process RSS by thread count!
-                    // Only count memory for real processes (or the root process itself).
-                    if !is_thread || curr == root {
-                        total_mem = total_mem.saturating_add(mem);
-                    }
+                    total_mem = total_mem.saturating_add(mem);
                 }
                 if let Some(kids) = children_map.get(&curr) {
                     for &k in kids {
@@ -243,5 +243,59 @@ impl Monitor {
     pub fn sample(&self) -> SystemMetrics {
         self.snapshot.read().unwrap().clone()
     }
+}
+
+static DISK_USAGE_CACHE: RwLock<Option<HashMap<std::path::PathBuf, (u64, std::time::Instant)>>> =
+    RwLock::new(None);
+
+/// Returns on-disk storage size in bytes for a directory or file.
+/// Traverses filesystem safely without following symlinks to prevent loops.
+/// Employs an ultra-fast in-memory cache (30s TTL) for sub-millisecond API responses.
+pub fn get_path_disk_size(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    // Check fast in-memory cache first (TTL = 30 seconds)
+    if let Ok(guard) = DISK_USAGE_CACHE.read() {
+        if let Some(map) = guard.as_ref() {
+            if let Some(&(bytes, last_updated)) = map.get(&canonical) {
+                if last_updated.elapsed() < Duration::from_secs(30) {
+                    return bytes;
+                }
+            }
+        }
+    }
+
+    // Compute disk size
+    let bytes = compute_disk_size(&canonical);
+
+    // Update cache
+    if let Ok(mut guard) = DISK_USAGE_CACHE.write() {
+        let map = guard.get_or_insert_with(HashMap::new);
+        map.insert(canonical, (bytes, std::time::Instant::now()));
+    }
+
+    bytes
+}
+
+fn compute_disk_size(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.is_file() {
+            return meta.len();
+        }
+        if meta.is_dir() && !meta.file_type().is_symlink() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let child = entry.path();
+                    total = total.saturating_add(compute_disk_size(&child));
+                }
+            }
+        }
+    }
+    total
 }
 

@@ -1829,6 +1829,18 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   background: linear-gradient(90deg, #f43f5e, #dc2626);
 }
 
+.res-disk-fill {
+  background: linear-gradient(90deg, #a855f7, #8b5cf6);
+}
+
+.res-disk-fill.warm {
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+
+.res-disk-fill.hot {
+  background: linear-gradient(90deg, #f43f5e, #dc2626);
+}
+
 .res-pid-chip {
   font-family: var(--font-mono);
   font-size: 11px;
