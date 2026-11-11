@@ -1887,7 +1887,7 @@ function openAddServiceModal() {
   document.getElementById('service-start-cmd').value = '';
 
   const portInput = document.getElementById('service-port');
-  if (portInput) portInput.value = getNextAvailablePort(1112);
+  if (portInput) portInput.value = getNextAvailablePort(8000);
   const domainInput = document.getElementById('service-domain');
   if (domainInput) domainInput.value = '';
   const accessInput = document.getElementById('service-access-mode');
@@ -2126,7 +2126,7 @@ document.getElementById('save-service-submit-btn')?.addEventListener('click', as
     build_cmd: '',
     start_cmd: document.getElementById('service-start-cmd').value.trim(),
     health_url: '',
-    port: portVal ? Number(portVal) : null,
+    port: portVal ? Number(portVal) : getNextAvailablePort(8000),
     domains: domainVal ? [domainVal] : [],
     access_mode: accessMode,
     allowed_ips: allowedIps,
@@ -2386,6 +2386,9 @@ function openAddWebsiteModal() {
   // Apply default preset (node)
   applyPreset('node');
 
+  const portInput = document.getElementById('website-port');
+  if (portInput) portInput.value = getNextAvailablePort(3000);
+
   openModal('modal-website');
 }
 window.openAddWebsiteModal = openAddWebsiteModal;
@@ -2406,7 +2409,7 @@ async function openEditWebsiteModal(projectId) {
   document.getElementById('website-repo').value = p.repo_url || '';
   document.getElementById('website-branch').value = p.branch || 'main';
   document.getElementById('website-domains').value = (p.domains || []).join(', ');
-  document.getElementById('website-port').value = p.port || '';
+  document.getElementById('website-port').value = p.port || getNextAvailablePort(3000);
   const accessInput = document.getElementById('website-access-mode');
   if (accessInput) accessInput.value = p.access_mode || 'local';
   const ipsInput = document.getElementById('website-allowed-ips');
@@ -2569,7 +2572,7 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     repo_url: document.getElementById('website-repo').value.trim(),
     branch: document.getElementById('website-branch').value.trim() || 'main',
     domains,
-    port: document.getElementById('website-port').value ? Number(document.getElementById('website-port').value) : null,
+    port: document.getElementById('website-port').value ? Number(document.getElementById('website-port').value) : getNextAvailablePort(3000),
     access_mode: accessMode,
     allowed_ips: allowedIps,
     deploy_dir: document.getElementById('website-deploy-dir').value.trim(),

@@ -573,10 +573,20 @@ impl Runtime {
             copy_dir_files_if_missing(&legacy_app_data, &db_dir);
         }
 
-        let port = p.port.unwrap_or(3000);
-        if p.port.is_some() {
-            self.allow_firewall_port(port, Some(p.id));
-        }
+        let port = if let Some(p_port) = p.port.filter(|&pt| pt > 0) {
+            p_port
+        } else {
+            let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+            let allocated = if let Ok(conn) = self.db.lock() {
+                let alloc = crate::db::allocate_global_unique_port(&conn, None, default_start, Some(p.id), None).unwrap_or(default_start);
+                let _ = conn.execute("UPDATE projects SET port = ? WHERE id = ?", rusqlite::params![alloc as u32, p.id]);
+                alloc
+            } else {
+                default_start
+            };
+            allocated
+        };
+        self.allow_firewall_port(port, Some(p.id));
 
         let container = WebsiteContainer {
             container_id: format!("webdep-ctr-{}-{}", p.id, safe_slug),

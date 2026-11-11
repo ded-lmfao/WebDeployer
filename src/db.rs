@@ -536,6 +536,29 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
+    // Universal Port Assignment Guarantee:
+    // Ensures every single website and backend service in SQLite has a non-conflicting, valid port assigned.
+    if let Ok(mut stmt) = conn.prepare("SELECT id, name, project_kind FROM projects WHERE port IS NULL OR port = 0") {
+        let unassigned: Vec<(i64, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?.unwrap_or_else(|| "website".to_string()))))
+            .map(|iter| iter.flatten().collect())
+            .unwrap_or_default();
+        for (pid, name, kind) in unassigned {
+            let default_start = if kind == "service" { 8000 } else { 3000 };
+            if let Ok(new_port) = allocate_global_unique_port(conn, None, default_start, Some(pid), None) {
+                conn.execute(
+                    "UPDATE projects SET port = ? WHERE id = ?",
+                    rusqlite::params![new_port as u32, pid],
+                )
+                .ok();
+                eprintln!(
+                    "[migration] Allocated unique port {} for workload '{}' (id: {})",
+                    new_port, name, pid
+                );
+            }
+        }
+    }
+
     purge_orphaned_project_data(conn);
 
     Ok(())

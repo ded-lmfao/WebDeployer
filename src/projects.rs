@@ -207,7 +207,15 @@ impl Projects {
 
         let mut list = Vec::new();
         for r in rows {
-            list.push(r?);
+            let mut p = r?;
+            if p.port.is_none() || p.port == Some(0) {
+                let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+                if let Ok(new_port) = crate::db::allocate_global_unique_port(&conn, None, default_start, Some(p.id), None) {
+                    let _ = conn.execute("UPDATE projects SET port = ? WHERE id = ?", params![new_port as u32, p.id]);
+                    p.port = Some(new_port);
+                }
+            }
+            list.push(p);
         }
         Ok(list)
     }
@@ -219,7 +227,18 @@ impl Projects {
 
         let res = stmt.query_row(params![id], row_to_project).optional()?;
 
-        Ok(res)
+        if let Some(mut p) = res {
+            if p.port.is_none() || p.port == Some(0) {
+                let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+                if let Ok(new_port) = crate::db::allocate_global_unique_port(&conn, None, default_start, Some(p.id), None) {
+                    let _ = conn.execute("UPDATE projects SET port = ? WHERE id = ?", params![new_port as u32, p.id]);
+                    p.port = Some(new_port);
+                }
+            }
+            return Ok(Some(p));
+        }
+
+        Ok(None)
     }
 
     pub fn create(&self, p: &Project) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
@@ -228,6 +247,13 @@ impl Projects {
         let domains_json = serde_json::to_string(&p.domains)?;
 
         let conn = self.db.lock().unwrap();
+        let final_port = if let Some(req) = p.port.filter(|&pt| pt > 0) {
+            crate::db::allocate_global_unique_port(&conn, Some(req), req, None, None).unwrap_or(req)
+        } else {
+            let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+            crate::db::allocate_global_unique_port(&conn, None, default_start, None, None).unwrap_or(default_start)
+        };
+
         conn.execute(
             "INSERT INTO projects(
                 name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port,
@@ -244,7 +270,7 @@ impl Projects {
                 p.project_type,
                 p.deploy_method,
                 p.deploy_dir,
-                p.port.map(|v| v as u32),
+                final_port as u32,
                 p.install_cmd,
                 p.build_cmd,
                 p.start_cmd,
@@ -281,6 +307,13 @@ impl Projects {
         let domains_json = serde_json::to_string(&p.domains)?;
 
         let conn = self.db.lock().unwrap();
+        let final_port = if let Some(req) = p.port.filter(|&pt| pt > 0) {
+            crate::db::allocate_global_unique_port(&conn, Some(req), req, Some(id), None).unwrap_or(req)
+        } else {
+            let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+            crate::db::allocate_global_unique_port(&conn, None, default_start, Some(id), None).unwrap_or(default_start)
+        };
+
         conn.execute(
             "UPDATE projects SET
                 name=?, repo_url=?, branch=?, project_type=?, deploy_method=?, deploy_dir=?, port=?,
@@ -296,7 +329,7 @@ impl Projects {
                 p.project_type,
                 p.deploy_method,
                 p.deploy_dir,
-                p.port.map(|v| v as u32),
+                final_port as u32,
                 p.install_cmd,
                 p.build_cmd,
                 p.start_cmd,
@@ -662,7 +695,7 @@ mod tests {
         let fetched = projects.get(id).unwrap().unwrap();
         assert_eq!(fetched.project_kind, "service");
         assert_eq!(fetched.name, "Discord Music Bot");
-        assert_eq!(fetched.port, None);
+        assert!(fetched.port.is_some() && fetched.port.unwrap() >= 8000);
 
         let list = projects.list().unwrap();
         assert!(list.iter().any(|p| p.id == id && p.project_kind == "service"));
