@@ -374,7 +374,7 @@ async function filesOpen(path) {
     }
 
     renderFilesTable();
-    updateEditorHighlight();
+    updateEditorHighlight(true);
     updateEditorGutter();
     updateEditorPos();
     bindEditorEvents();
@@ -420,36 +420,55 @@ function getSpeedHighlightLang(filename) {
 }
 
 let highlightSeq = 0;
-async function updateEditorHighlight() {
+let highlightTimer = null;
+let lastHighlightedContent = '';
+
+async function updateEditorHighlight(immediate = false) {
   const textarea = document.getElementById('files-editor');
   const codeEl = document.getElementById('files-editor-code');
   const card = document.getElementById('files-editor-card');
   if (!textarea || !codeEl) return;
 
   const content = textarea.value;
+  if (content === lastHighlightedContent && !immediate) return;
+
   // If file is excessively large, fallback to plain text textarea rendering
   if (content.length > 500000 || content.split('\n').length > 15000) {
     if (card) card.classList.add('no-highlight');
     codeEl.textContent = content;
+    lastHighlightedContent = content;
     return;
   }
 
   if (card) card.classList.remove('no-highlight');
   const lang = getSpeedHighlightLang(state.filesOpenPath || '');
-  const seq = ++highlightSeq;
 
-  try {
-    let html = await highlightHTML(content, lang, { block: false });
-    if (seq !== highlightSeq) return;
-    if (content.endsWith('\n')) {
-      html += '\n';
+  const doHighlight = async () => {
+    const seq = ++highlightSeq;
+    try {
+      let html = await highlightHTML(content, lang, { block: false });
+      if (seq !== highlightSeq) return;
+      if (content.endsWith('\n')) {
+        html += '\n';
+      }
+      codeEl.innerHTML = html;
+      lastHighlightedContent = content;
+    } catch (err) {
+      console.warn('Speed-highlight error:', err);
+      if (seq === highlightSeq) {
+        codeEl.textContent = content;
+        lastHighlightedContent = content;
+      }
     }
-    codeEl.innerHTML = html;
-  } catch (err) {
-    console.warn('Speed-highlight error:', err);
-    if (seq === highlightSeq) {
-      codeEl.textContent = content;
-    }
+  };
+
+  if (immediate) {
+    if (highlightTimer) clearTimeout(highlightTimer);
+    highlightTimer = null;
+    await doHighlight();
+  } else {
+    if (highlightTimer) clearTimeout(highlightTimer);
+    highlightTimer = setTimeout(doHighlight, 35);
   }
 }
 
@@ -584,6 +603,9 @@ function filesCloseEditor(force = false) {
   if (codeEl) codeEl.innerHTML = '';
   const textarea = document.getElementById('files-editor');
   if (textarea) textarea.value = '';
+  lastHighlightedContent = '';
+  if (highlightTimer) clearTimeout(highlightTimer);
+  highlightTimer = null;
   renderFilesTable();
 }
 window.filesCloseEditor = filesCloseEditor;

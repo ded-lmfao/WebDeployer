@@ -23,54 +23,66 @@ import './js/files.js';
 import './js/logs.js';
 
 // ============================================================================
-// Global Polling & Live Updates
+// Global Polling & Live Updates (Low Resource & Page Visibility Aware)
 // ============================================================================
 let pollInFlight = false;
+
+async function pollTick() {
+  if (pollInFlight || document.hidden) return;
+  pollInFlight = true;
+  try {
+    // Keep sidebar badges (databases & projects & services) constantly up-to-date across all tabs
+    await Promise.all([
+      loadProjects().catch(() => {}),
+      loadDatabases().catch(() => {})
+    ]);
+
+    // When actively in in-browser code editor, do not trigger background workspace DOM repaints
+    if (state.filesOpenPath) return;
+
+    if (state.currentView === 'overview') {
+      await loadOverview();
+    } else if (state.currentView === 'services') {
+      renderServicesList();
+    } else if (state.currentView === 'projects') {
+      renderProjectsList();
+    } else if (state.currentView === 'deployments') {
+      renderWebsiteWorkspaceHeader();
+      await loadDeploymentsView();
+    } else if (state.currentView === 'monitor') {
+      renderWebsiteWorkspaceHeader();
+      await loadMonitorView();
+    } else if (state.currentView === 'releases') {
+      renderWebsiteWorkspaceHeader();
+      await loadReleasesView();
+    } else if (state.currentView === 'rollbacks') {
+      renderWebsiteWorkspaceHeader();
+      await loadRollbacksView();
+    } else if (state.currentView === 'databases') {
+      const anyLooping = Object.values(waterPipelines).some((p) => p && p.isLooping);
+      if (!anyLooping) {
+        renderDatabasesList();
+      }
+    } else if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
+      renderWebsiteWorkspaceHeader();
+    }
+  } finally {
+    pollInFlight = false;
+  }
+}
+
 function startPolling() {
   if (state.overviewTimer) clearInterval(state.overviewTimer);
-
-  state.overviewTimer = setInterval(async () => {
-    if (pollInFlight) return;
-    pollInFlight = true;
-    try {
-      // Keep sidebar badges (databases & projects & services) constantly up-to-date across all tabs
-      await Promise.all([
-        loadProjects().catch(() => {}),
-        loadDatabases().catch(() => {})
-      ]);
-
-      if (state.currentView === 'overview') {
-        await loadOverview();
-      } else if (state.currentView === 'services') {
-        renderServicesList();
-      } else if (state.currentView === 'projects') {
-        renderProjectsList();
-      } else if (state.currentView === 'deployments') {
-        renderWebsiteWorkspaceHeader();
-        await loadDeploymentsView();
-      } else if (state.currentView === 'monitor') {
-        renderWebsiteWorkspaceHeader();
-        await loadMonitorView();
-      } else if (state.currentView === 'releases') {
-        renderWebsiteWorkspaceHeader();
-        await loadReleasesView();
-      } else if (state.currentView === 'rollbacks') {
-        renderWebsiteWorkspaceHeader();
-        await loadRollbacksView();
-      } else if (state.currentView === 'databases') {
-        const anyLooping = Object.values(waterPipelines).some((p) => p && p.isLooping);
-        if (!anyLooping) {
-          renderDatabasesList();
-        }
-      } else if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
-        renderWebsiteWorkspaceHeader();
-      }
-    } finally {
-      pollInFlight = false;
-    }
-  }, 4000);
+  state.overviewTimer = setInterval(pollTick, 4500);
 }
 window.startPolling = startPolling;
+
+// Low-power background mode: instantly resume fresh data when user re-focuses tab
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    void pollTick();
+  }
+});
 
 window.addEventListener('beforeunload', () => {
   if (state.logEventSource) {
