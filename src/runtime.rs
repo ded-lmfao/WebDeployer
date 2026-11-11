@@ -1266,6 +1266,7 @@ impl Runtime {
         cmd.env("PYTHONIOENCODING", "utf-8");
         cmd.env("PYTHONUTF8", "1");
         cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PIP_BREAK_SYSTEM_PACKAGES", "1");
         cmd.env("WEBDEP_PROJECT_ID", p.id.to_string());
         cmd.env("WEBDEP_PROJECT_SLUG", &p.slug);
         cmd.env("WEBDEP_CONTAINER_ID", &container.container_id);

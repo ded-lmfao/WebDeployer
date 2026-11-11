@@ -589,6 +589,14 @@ impl Deployer {
                         self.finish_deployment(dep_id, "failed", Some(&e2));
                         return;
                     }
+                } else if effective_install_cmd.contains("pip") && (e.contains("externally-managed-environment") || e.contains("break-system-packages")) {
+                    self.logs.add(Some(p.id), Some(dep_id), "build", "warn", "System Python is externally managed (PEP 668). Retrying with --break-system-packages...");
+                    let retry_cmd = format!("{} --break-system-packages", effective_install_cmd);
+                    if let Err(e2) = run_shell_cmd(&retry_cmd, &release_dir, &self.logs, p.id, dep_id).await {
+                        self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e2));
+                        self.finish_deployment(dep_id, "failed", Some(&e2));
+                        return;
+                    }
                 } else {
                     self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e));
                     self.finish_deployment(dep_id, "failed", Some(&e));
@@ -879,7 +887,8 @@ async fn run_shell_cmd(
         .env("npm_config_jobs", "1")
         .env("npm_config_audit", "false")
         .env("npm_config_fund", "false")
-        .env("npm_config_progress", "false");
+        .env("npm_config_progress", "false")
+        .env("PIP_BREAK_SYSTEM_PACKAGES", "1");
     if std::env::var("NODE_OPTIONS").is_err() {
         cmd.env("NODE_OPTIONS", "--max-old-space-size=448");
     }
