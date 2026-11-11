@@ -1363,24 +1363,6 @@ async function loadOverview() {
       actBox.style.display = 'none';
     }
 
-    // Recent Deployments with change-detection cache
-    const sig = `${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}`;
-    if (state.lastOverviewSig !== sig) {
-      state.lastOverviewSig = sig;
-
-      // Recent Deployments (paginated max 20 per page)
-      const recBody = document.getElementById('overview-recent-table');
-      if (!data.recent || !data.recent.length) {
-        recBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px;">No recent deployments recorded.</td></tr>';
-        const bar = document.getElementById('overview-recent-pagination');
-        if (bar) bar.innerHTML = '';
-      } else {
-        paginateAndRender(data.recent, 'overviewRecent', 'overview-recent-pagination', (slice) => {
-          recBody.innerHTML = slice.map((d) => renderDeploymentRow(d, true)).join('');
-        });
-      }
-    }
-
   } catch (err) {
     console.error('Overview load error:', err);
   }
