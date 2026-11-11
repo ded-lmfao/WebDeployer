@@ -182,7 +182,7 @@ const SESSION_CACHE_KEY = 'webdep_fast_cache_v3';
 try {
   sessionStorage.removeItem('webdep_fast_cache_v1');
   sessionStorage.removeItem('webdep_fast_cache_v2');
-} catch (_) { }
+} catch (_) {}
 
 // Hydrate warm cache from sessionStorage on startup (never cache /api/auth/*)
 try {
@@ -198,7 +198,7 @@ try {
       }
     }
   }
-} catch (_) { }
+} catch (_) {}
 
 function persistCacheToSession() {
   try {
@@ -206,7 +206,7 @@ function persistCacheToSession() {
       .filter(([k]) => !k.startsWith('/api/auth/'))
       .slice(-60);
     sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(entries));
-  } catch (_) { }
+  } catch (_) {}
 }
 
 function getCacheTtlMs(path) {
@@ -246,7 +246,7 @@ function invalidateClientCache(prefix = '') {
   }
   try {
     sessionStorage.removeItem(SESSION_CACHE_KEY);
-  } catch (_) { }
+  } catch (_) {}
 }
 window.invalidateClientCache = invalidateClientCache;
 
@@ -354,7 +354,7 @@ async function api(path, options = {}) {
             persistCacheToSession();
             return fresh;
           })
-          .catch(() => { })
+          .catch(() => {})
           .finally(() => inflightGets.delete(path));
         inflightGets.set(path, bgPromise);
       }
@@ -398,7 +398,7 @@ function prefetchWebsiteWorkspace(projectId) {
   setTimeout(() => {
     for (const url of endpoints) {
       if (!clientCache.has(url)) {
-        api(url).catch(() => { });
+        api(url).catch(() => {});
       }
     }
   }, 10);
@@ -431,7 +431,7 @@ function resetCleanUrl() {
     if (window.location.hash || window.location.search) {
       window.history.replaceState(null, '', window.location.pathname || '/');
     }
-  } catch (_) { }
+  } catch (_) {}
 }
 
 function stopPolling() {
@@ -444,7 +444,7 @@ function stopPolling() {
     state.activeDepPollTimer = null;
   }
   if (state.logEventSource) {
-    try { state.logEventSource.close(); } catch (_) { }
+    try { state.logEventSource.close(); } catch (_) {}
     state.logEventSource = null;
   }
 }
@@ -485,7 +485,7 @@ function showLogin() {
   state.currentView = 'overview';
   state.lastOverviewSig = null;
   invalidateClientCache();
-  try { sessionStorage.clear(); } catch (_) { }
+  try { sessionStorage.clear(); } catch (_) {}
 
   // Reset URL to clean root (strip #/settings, #/projects, query params, etc.)
   resetCleanUrl();
@@ -884,19 +884,19 @@ function renderWebsiteWorkspaceHeader() {
           ` : ''}
           ${hasPower('process') ? `
             ${!isOnline
-            ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
+              ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                    <span>Start</span>
                  </button>`
-            : ''
-          }
+              : ''
+            }
             ${isOnline || isMaintenance
-            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
+              ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
                    <span>Stop</span>
                  </button>`
-            : ''
-          }
+              : ''
+            }
             <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
               <span>Restart</span>
@@ -1106,7 +1106,7 @@ async function loadProjects() {
     if (badgeServicesEl) badgeServicesEl.textContent = services.length;
 
     // Keep databases count badge continuously synchronized
-    loadDatabases().catch(() => { });
+    loadDatabases().catch(() => {});
 
     if (state.projects.length > 0 && !state.selectedProjectId) {
       state.selectedProjectId = state.projects[0].id;
@@ -1134,8 +1134,108 @@ function getSelectedProject() {
 }
 
 // ============================================================================
-// View 1: Overview
+// View 1: Overview & Live Resource Consumption
 // ============================================================================
+function renderResourceBreakdown(resources) {
+  const tbody = document.getElementById('resource-breakdown-table');
+  if (!tbody) return;
+  const list = resources || state.overview?.resources || [];
+  const filter = state.resourceFilter || 'all';
+  const filtered = filter === 'all' ? list : list.filter((r) => r.kind === filter);
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px; color: var(--text-dim);">No workloads found in this category.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((r) => {
+    const isRunning = r.status === 'running';
+    const kindUpper = r.kind.toUpperCase();
+    const kindBadgeClass = `badge-res-${r.kind}`;
+    const icon = r.kind === 'panel' ? '⚡' : r.kind === 'database' ? '🗄️' : r.kind === 'service' ? '🤖' : '🌐';
+    const subtitle = r.kind === 'panel'
+      ? 'Core Platform Daemon'
+      : r.kind === 'database'
+      ? 'Managed Database'
+      : r.kind === 'service'
+      ? 'Background Service / Bot'
+      : 'Web Application';
+
+    const portPid = [
+      r.port ? `:${r.port}` : null,
+      r.pid ? `<span class="res-pid-chip">PID ${r.pid}</span>` : null,
+    ].filter(Boolean).join(' ') || '<span style="color:var(--text-dim)">--</span>';
+
+    const cpuVal = (r.cpuPct || 0).toFixed(1);
+    const cpuWarm = r.cpuPct > 40 ? 'hot' : r.cpuPct > 15 ? 'warm' : '';
+    const memVal = r.memoryFormatted || '0 MB';
+    const memPctVal = (r.memoryPct || 0).toFixed(1);
+    const memWarm = r.memoryPct > 30 ? 'hot' : r.memoryPct > 15 ? 'warm' : '';
+
+    let actionBtn = '';
+    if (r.kind === 'panel') {
+      actionBtn = `<button class="btn btn-secondary btn-sm" onclick="navigateTo('settings')">Settings &rarr;</button>`;
+    } else if (r.kind === 'database') {
+      actionBtn = `<button class="btn btn-secondary btn-sm" onclick="navigateTo('databases')">Databases &rarr;</button>`;
+    } else if (r.project_id) {
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${r.project_id}, 'deployments')">Manage &rarr;</button>`;
+    }
+
+    return `
+      <tr>
+        <td>
+          <div class="res-workload-title">
+            <div class="res-workload-icon">${icon}</div>
+            <div>
+              <div class="res-workload-name">${escapeHtml(r.name)}</div>
+              <div class="res-workload-sub">${subtitle}</div>
+            </div>
+          </div>
+        </td>
+        <td><span class="${kindBadgeClass}">${kindUpper}</span></td>
+        <td>${portPid}</td>
+        <td>
+          <span class="status-dot ${isRunning ? 'online' : 'offline'}"></span>
+          <span style="font-size: 12px; font-weight: 600; margin-left: 5px; color: ${isRunning ? 'var(--success)' : 'var(--text-muted)'};">${isRunning ? 'Running' : 'Stopped'}</span>
+        </td>
+        <td>
+          <div class="res-metric-cell">
+            <div class="res-metric-head">
+              <span style="color: ${isRunning ? 'var(--text-main)' : 'var(--text-dim)'}; font-weight: 600;">${isRunning ? `${cpuVal}%` : '0%'}</span>
+              <span style="color: var(--text-dim); font-size: 11px;">CPU</span>
+            </div>
+            <div class="res-mini-bar">
+              <div class="res-mini-fill res-cpu-fill ${cpuWarm}" style="width: ${isRunning ? Math.min(100, Math.max(2, r.cpuPct * 2)) : 0}%;"></div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="res-metric-cell">
+            <div class="res-metric-head">
+              <span style="color: ${isRunning ? 'var(--text-main)' : 'var(--text-dim)'}; font-weight: 600;">${isRunning ? memVal : '0 MB'}</span>
+              <span style="color: var(--text-dim); font-size: 11px;">${isRunning ? `${memPctVal}% VPS` : '--'}</span>
+            </div>
+            <div class="res-mini-bar">
+              <div class="res-mini-fill res-mem-fill ${memWarm}" style="width: ${isRunning ? Math.min(100, Math.max(2, r.memoryPct)) : 0}%;"></div>
+            </div>
+          </div>
+        </td>
+        <td style="text-align: right;">
+          ${actionBtn}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+window.filterResourceBreakdown = function(filter) {
+  state.resourceFilter = filter;
+  document.querySelectorAll('#resource-filter-pills .pill').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-res-filter') === filter);
+  });
+  renderResourceBreakdown();
+};
+
 async function loadOverview() {
   try {
     const data = await api('/api/overview');
@@ -1153,12 +1253,12 @@ async function loadOverview() {
     if (badgeWebEl) badgeWebEl.textContent = ovWeb.length;
     const badgeSvcEl = document.getElementById('badge-services-count');
     if (badgeSvcEl) badgeSvcEl.textContent = ovSvc.length;
-    loadDatabases().catch(() => { });
+    loadDatabases().catch(() => {});
 
     const svcOnline = ovSvc.filter((x) => x.app?.running).length;
     document.getElementById('stat-services-online').textContent = svcOnline;
     document.getElementById('stat-services-offline').textContent = ovSvc.length - svcOnline;
-
+    
     let online = 0;
     let offline = 0;
     ovWeb.forEach((item) => {
@@ -1168,16 +1268,27 @@ async function loadOverview() {
     document.getElementById('stat-offline-count').textContent = offline;
 
     const cpuPct = m.cpu?.pct || 0;
+    const cpuCores = m.cpu?.cores || 1;
     document.getElementById('stat-cpu-pct').textContent = `${cpuPct}%`;
     const cpuBar = document.getElementById('stat-cpu-bar');
-    cpuBar.style.width = `${Math.min(100, cpuPct)}%`;
-    cpuBar.className = `progress-fill ${cpuPct > 80 ? 'rose' : cpuPct > 50 ? 'amber' : 'green'}`;
+    if (cpuBar) {
+      cpuBar.style.width = `${Math.min(100, cpuPct)}%`;
+      cpuBar.className = `progress-fill ${cpuPct > 80 ? 'rose' : cpuPct > 50 ? 'amber' : 'green'}`;
+    }
+    const cpuMeta = document.getElementById('stat-cpu-meta');
+    if (cpuMeta) cpuMeta.textContent = `${cpuCores} Core${cpuCores === 1 ? '' : 's'} (${cpuPct}% total)`;
 
     const memPct = m.memory?.pct || 0;
+    const usedMb = ((m.memory?.used || 0) / 1048576).toFixed(0);
+    const totalMb = ((m.memory?.total || 0) / 1048576).toFixed(0);
     document.getElementById('stat-mem-pct').textContent = `${memPct}%`;
     const memBar = document.getElementById('stat-mem-bar');
-    memBar.style.width = `${Math.min(100, memPct)}%`;
-    memBar.className = `progress-fill ${memPct > 85 ? 'rose' : memPct > 65 ? 'amber' : 'green'}`;
+    if (memBar) {
+      memBar.style.width = `${Math.min(100, memPct)}%`;
+      memBar.className = `progress-fill ${memPct > 85 ? 'rose' : memPct > 65 ? 'amber' : 'green'}`;
+    }
+    const memMeta = document.getElementById('stat-mem-meta');
+    if (memMeta) memMeta.textContent = `${usedMb} MB / ${totalMb} MB`;
 
     if (m.disk) {
       const freeGb = (m.disk.free / 1073741824).toFixed(1);
@@ -1185,6 +1296,33 @@ async function loadOverview() {
       document.getElementById('stat-disk-free').textContent = `${freeGb} GB`;
       document.getElementById('stat-disk-meta').textContent = `${totalGb} GB total (${m.disk.pct}% used)`;
     }
+
+    // Active resource summary bar
+    const sum = data.summary || {};
+    const panelUsageEl = document.getElementById('res-panel-usage');
+    if (panelUsageEl) {
+      panelUsageEl.textContent = `${sum.panelMemoryFormatted || '--'} • ${(sum.panelCpu || 0).toFixed(1)}% CPU`;
+    }
+    const workloadsUsageEl = document.getElementById('res-workloads-usage');
+    if (workloadsUsageEl) {
+      workloadsUsageEl.textContent = `${sum.totalManagedMemoryFormatted || '--'} • ${(sum.totalManagedCpu || 0).toFixed(1)}% CPU`;
+    }
+    const sysUsageEl = document.getElementById('res-system-usage');
+    if (sysUsageEl) {
+      sysUsageEl.textContent = sum.systemOverheadMemoryFormatted || '--';
+    }
+    const freeMemEl = document.getElementById('res-free-memory');
+    if (freeMemEl) {
+      const freeMb = ((m.memory?.free || 0) / 1048576).toFixed(0);
+      freeMemEl.textContent = `${freeMb} MB free`;
+    }
+    const countBadgeEl = document.getElementById('res-workloads-count-badge');
+    if (countBadgeEl) {
+      countBadgeEl.textContent = `${sum.runningWorkloadsCount || 0} / ${sum.totalWorkloadsCount || 0} Running`;
+    }
+
+    // Render active resources telemetry table
+    renderResourceBreakdown(data.resources);
 
     // Active deployment box
     const active = data.projects.find((x) => x.active);
@@ -1204,7 +1342,7 @@ async function loadOverview() {
     }
 
     // Websites Table & Recent Deployments with change-detection cache
-    const sig = `${data.projects.map((x) => `${x.project.id}:${x.project.updated_at}:${x.project.app_status}:${x.app?.running}:${x.behind}:${x.project.deployed_sha}`).join('|')}_${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}`;
+    const sig = `${data.projects.map((x) => `${x.project.id}:${x.project.updated_at}:${x.project.app_status}:${x.app?.running}:${x.app?.cpuPct}:${x.app?.memoryBytes}:${x.behind}:${x.project.deployed_sha}`).join('|')}_${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}_${data.resources?.map((r) => `${r.id}:${r.status}:${r.cpuPct}:${r.memoryBytes}`).join('|')}`;
     if (state.lastOverviewSig !== sig) {
       state.lastOverviewSig = sig;
 
@@ -1212,7 +1350,7 @@ async function loadOverview() {
       const renderOverviewRows = (tbody, items, emptyMsg) => {
         if (!tbody) return;
         if (!items.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px;">' + emptyMsg + '</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">' + emptyMsg + '</td></tr>';
           return;
         }
         tbody.innerHTML = items.map((item) => {
@@ -1226,13 +1364,19 @@ async function loadOverview() {
             : (domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
               (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>'));
           const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">None</span>';
-
+          
           let behindAhead = '--';
           if (item.behind != null && item.ahead != null) {
             behindAhead = item.behind > 0 ? `<span style="color:var(--warning); font-weight:600;">${item.behind} behind</span>` : '<span style="color:var(--success);">Up to date</span>';
           }
 
           const lastDep = item.lastSuccess ? `<span style="font-size:12px;">${formatRelativeTime(item.lastSuccess.finished_at || item.lastSuccess.started_at)}</span>` : '<span style="color:var(--text-dim)">Never</span>';
+
+          const cpuVal = item.app?.cpuPct != null ? `${item.app.cpuPct.toFixed(1)}%` : '--';
+          const memVal = item.app?.memoryFormatted || '--';
+          const resourceCell = isOnline
+            ? `<span style="font-family: var(--font-mono); font-size: 11.5px; color: var(--accent-light); font-weight: 600;">⚡ ${cpuVal} &bull; ${memVal}</span>`
+            : `<span style="color: var(--text-dim); font-size: 11.5px;">--</span>`;
 
           return `
             <tr style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
@@ -1244,6 +1388,7 @@ async function loadOverview() {
                 <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
                 <span style="font-weight: 600; font-size: 12px; margin-left: 5px; color: ${isOnline ? 'var(--success)' : isMaintenance ? 'var(--warning)' : 'var(--text-muted)'};">${isOnline ? 'Online' : isMaintenance ? 'Maintenance' : 'Offline'}</span>
               </td>
+              <td>${resourceCell}</td>
               <td>${sha}</td>
               <td onclick="event.stopPropagation()">
                 <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">Manage &rarr;</button>
@@ -1363,9 +1508,9 @@ function renderProjectsList() {
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
           <div style="display: flex; gap: 6px;">
             ${isOnline
-        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
-      }
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+            }
             <button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
           </div>
           <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
@@ -1475,20 +1620,20 @@ function renderServicesList() {
     const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
     const defaultTab = isLocal ? 'files' : 'deployments';
 
-    let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
-    if (p.access_mode === 'allowlist') {
-      const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
-      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
-    } else if (p.access_mode === 'public') {
-      accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
-    }
+        let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
+        if (p.access_mode === 'allowlist') {
+          const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
+          accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
+        } else if (p.access_mode === 'public') {
+          accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
+        }
 
-    const domainBadge = (p.domains && p.domains.length > 0)
-      ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">🌐 ${escapeHtml(p.domains[0])}</span>`
-      : '';
-    const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
+        const domainBadge = (p.domains && p.domains.length > 0)
+          ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">🌐 ${escapeHtml(p.domains[0])}</span>`
+          : '';
+        const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
 
-    return `
+        return `
       <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
         <div class="project-card-header">
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -1533,9 +1678,9 @@ function renderServicesList() {
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px;">
           <div style="display: flex; gap: 6px;">
             ${isOnline
-        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
-      }
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+            }
             ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>` : ''}
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" title="Upload and manage service files">Files</button>
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" title="View live logs">Logs</button>
@@ -2914,7 +3059,7 @@ function resetWaterPipeline(containerId) {
 }
 window.resetWaterPipeline = resetWaterPipeline;
 
-window.simulateWaterDeploy = function () {
+window.simulateWaterDeploy = function() {
   const stages = ['pending', 'fetching', 'pulling', 'installing', 'building', 'deploying', 'health_checking'];
   let sIdx = 0;
   const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
@@ -2941,7 +3086,7 @@ window.simulateWaterDeploy = function () {
   }, 2600);
 };
 
-window.simulateWaterDrain = function () {
+window.simulateWaterDrain = function() {
   const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
   const badge = document.getElementById('pipeline-status-badge');
   if (badge) {
@@ -3200,7 +3345,7 @@ async function loadLogsView() {
     if (Array.isArray(history)) {
       state.logLines = history;
     }
-  } catch (_) { }
+  } catch (_) {}
   renderTerminalLogs();
 }
 
@@ -3441,7 +3586,7 @@ async function loadEnvView() {
   if (!state.projects || state.projects.length === 0) {
     try {
       state.projects = await api('/api/projects');
-    } catch (_) { }
+    } catch (_) {}
   }
 
   const p = getSelectedProject();
@@ -3466,7 +3611,7 @@ async function loadEnvView() {
         vars.forEach((v) => {
           if (map.has(v.key)) v.real_value = map.get(v.key);
         });
-      } catch (_) { }
+      } catch (_) {}
     }
 
     envUiState.vars = Array.isArray(vars) ? vars : [];
@@ -3505,7 +3650,7 @@ function parseDotenvClient(input) {
     const key = line.slice(0, eqIdx).trim();
     let val = line.slice(eqIdx + 1).trim();
     if ((val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
-      (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
+        (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
       val = val.slice(1, -1).replace(/\\"/g, '"');
     } else {
       const commentIdx = val.indexOf(' #');
@@ -3631,15 +3776,15 @@ function renderEnvTableFromState() {
           </td>
           <td>
             ${isRevealed
-          ? `<span class="env-val-box" title="${escapeHtml(realVal)}">${escapeHtml(realVal) || '<em style="color:var(--text-dim);">(empty)</em>'}</span>`
-          : `<span class="env-val-box masked" onclick="toggleRevealSingleEnv(${keyJs})" title="Click to show value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>`
-        }
+              ? `<span class="env-val-box" title="${escapeHtml(realVal)}">${escapeHtml(realVal) || '<em style="color:var(--text-dim);">(empty)</em>'}</span>`
+              : `<span class="env-val-box masked" onclick="toggleRevealSingleEnv(${keyJs})" title="Click to show value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>`
+            }
           </td>
           <td>
             ${isSecret
-          ? '<span class="badge badge-warning">Secret</span>'
-          : '<span class="badge badge-neutral">Public</span>'
-        }
+              ? '<span class="badge badge-warning">Secret</span>'
+              : '<span class="badge badge-neutral">Public</span>'
+            }
           </td>
           <td style="text-align: right;">
             <div style="display: inline-flex; gap: 6px; justify-content: flex-end;">
@@ -3776,7 +3921,7 @@ async function handleInlineQuickAddEnv(e) {
     const extractedKey = key.slice(0, eq).replace(/^export\s+/, '').trim();
     let extractedVal = key.slice(eq + 1).trim();
     if ((extractedVal.startsWith('"') && extractedVal.endsWith('"')) ||
-      (extractedVal.startsWith("'") && extractedVal.endsWith("'"))) {
+        (extractedVal.startsWith("'") && extractedVal.endsWith("'"))) {
       extractedVal = extractedVal.slice(1, -1);
     }
     key = extractedKey;
@@ -4270,7 +4415,7 @@ function openCreateReleaseModal() {
     if (projGroup) projGroup.style.display = 'block';
     if (targetLabel) targetLabel.style.display = 'none';
     if (projSelect) {
-      projSelect.innerHTML = state.projects.map((proj) =>
+      projSelect.innerHTML = state.projects.map((proj) => 
         `<option value="${proj.id}" ${p && p.id === proj.id ? 'selected' : ''}>${escapeHtml(proj.name)} (${escapeHtml(proj.slug)})</option>`
       ).join('');
       projSelect.onchange = (e) => {
@@ -4454,7 +4599,7 @@ function renderSecurityStatusSummary() {
 
 async function loadSettingsView() {
   renderSecurityStatusSummary();
-  loadPasskeysList().catch(() => { });
+  loadPasskeysList().catch(() => {});
 
   const canManagePlatform = hasPower('settings_manage');
   const isMain = Boolean(state.user && state.user.isMainAdmin);
@@ -4466,7 +4611,7 @@ async function loadSettingsView() {
   if (usersCard) usersCard.style.display = isMain ? '' : 'none';
   if (panelCard) panelCard.style.display = isMain ? '' : 'none';
   if (updateCard) updateCard.style.display = isMain ? '' : 'none';
-  if (isMain) loadSystemVersionInfo(true).catch(() => { });
+  if (isMain) loadSystemVersionInfo(true).catch(() => {});
   if (!canManagePlatform && !isMain) return;
 
   try {
@@ -4481,7 +4626,7 @@ async function loadSettingsView() {
     if (s.github_tokens) {
       try {
         parsedTokens = JSON.parse(s.github_tokens);
-      } catch (_) { }
+      } catch (_) {}
     }
     if ((!Array.isArray(parsedTokens) || !parsedTokens.length) && s.github_token) {
       parsedTokens = String(s.github_token)
@@ -4492,10 +4637,10 @@ async function loadSettingsView() {
     }
     state.githubTokensDraft = Array.isArray(parsedTokens) && parsedTokens.length
       ? parsedTokens.map((t, i) => ({
-        label: t.label || `Account #${i + 1}`,
-        token: t.token || '',
-        revealed: false,
-      }))
+          label: t.label || `Account #${i + 1}`,
+          token: t.token || '',
+          revealed: false,
+        }))
       : [{ label: 'Primary Account', token: '', revealed: false }];
 
     const activeCount = state.githubTokensDraft.filter((t) => (t.token || '').trim().length > 0).length;
@@ -4531,11 +4676,11 @@ async function loadSettingsView() {
           const projHtml = (isMain || u.allProjects)
             ? '<span class="badge badge-info">All Websites (*)</span>'
             : (u.allowedProjects && u.allowedProjects.length
-              ? u.allowedProjects.map((pid) => {
-                const proj = state.projects.find((p) => p.id === pid);
-                return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
-              }).join(' ')
-              : '<span class="badge badge-warning">No Websites Assigned</span>');
+                ? u.allowedProjects.map((pid) => {
+                    const proj = state.projects.find((p) => p.id === pid);
+                    return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
+                  }).join(' ')
+                : '<span class="badge badge-warning">No Websites Assigned</span>');
 
           const perms = isMain || (u.permissions && u.permissions.includes('*'))
             ? ['*']
@@ -5906,8 +6051,8 @@ function startPolling() {
     try {
       // Keep sidebar badges (databases & projects & services) constantly up-to-date across all tabs
       await Promise.all([
-        loadProjects().catch(() => { }),
-        loadDatabases().catch(() => { })
+        loadProjects().catch(() => {}),
+        loadDatabases().catch(() => {})
       ]);
 
       if (state.currentView === 'overview') {
@@ -6449,7 +6594,7 @@ async function registerNewPasskey() {
         const spkiBuf = cred.response.getPublicKey();
         if (spkiBuf) publicKeySpki = bufferToBase64Url(spkiBuf);
       }
-    } catch (_) { }
+    } catch (_) {}
 
     let authenticatorData = null;
     try {
@@ -6457,7 +6602,7 @@ async function registerNewPasskey() {
         const adBuf = cred.response.getAuthenticatorData();
         if (adBuf) authenticatorData = bufferToBase64Url(adBuf);
       }
-    } catch (_) { }
+    } catch (_) {}
 
     const finishRes = await api('/api/auth/passkeys/register/finish', {
       method: 'POST',
@@ -7347,7 +7492,7 @@ async function startPlatformUpdate() {
         if (dismissBtn) dismissBtn.disabled = false;
         if (closeBtn) closeBtn.style.display = 'block';
 
-        loadSystemVersionInfo(true).catch(() => { });
+        loadSystemVersionInfo(true).catch(() => {});
         toast('WebDep compiled successfully! Click "Restart WebDep Panel Now" to apply.', 'success', 6000);
       }
     } catch (_) {

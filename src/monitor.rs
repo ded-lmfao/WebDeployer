@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
@@ -157,7 +158,8 @@ impl Monitor {
             loop {
                 interval.tick().await;
                 let m = mon.clone();
-                let include_procs = tick_count % 3 == 0;
+                // Refresh processes every 6s (every 2nd tick) for responsive metrics with near-zero overhead
+                let include_procs = tick_count % 2 == 0;
                 tick_count = tick_count.wrapping_add(1);
                 let _ = tokio::task::spawn_blocking(move || {
                     m.refresh_now(include_procs);
@@ -165,6 +167,54 @@ impl Monitor {
                 .await;
             }
         });
+    }
+
+    /// Returns process tree CPU usage (percentage) and resident memory (bytes)
+    /// aggregated for each requested root PID (root process + all descendant children).
+    /// Performs lock-read on in-memory sysinfo cache, zero OS syscalls or disk I/O.
+    pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
+        let sys = self.sys.lock().unwrap();
+        let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut metrics_map: HashMap<u32, (f32, u64)> = HashMap::new();
+
+        for (pid, p) in sys.processes() {
+            let pid_u32 = pid.as_u32();
+            metrics_map.insert(pid_u32, (p.cpu_usage(), p.memory()));
+            if let Some(parent) = p.parent() {
+                children_map.entry(parent.as_u32()).or_default().push(pid_u32);
+            }
+        }
+
+        let mut results = HashMap::with_capacity(root_pids.len());
+        for &root in root_pids {
+            let mut total_cpu = 0.0f32;
+            let mut total_mem = 0u64;
+            let mut visited = HashSet::new();
+            let mut queue = VecDeque::new();
+
+            if metrics_map.contains_key(&root) {
+                queue.push_back(root);
+                visited.insert(root);
+            }
+
+            while let Some(curr) = queue.pop_front() {
+                if let Some(&(cpu, mem)) = metrics_map.get(&curr) {
+                    total_cpu += cpu;
+                    total_mem = total_mem.saturating_add(mem);
+                }
+                if let Some(kids) = children_map.get(&curr) {
+                    for &k in kids {
+                        if visited.insert(k) {
+                            queue.push_back(k);
+                        }
+                    }
+                }
+            }
+
+            results.insert(root, (total_cpu, total_mem));
+        }
+
+        results
     }
 
     /// Instantaneous (< 1 microsecond) lock-free/read-lock read of the cached telemetry snapshot.

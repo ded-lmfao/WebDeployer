@@ -1031,7 +1031,7 @@ fn to_clean_path_str(path: &Path) -> String {
     }
 }
 
-fn read_pg_pid(data_dir: &Path) -> Option<u32> {
+pub(crate) fn read_pg_pid(data_dir: &Path) -> Option<u32> {
     let pid_file = data_dir.join("postmaster.pid");
     if let Ok(content) = std::fs::read_to_string(pid_file) {
         if let Some(first_line) = content.lines().next() {

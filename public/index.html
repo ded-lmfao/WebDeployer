@@ -402,6 +402,7 @@
               <div class="progress-bar">
                 <div class="progress-fill green" id="stat-cpu-bar" style="width: 0%;"></div>
               </div>
+              <div class="stat-meta" id="stat-cpu-meta">-- Cores</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">RAM</div>
@@ -409,6 +410,7 @@
               <div class="progress-bar">
                 <div class="progress-fill green" id="stat-mem-bar" style="width: 0%;"></div>
               </div>
+              <div class="stat-meta" id="stat-mem-meta">-- used</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Disk Free</div>
@@ -433,6 +435,73 @@
             </div>
           </div>
 
+          <!-- Live Resource Consumption & Telemetry Breakdown -->
+          <div class="card resource-breakdown-card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="card-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span class="status-dot online"></span>
+                  Active Resource Consumption
+                </span>
+                <span class="badge badge-neutral" id="res-workloads-count-badge">0 Workloads</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="filter-pills" id="resource-filter-pills">
+                  <button class="pill active" data-res-filter="all" onclick="filterResourceBreakdown('all')">All Workloads</button>
+                  <button class="pill" data-res-filter="website" onclick="filterResourceBreakdown('website')">Websites</button>
+                  <button class="pill" data-res-filter="service" onclick="filterResourceBreakdown('service')">Services</button>
+                  <button class="pill" data-res-filter="database" onclick="filterResourceBreakdown('database')">Databases</button>
+                  <button class="pill" data-res-filter="panel" onclick="filterResourceBreakdown('panel')">Panel</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Resource Usage Strip -->
+            <div class="resource-summary-bar">
+              <div class="res-summary-item">
+                <span class="res-summary-label">WebDep Engine (Daemon)</span>
+                <span class="res-summary-val" id="res-panel-usage">-- MB &bull; 0% CPU</span>
+              </div>
+              <div class="res-summary-item">
+                <span class="res-summary-label">Managed Workloads</span>
+                <span class="res-summary-val" id="res-workloads-usage" style="color: var(--accent-light);">-- MB &bull; 0% CPU</span>
+              </div>
+              <div class="res-summary-item">
+                <span class="res-summary-label">System / OS Overhead</span>
+                <span class="res-summary-val" id="res-system-usage">-- MB</span>
+              </div>
+              <div class="res-summary-item">
+                <span class="res-summary-label">Available VPS Memory</span>
+                <span class="res-summary-val" id="res-free-memory" style="color: var(--success);">-- MB free</span>
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-resource-breakdown">
+                  <thead>
+                    <tr>
+                      <th>Workload</th>
+                      <th>Type</th>
+                      <th>Port / PID</th>
+                      <th>Status</th>
+                      <th style="min-width: 140px;">CPU Usage</th>
+                      <th style="min-width: 180px;">Memory (RAM)</th>
+                      <th style="text-align: right;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="resource-breakdown-table">
+                    <tr>
+                      <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-dim);">
+                        Aggregating resource metrics...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
           <!-- Websites Quick Grid -->
           <div class="card">
             <div class="card-header">
@@ -447,13 +516,14 @@
                       <th>Website</th>
                       <th>URL / Port</th>
                       <th>Status</th>
+                      <th>Usage (CPU &bull; RAM)</th>
                       <th>Commit</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="overview-projects-table">
                     <tr>
-                      <td colspan="5" style="text-align: center; padding: 24px;">No websites created yet. Click "Add
+                      <td colspan="6" style="text-align: center; padding: 24px;">No websites created yet. Click "Add
                         Website" to get started.</td>
                     </tr>
                   </tbody>
@@ -476,13 +546,14 @@
                       <th>Service</th>
                       <th>Type</th>
                       <th>Status</th>
+                      <th>Usage (CPU &bull; RAM)</th>
                       <th>Commit</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="overview-services-table">
                     <tr>
-                      <td colspan="5" style="text-align: center; padding: 24px;">No backend services yet.</td>
+                      <td colspan="6" style="text-align: center; padding: 24px;">No backend services yet.</td>
                     </tr>
                   </tbody>
                 </table>

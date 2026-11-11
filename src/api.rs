@@ -2528,13 +2528,79 @@ struct OverviewAppStatus {
     pid: Option<u32>,
     #[serde(rename = "startedAt")]
     started_at: Option<i64>,
+    #[serde(rename = "cpuPct")]
+    cpu_pct: Option<f32>,
+    #[serde(rename = "memoryBytes")]
+    memory_bytes: Option<u64>,
+    #[serde(rename = "memoryFormatted")]
+    memory_formatted: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ResourceItem {
+    pub id: String,
+    pub name: String,
+    pub kind: String,          // "panel", "website", "service", "database"
+    pub status: String,        // "running", "stopped", "error"
+    pub pid: Option<u32>,
+    pub port: Option<u16>,
+    #[serde(rename = "cpuPct")]
+    pub cpu_pct: f32,
+    #[serde(rename = "memoryBytes")]
+    pub memory_bytes: u64,
+    #[serde(rename = "memoryFormatted")]
+    pub memory_formatted: String,
+    #[serde(rename = "memoryPct")]
+    pub memory_pct: f32,
+    #[serde(rename = "projectId")]
+    pub project_id: Option<i64>,
+    #[serde(rename = "databaseId")]
+    pub database_id: Option<i64>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ResourceSummary {
+    #[serde(rename = "totalManagedMemory")]
+    pub total_managed_memory: u64,
+    #[serde(rename = "totalManagedMemoryFormatted")]
+    pub total_managed_memory_formatted: String,
+    #[serde(rename = "totalManagedCpu")]
+    pub total_managed_cpu: f32,
+    #[serde(rename = "panelMemory")]
+    pub panel_memory: u64,
+    #[serde(rename = "panelMemoryFormatted")]
+    pub panel_memory_formatted: String,
+    #[serde(rename = "panelCpu")]
+    pub panel_cpu: f32,
+    #[serde(rename = "systemOverheadMemory")]
+    pub system_overhead_memory: u64,
+    #[serde(rename = "systemOverheadMemoryFormatted")]
+    pub system_overhead_memory_formatted: String,
+    #[serde(rename = "runningWorkloadsCount")]
+    pub running_workloads_count: usize,
+    #[serde(rename = "totalWorkloadsCount")]
+    pub total_workloads_count: usize,
 }
 
 #[derive(Serialize)]
 struct OverviewResponse {
     projects: Vec<OverviewProjectItem>,
+    resources: Vec<ResourceItem>,
+    summary: ResourceSummary,
     recent: Vec<crate::deployer::Deployment>,
     monitor: crate::monitor::SystemMetrics,
+}
+
+fn format_resource_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.0} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
 }
 
 fn fetch_overview_deployment(
@@ -2586,10 +2652,95 @@ async fn overview_handler(
     if let Some(ref u) = user_opt {
         projs.retain(|p| u.can_access_project(p.id));
     }
+
+    let monitor = state.monitor.sample();
+    let total_vps_mem = monitor.memory.total.max(1);
+    let num_cores = monitor.cpu.cores.max(1) as f32;
+
+    let panel_pid = std::process::id();
+    let mut pids_to_query = vec![panel_pid];
+
+    for p in &projs {
+        if p.app_status == "running" {
+            if let Some(pid) = p.app_pid {
+                pids_to_query.push(pid);
+            }
+        }
+    }
+
+    let dbs = state.databases.list().unwrap_or_default();
+    let mut db_pids = Vec::with_capacity(dbs.len());
+    for db in &dbs {
+        let mut d_pid = None;
+        if let Some(ref cid) = db.container_id {
+            if let Some(p_str) = cid.strip_prefix("pid-") {
+                d_pid = p_str.parse::<u32>().ok();
+            }
+        }
+        if d_pid.is_none() {
+            let data_dir = std::path::PathBuf::from(&db.data_dir).join("data");
+            d_pid = crate::databases::read_pg_pid(&data_dir);
+        }
+        if db.status == "running" {
+            if let Some(pid) = d_pid {
+                pids_to_query.push(pid);
+            }
+        }
+        db_pids.push((db.id, d_pid));
+    }
+
+    let proc_metrics = state.monitor.get_tree_metrics(&pids_to_query);
+    let mut resources = Vec::new();
+
+    // 1. WebDep Panel daemon self metrics
+    let (panel_raw_cpu, panel_mem) = proc_metrics.get(&panel_pid).copied().unwrap_or((0.0, 0));
+    let panel_cpu = ((panel_raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0;
+    let panel_mem_pct = ((panel_mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0;
+    resources.push(ResourceItem {
+        id: "panel".to_string(),
+        name: "WebDep Control Panel".to_string(),
+        kind: "panel".to_string(),
+        status: "running".to_string(),
+        pid: Some(panel_pid),
+        port: Some(4600),
+        cpu_pct: panel_cpu,
+        memory_bytes: panel_mem,
+        memory_formatted: format_resource_bytes(panel_mem),
+        memory_pct: panel_mem_pct,
+        project_id: None,
+        database_id: None,
+    });
+
     let mut items = Vec::new();
 
     for p in projs {
         let is_running = p.app_status == "running";
+        let (raw_cpu, mem) = if is_running {
+            if let Some(pid) = p.app_pid {
+                proc_metrics.get(&pid).copied().unwrap_or((0.0, 0))
+            } else {
+                (0.0, 0)
+            }
+        } else {
+            (0.0, 0)
+        };
+        let cpu = if is_running {
+            ((raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        let mem_pct = if is_running {
+            ((mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        let mem_fmt = if is_running && mem > 0 {
+            format_resource_bytes(mem)
+        } else if is_running {
+            "< 1 MB".to_string()
+        } else {
+            "0 MB".to_string()
+        };
 
         let last_success = {
             let conn = state.db.lock().unwrap();
@@ -2606,20 +2757,116 @@ async fn overview_handler(
                 running: is_running,
                 pid: p.app_pid,
                 started_at: p.app_started_at,
+                cpu_pct: if is_running { Some(cpu) } else { None },
+                memory_bytes: if is_running { Some(mem) } else { None },
+                memory_formatted: if is_running { Some(mem_fmt.clone()) } else { None },
             },
-            project: p,
+            project: p.clone(),
             active,
             behind: Some(0),
             ahead: Some(0),
             last_success,
         });
+
+        let kind = if p.project_kind == "service" { "service" } else { "website" };
+        resources.push(ResourceItem {
+            id: format!("{}-{}", kind, p.id),
+            name: p.name.clone(),
+            kind: kind.to_string(),
+            status: p.app_status.clone(),
+            pid: p.app_pid,
+            port: p.port,
+            cpu_pct: cpu,
+            memory_bytes: mem,
+            memory_formatted: mem_fmt,
+            memory_pct: mem_pct,
+            project_id: Some(p.id),
+            database_id: None,
+        });
     }
 
+    for db in dbs {
+        let d_pid = db_pids.iter().find(|(id, _)| *id == db.id).and_then(|(_, p)| *p);
+        let is_running = db.status == "running";
+        let (raw_cpu, mem) = if is_running {
+            if let Some(pid) = d_pid {
+                proc_metrics.get(&pid).copied().unwrap_or((0.0, 0))
+            } else {
+                (0.0, 0)
+            }
+        } else {
+            (0.0, 0)
+        };
+        let cpu = if is_running {
+            ((raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        let mem_pct = if is_running {
+            ((mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        let mem_fmt = if is_running && mem > 0 {
+            format_resource_bytes(mem)
+        } else if is_running {
+            "< 1 MB".to_string()
+        } else {
+            "0 MB".to_string()
+        };
+
+        resources.push(ResourceItem {
+            id: format!("database-{}", db.id),
+            name: format!("PostgreSQL ({})", db.name),
+            kind: "database".to_string(),
+            status: db.status.clone(),
+            pid: d_pid,
+            port: Some(db.port),
+            cpu_pct: cpu,
+            memory_bytes: mem,
+            memory_formatted: mem_fmt,
+            memory_pct: mem_pct,
+            project_id: None,
+            database_id: Some(db.id),
+        });
+    }
+
+    // Sort: running workloads first, descending by memory usage
+    resources.sort_by(|a, b| {
+        let a_run = a.status == "running";
+        let b_run = b.status == "running";
+        match (a_run, b_run) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.memory_bytes.cmp(&a.memory_bytes),
+        }
+    });
+
+    let total_managed_mem: u64 = resources.iter().map(|r| r.memory_bytes).sum();
+    let total_managed_cpu: f32 = ((resources.iter().map(|r| r.cpu_pct).sum::<f32>()) * 10.0).round() / 10.0;
+    let system_overhead = monitor.memory.used.saturating_sub(total_managed_mem);
+    let running_count = resources.iter().filter(|r| r.status == "running").count();
+    let total_count = resources.len();
+
+    let summary = ResourceSummary {
+        total_managed_memory: total_managed_mem,
+        total_managed_memory_formatted: format_resource_bytes(total_managed_mem),
+        total_managed_cpu,
+        panel_memory: panel_mem,
+        panel_memory_formatted: format_resource_bytes(panel_mem),
+        panel_cpu,
+        system_overhead_memory: system_overhead,
+        system_overhead_memory_formatted: format_resource_bytes(system_overhead),
+        running_workloads_count: running_count,
+        total_workloads_count: total_count,
+    };
+
     let recent = state.deployer.list_deployments(None, 10);
-    let monitor = state.monitor.sample();
 
     let payload = OverviewResponse {
         projects: items,
+        resources,
+        summary,
         recent,
         monitor,
     };

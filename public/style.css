@@ -1659,3 +1659,181 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ============================================================================
+   Overview Live Resource Telemetry Breakdown
+   ============================================================================ */
+.resource-breakdown-card {
+  margin-bottom: 24px;
+}
+
+.resource-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.res-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.res-summary-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.res-summary-val {
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+
+.tbl-resource-breakdown th,
+.tbl-resource-breakdown td {
+  vertical-align: middle;
+}
+
+.res-workload-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.res-workload-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.res-workload-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.res-workload-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.badge-res-panel {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.badge-res-website {
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.badge-res-service {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.badge-res-database {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.res-metric-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.res-metric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.res-mini-bar {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.res-mini-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.res-cpu-fill {
+  background: linear-gradient(90deg, #38bdf8, #6366f1);
+}
+
+.res-cpu-fill.warm {
+  background: linear-gradient(90deg, #fbbf24, #f97316);
+}
+
+.res-cpu-fill.hot {
+  background: linear-gradient(90deg, #f43f5e, #e11d48);
+}
+
+.res-mem-fill {
+  background: linear-gradient(90deg, #10b981, #06b6d4);
+}
+
+.res-mem-fill.warm {
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+
+.res-mem-fill.hot {
+  background: linear-gradient(90deg, #f43f5e, #dc2626);
+}
+
+.res-pid-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
