@@ -1223,11 +1223,17 @@ function renderResourceBreakdown(resources) {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'settings\')">Settings &rarr;</button>';
     } else if (r.kind === 'database') {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'databases\')">Databases &rarr;</button>';
-    } else if (pId) {
-      actionBtn = `<button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${pId}, 'deployments')">Manage &rarr;</button>`;
+    } else if (r.kind === 'service') {
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'services\')">Services &rarr;</button>';
+    } else {
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'projects\')">Websites &rarr;</button>';
     }
 
-    const rowClick = pId ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${pId}, 'deployments')"` : '';
+    const rowClick = pId
+      ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${pId})"`
+      : (r.kind === 'database'
+        ? 'style="cursor: pointer;" onclick="navigateTo(\'databases\')"'
+        : 'style="cursor: pointer;" onclick="navigateTo(\'settings\')"');
 
     return `
       <tr ${rowClick}>
