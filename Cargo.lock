@@ -1582,6 +1582,7 @@ dependencies = [
  "base64",
  "futures-util",
  "hex",
+ "libc",
  "rand",
  "rusqlite",
  "rust-embed",

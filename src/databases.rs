@@ -180,10 +180,25 @@ impl PgBinaries {
     }
 }
 
+fn is_running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 fn make_pg_server_command(prog: &Path, args: &[&str]) -> Command {
     #[cfg(unix)]
     {
-        if unsafe { libc::getuid() } == 0 {
+        if is_running_as_root() {
             let has_pg_user = std::process::Command::new("id")
                 .arg("postgres")
                 .output()
@@ -218,7 +233,7 @@ fn make_pg_server_command(prog: &Path, args: &[&str]) -> Command {
 fn ensure_pg_permissions(_db_dir: &Path, _data_dir: Option<&Path>) {
     #[cfg(unix)]
     {
-        if unsafe { libc::getuid() } == 0 {
+        if is_running_as_root() {
             ensure_parent_traverse_permissions(_db_dir);
             let _ = std::process::Command::new("chown")
                 .args(["-R", "postgres:postgres", &_db_dir.to_string_lossy()])
@@ -235,7 +250,7 @@ fn ensure_pg_permissions(_db_dir: &Path, _data_dir: Option<&Path>) {
 fn ensure_parent_traverse_permissions(_path: &Path) {
     #[cfg(unix)]
     {
-        if unsafe { libc::getuid() } == 0 {
+        if is_running_as_root() {
             let mut curr = _path.parent();
             while let Some(dir) = curr {
                 if dir == Path::new("/") || dir.as_os_str().is_empty() {
