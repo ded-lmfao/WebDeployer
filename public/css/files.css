@@ -460,8 +460,27 @@
 }
 
 /* ============================================================================
- * Syntax Highlighting Tokens (VS Code One Dark / Dracula Inspired)
+ * Speed-Highlight Syntax Coloring Engine (VS Code / One Dark Palette)
  * ============================================================================ */
+.file-editor-code {
+  color: #abb2bf;
+}
+.shj-syn-kwd     { color: #c678dd !important; font-weight: 600 !important; }
+.shj-syn-func    { color: #61afef !important; font-weight: 500 !important; }
+.shj-syn-str     { color: #98c379 !important; }
+.shj-syn-class   { color: #e5c07b !important; font-weight: 600 !important; }
+.shj-syn-type    { color: #56b6c2 !important; }
+.shj-syn-cmnt    { color: #64748b !important; font-style: italic !important; }
+.shj-syn-num     { color: #d19a66 !important; }
+.shj-syn-bool    { color: #e5c07b !important; font-weight: 500 !important; }
+.shj-syn-oper    { color: #56b6c2 !important; }
+.shj-syn-var     { color: #e06c75 !important; }
+.shj-syn-section { color: #61afef !important; font-weight: 600 !important; }
+.shj-syn-insert  { color: #98c379 !important; }
+.shj-syn-deleted { color: #e06c75 !important; }
+.shj-syn-err     { color: #f87171 !important; text-decoration: underline !important; }
+
+/* Legacy Fallback Tokens */
 .tok-comment    { color: #64748b !important; font-style: italic !important; }
 .tok-docstring  { color: #64748b !important; font-style: italic !important; }
 .tok-string     { color: #98c379 !important; }

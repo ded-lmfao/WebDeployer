@@ -6,7 +6,7 @@
 import { icon, FILE_KINDS } from './icons.js';
 import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard } from './state.js';
 import { api, toast } from './api.js';
-import { highlightCode, detectLanguage } from './syntax.js';
+import { highlightHTML } from '../vendor/speed-highlight/index.js';
 
 // ============================================================================
 // Backend Service File Browser
@@ -357,10 +357,11 @@ async function filesOpen(path) {
       iconEl.innerHTML = meta.iconSvg;
     }
 
-    const detectedLang = detectLanguage(path);
+    const detectedLang = getSpeedHighlightLang(path);
     const langBadge = document.getElementById('files-editor-lang-badge');
     if (langBadge) {
-      langBadge.textContent = detectedLang.toUpperCase();
+      const displayLang = detectedLang === 'py' ? 'PYTHON' : detectedLang === 'js' ? 'JAVASCRIPT' : detectedLang === 'ts' ? 'TYPESCRIPT' : detectedLang.toUpperCase();
+      langBadge.textContent = displayLang;
       langBadge.style.background = meta.iconBg;
       langBadge.style.color = meta.iconColor;
     }
@@ -389,25 +390,37 @@ async function filesOpen(path) {
     if (gutter) {
       gutter.scrollTop = 0;
     }
-
-    if (textarea) {
-      textarea.scrollTop = 0;
-      textarea.scrollLeft = 0;
-    }
-    if (pre) {
-      pre.scrollTop = 0;
-      pre.scrollLeft = 0;
-    }
-    if (gutter) {
-      gutter.scrollTop = 0;
-    }
   } catch (err) {
     toast(err.message, 'error');
   }
 }
 window.filesOpen = filesOpen;
 
-function updateEditorHighlight() {
+function getSpeedHighlightLang(filename) {
+  if (!filename) return 'plain';
+  const lower = filename.toLowerCase();
+  const base = lower.split('/').pop().split('\\').pop();
+
+  if (base === 'dockerfile' || base.startsWith('dockerfile.')) return 'docker';
+  if (base === '.env' || base.startsWith('.env.') || base.endsWith('.env')) return 'ini';
+  if (base.endsWith('.conf') || base.endsWith('.ini') || base.endsWith('.cfg') || base.endsWith('.properties') || base === 'requirements.txt') return 'ini';
+  if (base.endsWith('.py') || base.endsWith('.pyw')) return 'py';
+  if (base.endsWith('.js') || base.endsWith('.mjs') || base.endsWith('.cjs') || base.endsWith('.jsx')) return 'js';
+  if (base.endsWith('.ts') || base.endsWith('.tsx')) return 'ts';
+  if (base.endsWith('.json') || base.endsWith('.jsonc') || base.endsWith('.json5') || base.endsWith('.lock')) return 'json';
+  if (base.endsWith('.sh') || base.endsWith('.bash') || base.endsWith('.zsh') || base.endsWith('.ksh') || base === '.bashrc' || base === '.zshrc') return 'bash';
+  if (base.endsWith('.html') || base.endsWith('.htm') || base.endsWith('.svg') || base.endsWith('.xml') || base.endsWith('.vue')) return 'html';
+  if (base.endsWith('.css') || base.endsWith('.scss') || base.endsWith('.sass') || base.endsWith('.less')) return 'css';
+  if (base.endsWith('.yaml') || base.endsWith('.yml')) return 'yaml';
+  if (base.endsWith('.sql')) return 'sql';
+  if (base.endsWith('.rs')) return 'rs';
+  if (base.endsWith('.go')) return 'go';
+  if (base.endsWith('.md') || base.endsWith('.markdown')) return 'md';
+  return 'plain';
+}
+
+let highlightSeq = 0;
+async function updateEditorHighlight() {
   const textarea = document.getElementById('files-editor');
   const codeEl = document.getElementById('files-editor-code');
   const card = document.getElementById('files-editor-card');
@@ -422,8 +435,22 @@ function updateEditorHighlight() {
   }
 
   if (card) card.classList.remove('no-highlight');
-  const lang = detectLanguage(state.filesOpenPath || '');
-  codeEl.innerHTML = highlightCode(content, lang);
+  const lang = getSpeedHighlightLang(state.filesOpenPath || '');
+  const seq = ++highlightSeq;
+
+  try {
+    let html = await highlightHTML(content, lang, { block: false });
+    if (seq !== highlightSeq) return;
+    if (content.endsWith('\n')) {
+      html += '\n';
+    }
+    codeEl.innerHTML = html;
+  } catch (err) {
+    console.warn('Speed-highlight error:', err);
+    if (seq === highlightSeq) {
+      codeEl.textContent = content;
+    }
+  }
 }
 
 function updateEditorGutter() {

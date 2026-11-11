@@ -4,11 +4,15 @@
   "description": "Self-hosted deployment platform: GitHub sync, release directories, health-checked deploys, automatic rollback.",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "start": "cargo run --release",
     "build": "cargo build --release",
     "test": "cargo test"
+  },
+  "dependencies": {
+    "@speed-highlight/core": "^2.1.0"
   }
 }
-
