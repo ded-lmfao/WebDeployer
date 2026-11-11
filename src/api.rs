@@ -2987,8 +2987,8 @@ async fn overview_handler(
     monitor.memory.pct = ((effective_used_mem as f64 / total_vps_mem as f64 * 100.0).round() as u8).min(100);
 
     let system_overhead_cpu = (((effective_vps_cpu - (final_panel_cpu + total_managed_cpu)).max(0.0)) * 10.0).round() / 10.0;
-    let running_count = resources.iter().filter(|r| r.status == "running").count();
-    let total_count = resources.len();
+    let running_count = resources.iter().filter(|r| r.id != "panel" && r.status == "running").count();
+    let total_count = resources.iter().filter(|r| r.id != "panel").count();
 
     let summary = ResourceSummary {
         total_managed_memory: total_managed_mem,

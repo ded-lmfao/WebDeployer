@@ -1160,7 +1160,7 @@ function renderResourceBreakdown(resources) {
   if (!tbody) return;
   const list = resources || state.overview?.resources || [];
   const filter = state.resourceFilter || 'all';
-  const filtered = filter === 'all' ? list : list.filter((r) => r.kind === filter);
+  const filtered = filter === 'all' ? list.filter((r) => r.kind !== 'panel') : list.filter((r) => r.kind === filter);
 
   if (!filtered.length) {
     let emptyMsg = 'No active workloads found.';
@@ -1174,6 +1174,9 @@ function renderResourceBreakdown(resources) {
     } else if (filter === 'database') {
       emptyMsg = 'No managed databases created yet.';
       emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="navigateTo(\'databases\')">Go to Databases &rarr;</button>';
+    } else if (filter === 'all') {
+      emptyMsg = 'No workloads created yet. Deploy websites, backend services or databases to monitor their live resource usage.';
+      emptyAction = '<div style="margin-top: 12px; display: flex; gap: 8px; justify-content: center;"><button class="btn btn-primary btn-sm" onclick="openAddWebsiteModal()">+ Add Website</button><button class="btn btn-secondary btn-sm" onclick="openAddServiceModal()">+ Add Service</button><button class="btn btn-secondary btn-sm" onclick="navigateTo(\'databases\')">Go to Databases &rarr;</button></div>';
     }
     tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 32px 16px; color: var(--text-dim);"><div style="font-size: 13.5px;">${emptyMsg}</div>${emptyAction}</td></tr>`;
     return;
