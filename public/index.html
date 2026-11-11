@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.12.2">
+  <link rel="stylesheet" href="/style.css?v=3.12.3">
 </head>
 
 <body>
@@ -878,7 +878,7 @@
                 </div>
               </div>
             </div>
-            <div class="view-actions" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <div class="view-actions" id="files-header-actions" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
               <input type="file" id="service-file-upload-input" multiple style="display: none;"
                 onchange="handleFilesUpload(event)" aria-label="Upload files to service directory">
               <input type="file" id="service-folder-upload-input" webkitdirectory directory multiple style="display: none;"
@@ -934,7 +934,7 @@
             </div>
           </div>
 
-          <!-- Main File Explorer Surface -->
+          <!-- Main Unified File Explorer & In-Browser IDE Surface (1 Box, Dual Mode) -->
           <div class="card file-explorer-card" id="file-explorer-dropzone" style="padding: 0; overflow: hidden; position: relative;">
             <!-- Drop overlay when dragging files from desktop -->
             <div id="file-drop-overlay" class="file-drop-overlay" style="display: none;">
@@ -949,104 +949,107 @@
               </div>
             </div>
 
-            <!-- Breadcrumb Navigation & Filter Toolbar -->
-            <div class="file-explorer-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-                <button class="btn btn-secondary btn-sm" id="files-up-btn" onclick="filesGoUp()" title="Go to parent directory" style="display: none; padding: 4px 8px;">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                  <span style="font-size: 11.5px; margin-left: 2px;">Up</span>
-                </button>
-                <div id="files-breadcrumb" class="file-breadcrumb-trail"></div>
-                <button class="file-copy-path-btn" onclick="filesCopyCurrentPath()" title="Copy current folder path to clipboard">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                </button>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <div class="file-search-input-wrap">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="file-search-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                  <input type="text" id="files-filter-input" placeholder="Filter files..." class="file-filter-input" oninput="filesFilterList(this.value)">
-                  <button type="button" id="files-filter-clear" class="file-filter-clear" onclick="filesClearFilter()" style="display: none;">&times;</button>
+            <!-- View 1: File Browser & Directory Table -->
+            <div id="files-browser-view">
+              <!-- Breadcrumb Navigation & Filter Toolbar -->
+              <div class="file-explorer-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                  <button class="btn btn-secondary btn-sm" id="files-up-btn" onclick="filesGoUp()" title="Go to parent directory" style="display: none; padding: 4px 8px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    <span style="font-size: 11.5px; margin-left: 2px;">Up</span>
+                  </button>
+                  <div id="files-breadcrumb" class="file-breadcrumb-trail"></div>
+                  <button class="file-copy-path-btn" onclick="filesCopyCurrentPath()" title="Copy current folder path to clipboard">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
                 </div>
-                <span id="files-count-badge" class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono); font-weight: 500;">
-                  0 items
-                </span>
-              </div>
-            </div>
 
-            <!-- Structured File Explorer Table -->
-            <div id="files-table-container" class="file-table-container" style="overflow-x: auto;">
-              <table class="file-table" style="width: 100%; border-collapse: collapse; text-align: left;">
-                <thead>
-                  <tr style="border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.015);">
-                    <th style="padding: 10px 16px; font-weight: 600; width: 46%;">Name</th>
-                    <th style="padding: 10px 14px; font-weight: 600; width: 14%;">Size</th>
-                    <th style="padding: 10px 14px; font-weight: 600; width: 22%;">Modified</th>
-                    <th style="padding: 10px 16px; font-weight: 600; width: 18%; text-align: right;">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="files-list-body">
-                  <!-- Populated by renderFilesTable() in app.js -->
-                </tbody>
-              </table>
-              <div id="files-empty-state" style="display: none; padding: 48px 20px; text-align: center;">
-                <!-- Populated when directory has no matching items -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Professional IDE In-Browser Code / Config Editor -->
-          <div class="card file-editor-card" id="files-editor-card" style="display: none; margin-top: 16px; padding: 0; overflow: hidden;">
-            <div class="file-editor-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; flex-wrap: wrap; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
-                <div class="file-editor-tab-pill">
-                  <span id="files-editor-icon" style="display: inline-flex; align-items: center;"></span>
-                  <span id="files-editor-name" style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px;"></span>
-                  <span id="files-editor-dirty-badge" class="file-editor-dirty-indicator" style="display: none;" title="Unsaved changes"></span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div class="file-search-input-wrap">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="file-search-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" id="files-filter-input" placeholder="Filter files..." class="file-filter-input" oninput="filesFilterList(this.value)">
+                    <button type="button" id="files-filter-clear" class="file-filter-clear" onclick="filesClearFilter()" style="display: none;">&times;</button>
+                  </div>
+                  <span id="files-count-badge" class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono); font-weight: 500;">
+                    0 items
+                  </span>
                 </div>
-                <span id="files-editor-meta" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
               </div>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <span class="file-editor-kbd hide-mobile" title="Press Ctrl+S to save">Ctrl+S</span>
-                <button class="btn btn-secondary btn-sm" id="files-download-current-btn" onclick="filesDownloadCurrent()" title="Download file to computer">
-                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                  <span>Download</span>
-                </button>
-                <button class="btn btn-secondary btn-sm hide-mobile" id="files-fullscreen-btn" onclick="filesToggleFullscreen()" title="Toggle full-height workspace">
-                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-                  <span>Fullscreen</span>
-                </button>
-                <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent()" title="Save changes (Ctrl+S)">
-                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                  <span>Save</span>
-                </button>
-                <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()" title="Close editor (Esc)">
-                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                  <span>Close</span>
-                </button>
+
+              <!-- Structured File Explorer Table -->
+              <div id="files-table-container" class="file-table-container" style="overflow-x: auto;">
+                <table class="file-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                  <thead>
+                    <tr style="border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.015);">
+                      <th style="padding: 10px 16px; font-weight: 600; width: 46%;">Name</th>
+                      <th style="padding: 10px 14px; font-weight: 600; width: 14%;">Size</th>
+                      <th style="padding: 10px 14px; font-weight: 600; width: 22%;">Modified</th>
+                      <th style="padding: 10px 16px; font-weight: 600; width: 18%; text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="files-list-body">
+                    <!-- Populated by renderFilesTable() in files.js -->
+                  </tbody>
+                </table>
+                <div id="files-empty-state" style="display: none; padding: 48px 20px; text-align: center;">
+                  <!-- Populated when directory has no matching items -->
+                </div>
               </div>
             </div>
 
-            <!-- Synchronized Editor Pane with line gutter and syntax overlay -->
-            <div class="file-editor-body" id="files-editor-body">
-              <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
-              <div class="file-editor-stage" id="files-editor-stage">
-                <pre id="files-editor-pre" class="file-editor-pre" aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
-                <textarea id="files-editor" class="file-editor-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+            <!-- View 2: Professional In-Browser IDE Code / Config Editor (Unified in Same Box) -->
+            <div class="file-editor-card" id="files-editor-card" style="display: none; padding: 0; overflow: hidden; border: none; border-radius: 0; background: #0b0f19;">
+              <div class="file-editor-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                  <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()" title="Back to files list" style="padding: 4px 10px; display: inline-flex; align-items: center; gap: 5px; font-weight: 500;">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                    <span>Back</span>
+                  </button>
+                  <div class="file-editor-tab-pill">
+                    <span id="files-editor-icon" style="display: inline-flex; align-items: center;"></span>
+                    <span id="files-editor-name" style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;"></span>
+                    <span id="files-editor-dirty-badge" class="file-editor-dirty-indicator" style="display: none;" title="Unsaved changes"></span>
+                  </div>
+                  <span id="files-editor-meta" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span class="file-editor-kbd hide-mobile" title="Press Ctrl+S to save">Ctrl+S</span>
+                  <button class="btn btn-secondary btn-sm" id="files-download-current-btn" onclick="filesDownloadCurrent()" title="Download file to computer">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    <span>Download</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm hide-mobile" id="files-fullscreen-btn" onclick="filesToggleFullscreen()" title="Toggle full-height workspace">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                    <span>Fullscreen</span>
+                  </button>
+                  <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent(true)" title="Save changes and return to files (Ctrl+S)">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    <span>Save</span>
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <!-- Editor Status Footer -->
-            <div class="file-editor-footer">
-              <div style="display: flex; gap: 16px; align-items: center;">
-                <span id="files-editor-pos">Ln 1, Col 1</span>
-                <span id="files-editor-lines">1 lines</span>
-                <span id="files-editor-size">0 KB</span>
+              <!-- Synchronized Editor Pane with line gutter and syntax overlay -->
+              <div class="file-editor-body" id="files-editor-body">
+                <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
+                <div class="file-editor-stage" id="files-editor-stage">
+                  <pre id="files-editor-pre" class="file-editor-pre" aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
+                  <textarea id="files-editor" class="file-editor-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+                </div>
               </div>
-              <div style="display: flex; gap: 12px; align-items: center;">
-                <span id="files-editor-lang-badge" class="file-editor-lang-badge">CODE</span>
-                <span>UTF-8</span>
-                <span>Spaces: 2</span>
+
+              <!-- Editor Status Footer -->
+              <div class="file-editor-footer">
+                <div style="display: flex; gap: 16px; align-items: center;">
+                  <span id="files-editor-pos">Ln 1, Col 1</span>
+                  <span id="files-editor-lines">1 lines</span>
+                  <span id="files-editor-size">0 KB</span>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                  <span id="files-editor-lang-badge" class="file-editor-lang-badge">CODE</span>
+                  <span>UTF-8</span>
+                  <span>Spaces: 2</span>
+                </div>
               </div>
             </div>
           </div>
@@ -2783,7 +2786,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.12.2"></script>
+  <script type="module" src="/app.js?v=3.12.3"></script>
 </body>
 
 </html>

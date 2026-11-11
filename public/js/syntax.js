@@ -18,6 +18,7 @@ export function detectLanguage(filename) {
   const base = lower.split('/').pop().split('\\').pop();
 
   if (base === 'dockerfile' || base.startsWith('dockerfile.')) return 'dockerfile';
+  if (base === 'requirements.txt' || base.endsWith('-requirements.txt') || base.endsWith('.requirements.txt')) return 'requirements';
   if (base === '.env' || base.startsWith('.env.') || base.endsWith('.env')) return 'env';
   if (base.endsWith('.conf') || base.endsWith('.ini') || base.endsWith('.cfg') || base.endsWith('.properties')) return 'env';
   if (base.endsWith('.py') || base.endsWith('.pyw')) return 'python';
@@ -479,6 +480,24 @@ function highlightDockerfile(code) {
     .join('\n');
 }
 
+function highlightRequirements(code) {
+  return code
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('#')) {
+        return `<span class="tok-comment">${escapeHtml(line)}</span>`;
+      }
+      const match = line.match(/^([a-zA-Z0-9_\-\[\]]+)(\s*(?:==|>=|<=|~=|!=|>|<)\s*)(.*)$/);
+      if (match) {
+        return `<span class="tok-property">${escapeHtml(match[1])}</span><span class="tok-operator">${escapeHtml(match[2])}</span><span class="tok-number">${escapeHtml(match[3])}</span>`;
+      }
+      return `<span class="tok-property">${escapeHtml(line)}</span>`;
+    })
+    .join('\n');
+}
+
 export function highlightCode(code, langOrFilename) {
   if (!code) return '';
   // Performance safeguard for extremely large files (>500KB or >15k lines)
@@ -490,6 +509,9 @@ export function highlightCode(code, langOrFilename) {
   let highlighted = '';
 
   switch (lang) {
+    case 'requirements':
+      highlighted = highlightRequirements(code);
+      break;
     case 'python':
       highlighted = highlightPython(code);
       break;

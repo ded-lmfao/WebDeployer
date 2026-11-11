@@ -270,10 +270,11 @@
  * Enterprise IDE Code & Config Editor
  * ============================================================================ */
 .file-editor-card {
-  border-radius: 10px !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border: none !important;
+  border-radius: 0 !important;
   background: #0b0f19 !important;
-  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+  box-shadow: none !important;
+  margin: 0 !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -285,7 +286,8 @@
   max-height: none !important;
   height: calc(100vh - 32px) !important;
   border-radius: 12px !important;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 100vw rgba(0, 0, 0, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 100vw rgba(0, 0, 0, 0.75) !important;
 }
 
 .file-editor-card.fullscreen .file-editor-body {
@@ -341,8 +343,9 @@
   position: relative;
   display: flex;
   background: #0b0f19;
-  min-height: 440px;
-  max-height: 680px;
+  min-height: 520px;
+  height: 64vh;
+  max-height: 800px;
 }
 
 .file-editor-gutter {

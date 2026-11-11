@@ -326,11 +326,15 @@ async function filesOpen(path) {
     state.filesEditorDirty = false;
 
     const editorCard = document.getElementById('files-editor-card');
+    const browserView = document.getElementById('files-browser-view');
+    const headerActions = document.getElementById('files-header-actions');
     const nameEl = document.getElementById('files-editor-name');
     const textarea = document.getElementById('files-editor');
     const dirtyBadge = document.getElementById('files-editor-dirty-badge');
     const metaEl = document.getElementById('files-editor-meta');
     const iconEl = document.getElementById('files-editor-icon');
+    const gutter = document.getElementById('files-editor-gutter');
+    const pre = document.getElementById('files-editor-pre');
 
     if (nameEl) {
       const parts = path.split('/');
@@ -361,9 +365,11 @@ async function filesOpen(path) {
       langBadge.style.color = meta.iconColor;
     }
 
+    // Switch box view: hide file list and top buttons, open editor in the same box
+    if (browserView) browserView.style.display = 'none';
+    if (headerActions) headerActions.style.display = 'none';
     if (editorCard) {
       editorCard.style.display = 'block';
-      editorCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     renderFilesTable();
@@ -376,7 +382,18 @@ async function filesOpen(path) {
       textarea.scrollTop = 0;
       textarea.scrollLeft = 0;
     }
-    const pre = document.getElementById('files-editor-pre');
+    if (pre) {
+      pre.scrollTop = 0;
+      pre.scrollLeft = 0;
+    }
+    if (gutter) {
+      gutter.scrollTop = 0;
+    }
+
+    if (textarea) {
+      textarea.scrollTop = 0;
+      textarea.scrollLeft = 0;
+    }
     if (pre) {
       pre.scrollTop = 0;
       pre.scrollLeft = 0;
@@ -475,7 +492,7 @@ function bindEditorEvents() {
   textarea.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
       e.preventDefault();
-      void filesSaveCurrent();
+      void filesSaveCurrent(false);
       return;
     }
     if (e.key === 'Escape') {
@@ -510,17 +527,36 @@ window.filesToggleFullscreen = filesToggleFullscreen;
 
 function filesCloseEditor(force = false) {
   if (!force && state.filesEditorDirty) {
-    if (!confirm('You have unsaved changes. Discard and close editor?')) {
+    if (!confirm('You have unsaved changes. Discard and return to files?')) {
       return;
     }
   }
   state.filesOpenPath = null;
   state.filesEditorDirty = false;
+
   const card = document.getElementById('files-editor-card');
+  const browserView = document.getElementById('files-browser-view');
+  const headerActions = document.getElementById('files-header-actions');
+  const fullscreenBtn = document.getElementById('files-fullscreen-btn');
+
   if (card) {
     card.classList.remove('fullscreen');
     card.style.display = 'none';
   }
+  if (browserView) {
+    browserView.style.display = 'block';
+  }
+  if (headerActions) {
+    headerActions.style.display = 'flex';
+  }
+  if (fullscreenBtn) {
+    fullscreenBtn.innerHTML = `${icon('external-link', { size: 13 })} <span>Fullscreen</span>`;
+  }
+
+  const codeEl = document.getElementById('files-editor-code');
+  if (codeEl) codeEl.innerHTML = '';
+  const textarea = document.getElementById('files-editor');
+  if (textarea) textarea.value = '';
   const codeEl = document.getElementById('files-editor-code');
   if (codeEl) codeEl.innerHTML = '';
   const textarea = document.getElementById('files-editor');
@@ -529,7 +565,7 @@ function filesCloseEditor(force = false) {
 }
 window.filesCloseEditor = filesCloseEditor;
 
-async function filesSaveCurrent() {
+async function filesSaveCurrent(andClose = true) {
   const p = getSelectedProject();
   if (!p || !state.filesOpenPath) return;
 
@@ -539,15 +575,22 @@ async function filesSaveCurrent() {
   if (btn) btn.disabled = true;
 
   try {
+    const savedPath = state.filesOpenPath;
     await api(`/api/projects/${p.id}/files/content`, {
       method: 'PUT',
-      body: { path: state.filesOpenPath, content: textarea ? textarea.value : '' },
+      body: { path: savedPath, content: textarea ? textarea.value : '' },
     });
     state.filesEditorInitialContent = textarea ? textarea.value : '';
     state.filesEditorDirty = false;
     if (dirtyBadge) dirtyBadge.style.display = 'none';
-    toast(`Saved ${state.filesOpenPath}. Restart service to apply changes.`, 'success');
-    void loadFilesView();
+    toast(`Saved ${savedPath}. Restart service to apply changes.`, 'success');
+
+    if (andClose) {
+      filesCloseEditor(true);
+      void loadFilesView();
+    } else {
+      void loadFilesView();
+    }
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
   } finally {
@@ -739,6 +782,7 @@ function setupFileDropzone() {
   let dragCounter = 0;
 
   dropzone.addEventListener('dragenter', (e) => {
+    if (state.filesOpenPath) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter++;
@@ -747,12 +791,14 @@ function setupFileDropzone() {
   });
 
   dropzone.addEventListener('dragover', (e) => {
+    if (state.filesOpenPath) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
   });
 
   dropzone.addEventListener('dragleave', (e) => {
+    if (state.filesOpenPath) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter--;
