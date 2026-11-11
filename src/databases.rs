@@ -180,6 +180,49 @@ impl PgBinaries {
     }
 }
 
+fn make_pg_server_command(prog: &Path, args: &[&str]) -> Command {
+    #[cfg(unix)]
+    {
+        if unsafe { libc::getuid() } == 0 {
+            let has_pg_user = std::process::Command::new("id")
+                .arg("postgres")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if has_pg_user {
+                let mut cmd = Command::new("runuser");
+                cmd.arg("-u").arg("postgres").arg("--").arg(prog);
+                for a in args {
+                    cmd.arg(a);
+                }
+                return cmd;
+            }
+        }
+    }
+    let mut cmd = Command::new(prog);
+    for a in args {
+        cmd.arg(a);
+    }
+    cmd
+}
+
+fn ensure_pg_permissions(_db_dir: &Path, _data_dir: Option<&Path>) {
+    #[cfg(unix)]
+    {
+        if unsafe { libc::getuid() } == 0 {
+            let _ = std::process::Command::new("chown")
+                .args(["-R", "postgres:postgres", &_db_dir.to_string_lossy()])
+                .status();
+            if let Some(d) = _data_dir {
+                let _ = std::process::Command::new("chmod")
+                    .args(["0700", &d.to_string_lossy()])
+                    .status();
+            }
+        }
+    }
+}
+
 pub struct Databases {
     db: DbPool,
     vault: Arc<Vault>,
@@ -489,8 +532,7 @@ impl Databases {
 
         if let Ok(pg_bins) = PgBinaries::detect() {
             let data_str = to_clean_path_str(&data_dir);
-            let mut stop_cmd = Command::new(&pg_bins.pg_ctl);
-            stop_cmd.args(["-D", &data_str, "-m", "fast", "stop"]);
+            let mut stop_cmd = make_pg_server_command(&pg_bins.pg_ctl, &["-D", &data_str, "-m", "fast", "stop"]);
             stop_cmd.stdin(std::process::Stdio::null());
             stop_cmd.stdout(std::process::Stdio::null());
             stop_cmd.stderr(std::process::Stdio::null());
@@ -545,8 +587,7 @@ impl Databases {
         // Hot reload pg_hba.conf without dropping client connections
         if let Ok(pg_bins) = PgBinaries::detect() {
             let data_str = to_clean_path_str(&data_dir);
-            let _ = Command::new(&pg_bins.pg_ctl)
-                .args(["-D", &data_str, "reload"])
+            let _ = make_pg_server_command(&pg_bins.pg_ctl, &["-D", &data_str, "reload"])
                 .output()
                 .await;
         }
@@ -647,20 +688,23 @@ impl Databases {
                 &format!("[DB #{}] Initializing PostgreSQL data cluster via initdb (SCRAM-SHA-256)...", id),
             );
 
-            let mut init_cmd = Command::new(&pg_bins.initdb);
-            init_cmd.args([
-                "-D",
-                &data_str,
-                "-U",
-                db_user,
-                "-A",
-                "scram-sha-256",
-                "--pwfile",
-                &pw_str,
-                "-E",
-                "UTF8",
-                "--no-locale",
-            ]);
+            ensure_pg_permissions(db_dir, Some(&data_dir));
+            let mut init_cmd = make_pg_server_command(
+                &pg_bins.initdb,
+                &[
+                    "-D",
+                    &data_str,
+                    "-U",
+                    db_user,
+                    "-A",
+                    "scram-sha-256",
+                    "--pwfile",
+                    &pw_str,
+                    "-E",
+                    "UTF8",
+                    "--no-locale",
+                ],
+            );
 
             let out = init_cmd.output().await.map_err(|e| {
                 format!("Failed to execute initdb: {}", e)
@@ -734,15 +778,18 @@ impl Databases {
             let _ = tokio::fs::remove_file(&pid_file).await;
         }
 
-        let mut start_cmd = Command::new(&pg_bins.pg_ctl);
-        start_cmd.args([
-            "-D",
-            &data_str,
-            "-l",
-            &log_str,
-            "-W",
-            "start",
-        ]);
+        ensure_pg_permissions(db_dir, Some(&data_dir));
+        let mut start_cmd = make_pg_server_command(
+            &pg_bins.pg_ctl,
+            &[
+                "-D",
+                &data_str,
+                "-l",
+                &log_str,
+                "-W",
+                "start",
+            ],
+        );
         start_cmd.stdin(std::process::Stdio::null());
         start_cmd.stdout(std::process::Stdio::null());
         start_cmd.stderr(std::process::Stdio::null());
