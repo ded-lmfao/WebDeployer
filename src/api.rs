@@ -370,9 +370,13 @@ fn create_authenticated_response(
 }
 
 fn check_api_cache(cache: &crate::cache::AppCache, cache_key: &str) -> Option<Response> {
-    if let Some(cached_val) = cache.get(cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut().insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(cached_json) = cache.get_json(cache_key) {
+        let res = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-cache", HeaderValue::from_static("HIT"))
+            .body(axum::body::Body::from(cached_json.to_string()))
+            .unwrap_or_else(|_| Json(serde_json::json!({})).into_response());
         Some(res)
     } else {
         None
@@ -4515,10 +4519,7 @@ struct CaddyStatusResponse {
 
 async fn caddy_status_handler(State(state): State<AppState>) -> Response {
     let cache_key = "caddy:status";
-    if let Some(cached_val) = state.cache.get(cache_key) {
-        let mut res = Json(cached_val).into_response();
-        res.headers_mut()
-            .insert("x-cache", HeaderValue::from_static("HIT"));
+    if let Some(res) = check_api_cache(&state.cache, cache_key) {
         return res;
     }
 

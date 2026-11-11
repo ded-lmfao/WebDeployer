@@ -473,16 +473,19 @@ impl Updater {
         }
 
         Self::append_log(&status_arc, &format!("[Success] New WebDep release binary compiled and verified! (Commit: {})", new_commit));
-        Self::append_log(&status_arc, "[Ready] WebDep is compiled and staged for restart. Awaiting user restart confirmation.");
+        Self::append_log(&status_arc, "[Restart] Automatically restarting WebDep panel now to activate update...");
 
-        Self::set_step(&status_arc, "Update compiled successfully! Ready to restart WebDep.", 100);
+        Self::set_step(&status_arc, "Update complete! Restarting WebDep panel...", 100);
 
         if let Ok(mut st) = status_arc.lock() {
-            st.status = "ready_to_restart".to_string();
+            st.status = "restarting".to_string();
             st.progress = 100;
-            st.step = "Update compiled successfully! Restart panel to apply changes.".to_string();
+            st.step = "Update complete! Restarting WebDep panel...".to_string();
             st.finished_at = Some(now_secs());
         }
+
+        // Automatically trigger panel restart
+        restart_service_delayed(1200);
     }
 }
 
@@ -514,6 +517,8 @@ pub fn restart_service_delayed(delay_ms: u64) {
                     info!("Spawning fresh WebDep binary detached at: {}", bin.display());
                     let _ = Command::new(bin)
                         .current_dir(&cwd)
+                        .env("MALLOC_ARENA_MAX", "2")
+                        .env("MALLOC_TRIM_THRESHOLD_", "65536")
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())

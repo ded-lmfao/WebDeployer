@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
+use sysinfo::{
+    CpuRefreshKind, Disks, MemoryRefreshKind, ProcessRefreshKind, RefreshKind, System,
+};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CpuMetrics {
@@ -138,7 +140,10 @@ impl Monitor {
         sys.refresh_cpu_all();
         sys.refresh_memory();
         if include_processes {
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+            let p_kind = ProcessRefreshKind::new()
+                .with_cpu()
+                .with_memory();
+            sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true, p_kind);
         }
         let mut disks = self.disks.lock().unwrap();
         disks.refresh();
@@ -165,6 +170,15 @@ impl Monitor {
                     m.refresh_now(include_procs);
                 })
                 .await;
+                if tick_count % 20 == 0 {
+                    #[cfg(target_os = "linux")]
+                    unsafe {
+                        extern "C" {
+                            fn malloc_trim(pad: libc::size_t) -> libc::c_int;
+                        }
+                        malloc_trim(0);
+                    }
+                }
             }
         });
     }

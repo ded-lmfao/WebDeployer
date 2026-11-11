@@ -7251,17 +7251,11 @@ async function loadSystemVersionInfo(quiet = false) {
     if (remoteHashEl) remoteHashEl.textContent = v.remote_commit ? v.remote_commit : 'Up to date';
 
     if (remoteStatusEl) {
-      if (v.ready_to_restart) {
-        remoteStatusEl.innerHTML = '<span style="color:#fbbf24; font-weight:600;">Update compiled! Restart required to activate.</span>';
-      } else if (v.has_update) {
-        remoteStatusEl.innerHTML = `<span style="color:var(--success); font-weight:600;">New commit ${v.remote_commit} available on GitHub.</span>`;
+      if (v.has_update) {
+        remoteStatusEl.innerHTML = `<span style="color:var(--accent-light); font-weight:600;">Update available (${v.remote_commit})</span>`;
       } else {
-        remoteStatusEl.textContent = `Aligned with remote origin/${v.current_branch || 'main'}`;
+        remoteStatusEl.innerHTML = '<span style="color:var(--success); font-weight:600;">Up to date</span>';
       }
-    }
-
-    if (restartBanner) {
-      restartBanner.style.display = v.ready_to_restart ? 'flex' : 'none';
     }
 
     if (badgeEl) {
@@ -7436,24 +7430,18 @@ async function startPlatformUpdate() {
         if (dismissBtn) dismissBtn.disabled = false;
         if (closeBtn) closeBtn.style.display = 'block';
         toast('Update failed! Previous version was restored with zero downtime.', 'error', 8000);
-      } else if (st.status === 'ready_to_restart' || st.status === 'success') {
+      } else if (st.status === 'restarting' || st.status === 'ready_to_restart' || st.status === 'success') {
         clearInterval(updatePollTimer);
         updatePollTimer = null;
-        if (stepText) stepText.textContent = 'Update compiled successfully! Ready to restart.';
+        if (stepText) stepText.textContent = 'Update complete! Restarting WebDep panel...';
         if (progressBar) {
           progressBar.style.width = '100%';
           progressBar.style.background = 'var(--success)';
         }
-        if (spinner) spinner.style.display = 'none';
-        if (statusBanner) statusBanner.style.display = 'none';
+        if (spinner) spinner.style.display = 'block';
+        if (bannerMsg) bannerMsg.textContent = 'Restarting WebDep panel now. Reconnecting automatically...';
 
-        // Display user prompt to restart!
-        if (restartPrompt) restartPrompt.style.display = 'block';
-        if (dismissBtn) dismissBtn.disabled = false;
-        if (closeBtn) closeBtn.style.display = 'block';
-
-        loadSystemVersionInfo(true).catch(() => {});
-        toast('WebDep compiled successfully! Click "Restart WebDep Panel Now" to apply.', 'success', 6000);
+        pollReconnectionAfterUpdate();
       }
     } catch (_) {
       // transient network poll error

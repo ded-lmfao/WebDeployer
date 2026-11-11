@@ -84,6 +84,10 @@ fi
 chmod +x target/release/webdep
 mkdir -p data/logs data/caddy
 
+# Low-memory allocator tuning for Linux glibc (eliminates multi-arena RAM bloat)
+export MALLOC_ARENA_MAX=2
+export MALLOC_TRIM_THRESHOLD_=65536
+
 PORT=$(grep -E '^PORT=' .env 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
 PORT="${PORT:-4600}"
 PUBLIC_IP=$(curl -s --max-time 2 https://api.ipify.org || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
@@ -133,6 +137,8 @@ Restart=always
 RestartSec=3
 Environment=RUST_LOG=webdep=info
 Environment="PATH=${USER_HOME}/.cargo/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="MALLOC_ARENA_MAX=2"
+Environment="MALLOC_TRIM_THRESHOLD_=65536"
 
 [Install]
 WantedBy=multi-user.target

@@ -36,21 +36,29 @@ pub fn open_db(data_dir: &Path) -> Result<DbPool, Box<dyn std::error::Error + Se
 
     let conn = Connection::open(&db_path)?;
 
-    // High performance PRAGMAs (WAL, NORMAL sync, in-memory temp store, 20MB cache)
+    // Ultra-efficient, low-memory PRAGMAs:
+    // - WAL mode for fast concurrency
+    // - 2MB page cache (plenty for WebDep's < 1MB database while saving ~18MB RAM)
+    // - temp_store = DEFAULT & mmap_size = 0 to prevent unnecessary RAM bloat
     conn.execute_batch(
         "
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
         PRAGMA foreign_keys = ON;
         PRAGMA busy_timeout = 5000;
-        PRAGMA cache_size = -20000;
-        PRAGMA temp_store = MEMORY;
+        PRAGMA cache_size = -2000;
+        PRAGMA temp_store = DEFAULT;
+        PRAGMA mmap_size = 0;
         ",
     )?;
 
     migrate(&conn)?;
 
     Ok(Arc::new(Mutex::new(conn)))
+}
+
+pub fn shrink_memory(conn: &Connection) {
+    let _ = conn.execute_batch("PRAGMA shrink_memory;");
 }
 
 fn get_table_columns(conn: &Connection, table: &str) -> Vec<String> {

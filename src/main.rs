@@ -36,8 +36,16 @@ use crate::runtime::Runtime;
 use crate::updater::Updater;
 use crate::vault::Vault;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        extern "C" {
+            fn mallopt(param: libc::c_int, value: libc::c_int) -> libc::c_int;
+        }
+        mallopt(-8, 2); // M_ARENA_MAX = 2 (eliminates glibc multi-arena memory bloat)
+        mallopt(-1, 64 * 1024); // M_TRIM_THRESHOLD = 64KB (returns memory to OS immediately)
+    }
     // Fast, zero-overhead tracing subscriber
     tracing_subscriber::registry()
         .with(
@@ -84,6 +92,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         &config.data_dir,
     ));
     let updater = Arc::new(Updater::new(config.data_dir.clone()));
+
+    // Periodic memory maintenance: prunes expired cache, shrinks SQLite pager, and trims Linux heap
+    {
+        let mem_cache = cache.clone();
+        let mem_db = db.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                mem_cache.prune_expired();
+                if let Ok(conn) = mem_db.lock() {
+                    crate::db::shrink_memory(&conn);
+                }
+                #[cfg(target_os = "linux")]
+                unsafe {
+                    extern "C" {
+                        fn malloc_trim(pad: libc::size_t) -> libc::c_int;
+                    }
+                    malloc_trim(0);
+                }
+            }
+        });
+    }
 
     // Auto-resume any websites marked 'running' in SQLite on platform startup,
     // and ensure any websites marked 'stopped' have no orphan processes left on their ports
