@@ -14,6 +14,7 @@ mod monitor;
 mod projects;
 mod runtime;
 mod static_assets;
+mod updater;
 mod vault;
 
 use std::net::SocketAddr;
@@ -32,6 +33,7 @@ use crate::logs::Logs;
 use crate::monitor::Monitor;
 use crate::projects::Projects;
 use crate::runtime::Runtime;
+use crate::updater::Updater;
 use crate::vault::Vault;
 
 #[tokio::main]
@@ -81,6 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         (*logs).clone(),
         &config.data_dir,
     ));
+    let updater = Arc::new(Updater::new(config.data_dir.clone()));
 
     // Auto-resume any websites marked 'running' in SQLite on platform startup,
     // and ensure any websites marked 'stopped' have no orphan processes left on their ports
@@ -139,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         deployer: deployer.clone(),
         cache,
         databases,
+        updater,
     };
 
     let app = create_router(state);

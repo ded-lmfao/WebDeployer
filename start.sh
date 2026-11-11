@@ -22,6 +22,40 @@ if [[ "$MODE" == "--stop" || "$MODE" == "stop" ]]; then
     exit 0
 fi
 
+if [[ "$MODE" == "--update" || "$MODE" == "update" ]]; then
+    echo "[*] Updating WebDep to the latest commit..."
+    echo "[*] Preserving data/ directory and .env secrets..."
+    if [[ -f ".env" ]]; then
+        cp .env .env.update-bak 2>/dev/null || true
+    fi
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    [[ "$BRANCH" == "HEAD" || -z "$BRANCH" ]] && BRANCH="main"
+    echo "[*] Fetching latest commits from origin/${BRANCH}..."
+    git fetch origin "$BRANCH"
+    git reset --hard "origin/${BRANCH}"
+    if [[ -f ".env.update-bak" && ! -f ".env" ]]; then
+        cp .env.update-bak .env
+    fi
+    rm -f .env.update-bak 2>/dev/null || true
+
+    # Prepare cargo hot-swap
+    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+    mv target/release/webdep target/release/webdep.old 2>/dev/null || true
+    echo "[*] Compiling release binary (Low-RAM: CARGO_BUILD_JOBS=1)..."
+    CARGO_BUILD_JOBS=1 cargo build --release
+    rm -f target/release/webdep.old 2>/dev/null || true
+    chmod +x target/release/webdep
+
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet webdep 2>/dev/null; then
+        echo "[*] Restarting systemd service 'webdep'..."
+        sudo systemctl restart webdep || systemctl restart webdep
+        echo "[+] WebDep successfully updated and restarted!"
+    else
+        echo "[+] WebDep compiled to latest commit. Run './start.sh' or './start.sh --service' to start."
+    fi
+    exit 0
+fi
+
 # Ensure .env exists and binds to 0.0.0.0 for VPS access
 if [[ ! -f ".env" ]]; then
     cp .env.example .env 2>/dev/null || true
@@ -74,9 +108,9 @@ if command -v sudo >/dev/null 2>&1; then
                 sudo iptables -I INPUT 1 -p tcp --dport "$p" -m conntrack --ctstate NEW -j ACCEPT 2>/dev/null || true
         done
     fi
-    # Allow WebDep service user to automatically open ports in UFW/iptables & reload Caddy when new websites are created
+    # Allow WebDep service user to automatically open ports in UFW/iptables, reload Caddy & restart WebDep
     if [[ -d "/etc/sudoers.d" ]]; then
-        echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ufw, /usr/sbin/iptables, /usr/bin/systemctl reload caddy" | sudo tee /etc/sudoers.d/webdep-firewall >/dev/null 2>&1 || true
+        echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ufw, /usr/sbin/iptables, /usr/bin/systemctl reload caddy, /usr/bin/systemctl restart webdep, /bin/systemctl restart webdep" | sudo tee /etc/sudoers.d/webdep-firewall >/dev/null 2>&1 || true
         sudo chmod 0440 /etc/sudoers.d/webdep-firewall 2>/dev/null || true
     fi
 fi
@@ -84,6 +118,7 @@ fi
 if [[ "$MODE" == "--service" || "$MODE" == "service" ]]; then
     echo "[*] Installing systemd service (/etc/systemd/system/webdep.service)..."
     SERVICE_USER="${SUDO_USER:-$(whoami)}"
+    USER_HOME=$(eval echo "~${SERVICE_USER}")
     sudo tee /etc/systemd/system/webdep.service >/dev/null <<EOF
 [Unit]
 Description=WebDep Multi-Website Deployment & Hosting Platform
@@ -97,6 +132,7 @@ ExecStart=${APP_DIR}/target/release/webdep
 Restart=always
 RestartSec=3
 Environment=RUST_LOG=webdep=info
+Environment="PATH=${USER_HOME}/.cargo/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 [Install]
 WantedBy=multi-user.target

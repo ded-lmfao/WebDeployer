@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.10.8">
+  <link rel="stylesheet" href="/style.css?v=3.11.0">
 </head>
 
 <body>
@@ -1321,6 +1321,56 @@
             </div>
           </div>
 
+          <!-- Platform Version & 1-Click Self-Update Card -->
+          <div class="card" id="settings-update-card">
+            <div class="card-header">
+              <div>
+                <span class="card-title">WebDep Platform Updates</span>
+                <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">
+                  1-Click Git synchronization &amp; automatic zero-downtime hot-swap compilation
+                </div>
+              </div>
+              <span class="badge" id="platform-version-badge" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-light); font-family: var(--font-mono); font-size: 11px;">Checking version...</span>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; padding: 12px 14px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                <div>
+                  <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 4px;">Current Version</div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="platform-branch-name" style="font-weight: 600; color: var(--text-main);">main</span>
+                    <span style="color: var(--text-dim);">&bull;</span>
+                    <code id="platform-commit-hash" style="color: var(--accent-light); font-size: 12.5px;">...</code>
+                  </div>
+                  <div id="platform-commit-msg" style="font-size: 12px; color: var(--text-dim); margin-top: 4px; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    Fetching commit details...
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="check-platform-update-btn" onclick="checkPlatformUpdates(true)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                    </svg>
+                    <span>Check for Updates</span>
+                  </button>
+                  <button type="button" class="btn btn-primary btn-sm" id="trigger-platform-update-btn" onclick="startPlatformUpdate()">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="16 16 12 12 8 16"></polyline>
+                      <line x1="12" y1="12" x2="12" y2="21"></line>
+                      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+                      <polyline points="16 16 12 12 8 16"></polyline>
+                    </svg>
+                    <span>Fetch &amp; Update to Latest Commit</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-dim);">
+                <span style="color: var(--success); font-weight: 600;">🛡️ Safe Update Guarantee:</span>
+                Your <code>data/</code> folder (SQLite databases, hosted websites, services) and <code>.env</code> secrets are completely preserved and untouched.
+              </div>
+            </div>
+          </div>
+
           <div class="card" id="settings-panel-card">
             <div class="card-header">
               <span class="card-title">Server Controls</span>
@@ -2548,11 +2598,56 @@
     </div>
   </div>
 
+  <!-- MODAL: 1-CLICK PLATFORM UPDATE -->
+  <div class="modal-overlay" id="modal-platform-update">
+    <div class="modal-container" style="max-width: 680px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">WebDep Platform Update</h3>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">
+            Fetching latest commit, preserving data/.env, and recompiling with Cargo
+          </div>
+        </div>
+        <button class="modal-close" id="modal-platform-update-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Progress Bar & Status -->
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span id="update-step-text" style="font-weight: 500; font-size: 13px; color: var(--text-main);">Preparing update...</span>
+            <span id="update-pct-text" style="font-weight: 600; font-size: 12px; color: var(--accent-light);">0%</span>
+          </div>
+          <div class="progress" style="height: 7px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden;">
+            <div id="update-progress-bar" class="progress-bar" style="width: 0%; transition: width 0.3s ease; background: var(--accent-primary);"></div>
+          </div>
+        </div>
+
+        <!-- Safe Status Banner -->
+        <div id="update-status-banner" style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 8px; margin-bottom: 14px; font-size: 12px;">
+          <div class="spinner-sm" id="update-active-spinner" style="border: 2px solid rgba(255,255,255,0.15); border-top-color: var(--accent-light); width: 14px; height: 14px; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <span id="update-banner-msg">Preserving your databases and environment settings while building the latest release.</span>
+        </div>
+
+        <!-- Live Build & Git Console Logs -->
+        <div class="form-group" style="margin-bottom: 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label class="form-label" style="margin: 0; font-size: 12px;">Live Build &amp; Compilation Logs</label>
+            <span style="font-size: 11px; color: var(--text-dim);">Low-RAM Mode: CARGO_BUILD_JOBS=1</span>
+          </div>
+          <div id="update-console-logs" style="height: 240px; overflow-y: auto; background: #0c0e14; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; color: #cbd5e1; white-space: pre-wrap; word-break: break-all;">Waiting for update to start...</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 14px 22px; justify-content: flex-end;">
+        <button class="btn btn-secondary" id="update-dismiss-btn" data-close-modal disabled>Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST CONTAINER -->
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.10.8"></script>
+  <script type="module" src="/app.js?v=3.11.0"></script>
 </body>
 
 </html>

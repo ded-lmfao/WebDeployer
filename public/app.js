@@ -4461,9 +4461,12 @@ async function loadSettingsView() {
   const globalCard = document.getElementById('settings-global-config-card');
   const usersCard = document.getElementById('settings-users-card');
   const panelCard = document.getElementById('settings-panel-card');
+  const updateCard = document.getElementById('settings-update-card');
   if (globalCard) globalCard.style.display = canManagePlatform ? '' : 'none';
   if (usersCard) usersCard.style.display = isMain ? '' : 'none';
   if (panelCard) panelCard.style.display = isMain ? '' : 'none';
+  if (updateCard) updateCard.style.display = isMain ? '' : 'none';
+  if (isMain) loadSystemVersionInfo(true).catch(() => {});
   if (!canManagePlatform && !isMain) return;
 
   try {
@@ -7117,3 +7120,193 @@ document.getElementById('clear-cache-btn')?.addEventListener('click', async () =
     toast(`Failed to clear cache: ${err.message}`, 'error');
   }
 });
+
+// ============================================================================
+// WebDep Platform 1-Click Self-Update & Git Synchronization
+// ============================================================================
+let updatePollTimer = null;
+
+async function loadSystemVersionInfo(quiet = false) {
+  try {
+    const v = await api('/api/system/version');
+    const branchEl = document.getElementById('platform-branch-name');
+    const hashEl = document.getElementById('platform-commit-hash');
+    const msgEl = document.getElementById('platform-commit-msg');
+    const badgeEl = document.getElementById('platform-version-badge');
+    const updateBtn = document.getElementById('trigger-platform-update-btn');
+
+    if (branchEl) branchEl.textContent = v.current_branch || 'main';
+    if (hashEl) hashEl.textContent = v.current_commit || 'unknown';
+    if (msgEl) msgEl.textContent = v.commit_message || 'Self-hosted WebDep deployment platform';
+
+    if (badgeEl) {
+      if (v.update_in_progress) {
+        badgeEl.textContent = '● Update in Progress';
+        badgeEl.style.background = 'rgba(234, 179, 8, 0.15)';
+        badgeEl.style.color = '#eab308';
+      } else if (v.has_update) {
+        badgeEl.textContent = `🚀 Update Available (${v.remote_commit})`;
+        badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
+        badgeEl.style.color = 'var(--success)';
+        if (updateBtn) {
+          updateBtn.classList.remove('btn-secondary');
+          updateBtn.classList.add('btn-primary');
+        }
+      } else {
+        badgeEl.textContent = '● Up to Date';
+        badgeEl.style.background = 'rgba(99, 102, 241, 0.15)';
+        badgeEl.style.color = 'var(--accent-light)';
+      }
+    }
+    return v;
+  } catch (err) {
+    if (!quiet) toast(`Could not load version info: ${err.message}`, 'warning');
+    return null;
+  }
+}
+window.loadSystemVersionInfo = loadSystemVersionInfo;
+
+async function checkPlatformUpdates(manual = false) {
+  const btn = document.getElementById('check-platform-update-btn');
+  if (btn) btn.disabled = true;
+  if (manual) toast('Checking remote repository for latest commits...', 'info', 2500);
+
+  const v = await loadSystemVersionInfo(!manual);
+  if (btn) btn.disabled = false;
+
+  if (manual && v) {
+    if (v.has_update) {
+      toast(`New commit ${v.remote_commit} available on origin/${v.current_branch}! Click Update to apply.`, 'success', 5000);
+    } else {
+      toast(`WebDep is already up to date with origin/${v.current_branch} (${v.current_commit})`, 'success');
+    }
+  }
+}
+window.checkPlatformUpdates = checkPlatformUpdates;
+
+async function startPlatformUpdate() {
+  const v = await loadSystemVersionInfo(true);
+  const branchName = v?.current_branch || 'main';
+
+  const ok = await showConfirmDialog({
+    title: 'Update WebDep to Latest Commit',
+    message: `Fetch latest commits from <strong>origin/${escapeHtml(branchName)}</strong> and recompile WebDep?<br><br>
+    &bull; <strong style="color:var(--success);">Safe & Non-Destructive:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file are completely untouched.<br>
+    &bull; <strong style="color:var(--accent-light);">Resource-Safe:</strong> Compiled in low-RAM mode (<code>CARGO_BUILD_JOBS=1</code>) to prevent VPS out-of-memory errors.<br>
+    &bull; <strong style="color:var(--text-main);">Automatic Restart:</strong> WebDep will automatically hot-swap and reboot cleanly once compilation succeeds.`,
+    confirmText: '🚀 Fetch & Update WebDep',
+    danger: false,
+  });
+  if (!ok) return;
+
+  const stepText = document.getElementById('update-step-text');
+  const pctText = document.getElementById('update-pct-text');
+  const progressBar = document.getElementById('update-progress-bar');
+  const consoleLogs = document.getElementById('update-console-logs');
+  const bannerMsg = document.getElementById('update-banner-msg');
+  const spinner = document.getElementById('update-active-spinner');
+  const dismissBtn = document.getElementById('update-dismiss-btn');
+  const closeBtn = document.getElementById('modal-platform-update-close');
+
+  if (stepText) stepText.textContent = 'Initializing update pipeline...';
+  if (pctText) pctText.textContent = '5%';
+  if (progressBar) {
+    progressBar.style.width = '5%';
+    progressBar.style.background = 'var(--accent-primary)';
+  }
+  if (consoleLogs) consoleLogs.textContent = 'Connecting to backend update service...\n';
+  if (bannerMsg) bannerMsg.textContent = 'Preserving your databases and environment settings while building the latest release.';
+  if (spinner) spinner.style.display = 'block';
+  if (dismissBtn) dismissBtn.disabled = true;
+  if (closeBtn) closeBtn.style.display = 'none';
+
+  openModal('modal-platform-update');
+
+  try {
+    await api('/api/system/update', { method: 'POST', body: { branch: branchName } });
+  } catch (err) {
+    if (stepText) stepText.textContent = 'Failed to start update';
+    if (bannerMsg) bannerMsg.textContent = `Error: ${err.message}`;
+    if (spinner) spinner.style.display = 'none';
+    if (dismissBtn) dismissBtn.disabled = false;
+    if (closeBtn) closeBtn.style.display = 'block';
+    toast(`Update could not start: ${err.message}`, 'error');
+    return;
+  }
+
+  // Poll update progress
+  if (updatePollTimer) clearInterval(updatePollTimer);
+  updatePollTimer = setInterval(async () => {
+    try {
+      const st = await api('/api/system/update/status');
+      if (stepText) stepText.textContent = st.step || 'Building...';
+      if (pctText) pctText.textContent = `${st.progress || 0}%`;
+      if (progressBar) progressBar.style.width = `${st.progress || 0}%`;
+
+      if (consoleLogs && Array.isArray(st.logs)) {
+        consoleLogs.textContent = st.logs.join('\n');
+        consoleLogs.scrollTop = consoleLogs.scrollHeight;
+      }
+
+      if (st.status === 'error') {
+        clearInterval(updatePollTimer);
+        updatePollTimer = null;
+        if (progressBar) progressBar.style.background = 'var(--danger)';
+        if (spinner) spinner.style.display = 'none';
+        if (bannerMsg) bannerMsg.textContent = `Update halted: ${st.error || 'Review build logs above'}. Previous binary kept intact.`;
+        if (dismissBtn) dismissBtn.disabled = false;
+        if (closeBtn) closeBtn.style.display = 'block';
+        toast('Update failed! Previous version was restored with zero downtime.', 'error', 8000);
+      } else if (st.status === 'success') {
+        clearInterval(updatePollTimer);
+        updatePollTimer = null;
+        if (stepText) stepText.textContent = 'Update succeeded! Service is rebooting... Reconnecting...';
+        if (bannerMsg) bannerMsg.textContent = 'Hot-swap complete! Waiting for WebDep to come back online...';
+        pollReconnectionAfterUpdate();
+      }
+    } catch (_) {
+      // Backend may be currently restarting
+    }
+  }, 900);
+}
+window.startPlatformUpdate = startPlatformUpdate;
+
+async function pollReconnectionAfterUpdate() {
+  const stepText = document.getElementById('update-step-text');
+  const bannerMsg = document.getElementById('update-banner-msg');
+  const progressBar = document.getElementById('update-progress-bar');
+  const spinner = document.getElementById('update-active-spinner');
+
+  if (progressBar) {
+    progressBar.style.width = '100%';
+    progressBar.style.background = 'var(--success)';
+  }
+
+  // Wait 2.5s for the old process to finish exiting
+  await new Promise((r) => setTimeout(r, 2500));
+
+  for (let attempt = 1; attempt <= 90; attempt++) {
+    if (bannerMsg) bannerMsg.textContent = `Probing WebDep service (Attempt ${attempt}/90)...`;
+    try {
+      const res = await fetch('/healthz', { cache: 'no-store' });
+      if (res.ok) {
+        if (stepText) stepText.textContent = 'WebDep is back online!';
+        if (bannerMsg) bannerMsg.textContent = 'Updated release verified live! Reloading dashboard in 1.5s...';
+        if (spinner) spinner.style.display = 'none';
+        toast('WebDep updated and restarted successfully!', 'success', 4000);
+        setTimeout(() => window.location.reload(), 1500);
+        return;
+      }
+    } catch (_) {
+      // Still restarting
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  if (bannerMsg) bannerMsg.textContent = 'Panel took longer than expected to reconnect. Please refresh your browser or check terminal status: sudo systemctl status webdep';
+  const dismissBtn = document.getElementById('update-dismiss-btn');
+  if (dismissBtn) dismissBtn.disabled = false;
+  const closeBtn = document.getElementById('modal-platform-update-close');
+  if (closeBtn) closeBtn.style.display = 'block';
+}
+

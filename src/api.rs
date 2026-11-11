@@ -45,6 +45,7 @@ pub struct AppState {
     pub deployer: Arc<Deployer>,
     pub cache: Arc<AppCache>,
     pub databases: Arc<crate::databases::Databases>,
+    pub updater: Arc<crate::updater::Updater>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -134,6 +135,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/cache/stats", get(cache_stats_handler))
         .route("/api/cache/clear", post(cache_clear_handler))
         .route("/api/system/restart", post(restart_panel_handler))
+        .route("/api/system/version", get(system_version_handler))
+        .route("/api/system/update/status", get(system_update_status_handler))
+        .route("/api/system/update", post(system_update_handler))
         .route("/api/settings", get(get_settings_handler).put(update_settings_handler).patch(update_settings_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
         .route("/api/users/:id", put(update_user_handler).patch(update_user_handler).delete(delete_user_handler))
@@ -2749,6 +2753,46 @@ async fn restart_panel_handler(
     });
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "Panel is restarting" })))
+}
+
+async fn system_version_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::updater::GitVersionInfo>, (StatusCode, String)> {
+    let _actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    Ok(Json(state.updater.get_version_info()))
+}
+
+async fn system_update_status_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::updater::UpdateStatus>, (StatusCode, String)> {
+    let _actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    Ok(Json(state.updater.get_status()))
+}
+
+async fn system_update_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Option<Json<crate::updater::TriggerUpdatePayload>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_main_admin(&state, &headers)?;
+    log_audit(
+        &state,
+        &actor.username,
+        "system.update",
+        Some("platform"),
+        Some("Triggered 1-click platform update from Git repository"),
+    );
+    state.logs.add(None, None, "system", "warn", &format!("1-Click platform update triggered by {}", actor.username));
+
+    let branch = payload.and_then(|p| p.branch.clone());
+    state.updater.start_update(branch)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    Ok(Json(serde_json::json!({ "ok": true, "message": "Update sequence started" })))
 }
 
 async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
