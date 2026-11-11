@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Path as AxPath, Query, Request, State},
+    extract::{DefaultBodyLimit, Multipart, Path as AxPath, Query, Request, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::{
@@ -85,7 +85,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects/:id/backups/restore", post(restore_backup_handler))
         .route("/api/projects/:id/backups/:backup_id", delete(delete_backup_handler))
         // Project Env
-        .route("/api/projects/:id/env", get(get_env_handler).put(set_env_handler))
+        .route("/api/projects/:id/env", get(get_env_handler).put(set_env_handler).post(set_env_handler))
         .route("/api/projects/:id/env/bulk", post(bulk_set_env_handler))
         .route("/api/projects/:id/env/raw", get(get_raw_env_handler))
         .route("/api/projects/:id/env/reveal", post(reveal_env_handler))
@@ -105,6 +105,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects/:id/nginx/apply", post(apply_caddy_handler))
         .route("/api/projects/:id/nginx/certbot", post(certbot_caddy_handler))
         .route("/api/projects/:id/app-logs", get(get_app_logs_handler))
+        // Backend service file browser
+        .route("/api/projects/:id/files", get(files_list_handler).delete(files_delete_handler))
+        .route("/api/projects/:id/files/content", get(files_read_handler).put(files_write_handler))
+        .route("/api/projects/:id/files/mkdir", post(files_mkdir_handler))
+        .route(
+            "/api/projects/:id/files/upload",
+            post(files_upload_handler).layer(DefaultBodyLimit::max(500 * 1024 * 1024)),
+        )
         // GitHub & Caddy Status
         .route("/api/github/repos", get(github_repos_handler))
         .route("/api/nginx/status", get(caddy_status_handler))
@@ -1218,8 +1226,15 @@ async fn create_project_handler(
     Json(mut p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "projects_manage", None)?;
-    if p.name.trim().is_empty() || p.slug.trim().is_empty() || p.repo_url.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "Name, slug, and repo_url are required".into()));
+    let is_service = p.project_kind == "service";
+    if p.name.trim().is_empty() || p.slug.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Name and slug are required".into()));
+    }
+    if !is_service && p.repo_url.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "GitHub repo_url is required for websites".into()));
+    }
+    if is_service && p.repo_url.trim().is_empty() {
+        p.repo_url = "local".to_string();
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     if p.deploy_dir.trim().is_empty()
@@ -1229,6 +1244,8 @@ async fn create_project_handler(
     {
         let rel = if p.deploy_dir.starts_with("./") || p.deploy_dir.starts_with(".\\") {
             p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\").to_string()
+        } else if is_service {
+            format!("data/services/{}", p.slug)
         } else {
             format!("data/sites/{}", p.slug)
         };
@@ -1240,7 +1257,11 @@ async fn create_project_handler(
     }
 
     // Ensure non-conflicting port across all hosted websites
-    if let Ok(existing) = state.projects.list() {
+    if is_service {
+        if p.port == Some(0) {
+            p.port = None;
+        }
+    } else if let Ok(existing) = state.projects.list() {
         let used_ports: std::collections::HashSet<u16> = existing.iter().filter_map(|x| x.port).collect();
         let mut candidate = p.port.unwrap_or(3000);
         while used_ports.contains(&candidate) || candidate == 4600 {
@@ -1257,13 +1278,19 @@ async fn create_project_handler(
         .create(&p)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
+    let audit_action = if is_service { "service.create" } else { "website.create" };
+    let audit_desc = if is_service {
+        format!("Created backend service '{}' (Repo: {})", p.name, p.repo_url)
+    } else {
+        format!("Created website '{}' (Port {}, Repo: {})", p.name, p.port.unwrap_or(3000), p.repo_url)
+    };
     log_audit_project(
         &state,
         Some(id),
         &actor.username,
-        "website.create",
+        audit_action,
         Some(&p.name),
-        Some(&format!("Created website '{}' (Port {}, Repo: {})", p.name, p.port.unwrap_or(3000), p.repo_url)),
+        Some(&audit_desc),
     );
 
     let created = state
@@ -1274,9 +1301,14 @@ async fn create_project_handler(
 
     let _ = state.runtime.ensure_container(&created);
 
-    if let Ok(all) = state.projects.list() {
-        let _ = state.caddy.write_config(&created, &all);
-        let _ = state.caddy.reload();
+    if !is_service || !created.domains.is_empty() {
+        if let Ok(all) = state.projects.list() {
+            let _ = state.caddy.write_config(&created, &all);
+            let _ = state.caddy.reload();
+        }
+    }
+    if let Some(port) = created.port {
+        crate::databases::Databases::sync_firewall_rules(port, &created.access_mode, &created.allowed_ips).await;
     }
     state.cache.invalidate_all();
 
@@ -1318,14 +1350,18 @@ async fn update_project_handler(
         &state,
         Some(id),
         &actor.username,
-        "website.update",
+        if p.project_kind == "service" { "service.update" } else { "website.update" },
         Some(&p.name),
-        Some(&format!(
-            "Updated website settings (Port {}, Branch '{}', Domains {:?})",
-            p.port.unwrap_or(3000),
-            p.branch,
-            p.domains
-        )),
+        Some(&if p.project_kind == "service" {
+            format!("Updated service settings (Branch '{}', Start '{}')", p.branch, p.start_cmd)
+        } else {
+            format!(
+                "Updated website settings (Port {}, Branch '{}', Domains {:?})",
+                p.port.unwrap_or(3000),
+                p.branch,
+                p.domains
+            )
+        }),
     );
 
     let updated = state
@@ -1336,9 +1372,14 @@ async fn update_project_handler(
 
     let _ = state.runtime.ensure_container(&updated);
 
-    if let Ok(all) = state.projects.list() {
-        let _ = state.caddy.write_config(&updated, &all);
-        let _ = state.caddy.reload();
+    if updated.project_kind != "service" || !updated.domains.is_empty() {
+        if let Ok(all) = state.projects.list() {
+            let _ = state.caddy.write_config(&updated, &all);
+            let _ = state.caddy.reload();
+        }
+    }
+    if let Some(port) = updated.port {
+        crate::databases::Databases::sync_firewall_rules(port, &updated.access_mode, &updated.allowed_ips).await;
     }
     state.cache.invalidate_all();
 
@@ -1357,10 +1398,11 @@ async fn delete_project_handler(
             &state,
             Some(id),
             &actor.username,
-            "website.delete",
+            if p.project_kind == "service" { "service.delete" } else { "website.delete" },
             Some(&p.name),
             Some(&format!(
-                "Deleted website '{}' ({}) along with its files, container data, and cache",
+                "Deleted {} '{}' ({}) along with its files, container data, and cache",
+                if p.project_kind == "service" { "service" } else { "website" },
                 p.name, p.slug
             )),
         );
@@ -1373,6 +1415,9 @@ async fn delete_project_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if let Some(ref p) = deleted_proj {
+        if let Some(port) = p.port {
+            crate::databases::Databases::remove_firewall_rules(port, &p.allowed_ips).await;
+        }
         if let Ok(remaining) = state.projects.list() {
             state.runtime.cleanup_project_files(p, &remaining);
             state.caddy.remove_project_config(&p.slug, &remaining);
@@ -1382,6 +1427,245 @@ async fn delete_project_handler(
     state.cache.invalidate_all();
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Backend Service File Browser (scoped to <deploy_dir>/app)
+// ---------------------------------------------------------------------------
+#[derive(Deserialize)]
+struct FilesQuery {
+    #[serde(default)]
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct FileWritePayload {
+    path: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct FileMkdirPayload {
+    path: String,
+}
+
+fn service_root(p: &crate::projects::Project) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    if p.project_kind != "service" {
+        return Err((StatusCode::BAD_REQUEST, "File browser is only available for backend services".into()));
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let raw = std::path::Path::new(&p.deploy_dir);
+    let base = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        cwd.join(p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\"))
+    };
+    let root = base.join("app");
+    let _ = std::fs::create_dir_all(&root);
+    Ok(root)
+}
+
+/// Join a user supplied relative path onto the root, rejecting anything that could escape it.
+fn safe_join(root: &std::path::Path, rel: &str) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    let mut out = root.to_path_buf();
+    for part in rel.split(|c| c == '/' || c == '\\') {
+        match part {
+            "" | "." => {}
+            ".." => return Err((StatusCode::BAD_REQUEST, "Invalid path".into())),
+            s if s.contains(':') => return Err((StatusCode::BAD_REQUEST, "Invalid path".into())),
+            s => out.push(s),
+        }
+    }
+    Ok(out)
+}
+
+async fn files_list_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let root = service_root(&p)?;
+    let dir = safe_join(&root, &q.path)?;
+    let mut entries = Vec::new();
+    let mut rd = tokio::fs::read_dir(&dir)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+    while let Ok(Some(e)) = rd.next_entry().await {
+        let meta = match e.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        entries.push(serde_json::json!({
+            "name": e.file_name().to_string_lossy(),
+            "is_dir": meta.is_dir(),
+            "size": if meta.is_dir() { 0 } else { meta.len() },
+            "modified": modified,
+        }));
+    }
+    entries.sort_by(|a, b| {
+        let ad = a["is_dir"].as_bool().unwrap_or(false);
+        let bd = b["is_dir"].as_bool().unwrap_or(false);
+        bd.cmp(&ad).then_with(|| {
+            a["name"].as_str().unwrap_or("").to_lowercase().cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
+        })
+    });
+    Ok(Json(serde_json::json!({ "path": q.path, "entries": entries })))
+}
+
+async fn files_read_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let root = service_root(&p)?;
+    let file = safe_join(&root, &q.path)?;
+    let meta = tokio::fs::metadata(&file)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+    if !meta.is_file() {
+        return Err((StatusCode::BAD_REQUEST, "Not a file".into()));
+    }
+    if meta.len() > 2 * 1024 * 1024 {
+        return Err((StatusCode::BAD_REQUEST, "File is larger than 2 MB and cannot be edited here".into()));
+    }
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let content = String::from_utf8(bytes)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Binary file cannot be displayed".to_string()))?;
+    Ok(Json(serde_json::json!({ "path": q.path, "content": content })))
+}
+
+async fn files_write_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileWritePayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let root = service_root(&p)?;
+    let file = safe_join(&root, &payload.path)?;
+    if file == root {
+        return Err((StatusCode::BAD_REQUEST, "Invalid file path".into()));
+    }
+    if let Some(parent) = file.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    tokio::fs::write(&file, payload.content.as_bytes())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "file.write",
+        Some(&p.name),
+        Some(&format!("Saved file '{}'", payload.path)),
+    );
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn files_mkdir_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileMkdirPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let root = service_root(&p)?;
+    let dir = safe_join(&root, &payload.path)?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn files_delete_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let root = service_root(&p)?;
+    let target = safe_join(&root, &q.path)?;
+    if target == root {
+        return Err((StatusCode::BAD_REQUEST, "Cannot delete the service root".into()));
+    }
+    let meta = tokio::fs::metadata(&target)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+    let res = if meta.is_dir() {
+        tokio::fs::remove_dir_all(&target).await
+    } else {
+        tokio::fs::remove_file(&target).await
+    };
+    res.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "file.delete",
+        Some(&p.name),
+        Some(&format!("Deleted '{}'", q.path)),
+    );
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn files_upload_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let root = service_root(&p)?;
+    let target_dir = safe_join(&root, &q.path)?;
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut uploaded = Vec::new();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let file_name = match field.file_name() {
+            Some(name) if !name.trim().is_empty() => name.to_string(),
+            _ => continue,
+        };
+        let clean_name = std::path::Path::new(&file_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&file_name);
+
+        let target_file = safe_join(&target_dir, clean_name)?;
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        tokio::fs::write(&target_file, &bytes)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        uploaded.push(clean_name.to_string());
+    }
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "file.upload",
+        Some(&p.name),
+        Some(&format!("Uploaded {} file(s) into '{}'", uploaded.len(), q.path)),
+    );
+    Ok(Json(serde_json::json!({ "ok": true, "uploaded": uploaded })))
 }
 
 // ---------------------------------------------------------------------------
@@ -1654,13 +1938,17 @@ async fn start_project_with_audit(
                 &actor.username,
                 action,
                 Some(&p.name),
-                Some(&format!("{} website container (PID {}, Port {})", action_label, pid, p.port.unwrap_or(3000))),
+                Some(&if p.project_kind == "service" {
+                format!("{} backend service (PID {})", action_label, pid)
+            } else {
+                format!("{} website container (PID {}, Port {})", action_label, pid, p.port.unwrap_or(3000))
+            }),
             );
             Ok(pid)
         }
         Err(e) if e == "NOT_DEPLOYED_YET" => Err((
             StatusCode::BAD_REQUEST,
-            format!("Website '{}' has not been deployed yet. Please click 'Deploy' to build and deploy it first.", p.name),
+            format!("'{}' has not been deployed yet. Please click 'Deploy' to build and deploy it first.", p.name),
         )),
         Err(e) => Err((StatusCode::BAD_REQUEST, e)),
     }
@@ -1699,7 +1987,11 @@ async fn stop_project_handler(
         &actor.username,
         "container.stop",
         Some(&p.name),
-        Some(&format!("Stopped website container and freed port {}", p.port.unwrap_or(3000))),
+        Some(&if p.project_kind == "service" {
+            "Stopped backend service".to_string()
+        } else {
+            format!("Stopped website container and freed port {}", p.port.unwrap_or(3000))
+        }),
     );
 
     Ok(Json(serde_json::json!({ "stopped": true })))
@@ -3882,7 +4174,7 @@ async fn delete_release_handler(
 
     if let Some(d_str) = rel_dir {
         let path = std::path::Path::new(&d_str);
-        if path.exists() && (d_str.contains("releases") || d_str.contains("rel-")) {
+        if p.project_kind != "service" && path.exists() && (d_str.contains("releases") || d_str.contains("rel-")) {
             let _ = tokio::fs::remove_dir_all(path).await;
         }
     }
@@ -4136,10 +4428,40 @@ async fn link_database_handler(
     state.databases.set_linked_project(id, Some(p.id)).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     state.cache.invalidate_project(p.id);
 
-    log_audit(&state, &user.username, "database.link", Some(&db.name), Some(&format!("Linked database '{}' to website '{}'", db.name, p.name)));
+    let is_service = p.project_kind == "service";
+    let target_noun = if is_service { "service" } else { "website" };
+
+    if is_service {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let raw = std::path::Path::new(&p.deploy_dir);
+        let base = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else {
+            cwd.join(p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\"))
+        };
+        let app_dir = base.join("app");
+        let dotenv_path = app_dir.join(".env");
+        if dotenv_path.exists() {
+            if let Ok(content) = tokio::fs::read_to_string(&dotenv_path).await {
+                let mut lines: Vec<String> = content.lines()
+                    .filter(|l| !l.starts_with("DATABASE_URL=") && !l.starts_with("PGHOST=") && !l.starts_with("PGPORT=") && !l.starts_with("PGUSER=") && !l.starts_with("PGPASSWORD=") && !l.starts_with("PGDATABASE="))
+                    .map(|l| l.to_string())
+                    .collect();
+                lines.push(format!("DATABASE_URL={}", internal_url));
+                lines.push("PGHOST=127.0.0.1".to_string());
+                lines.push(format!("PGPORT={}", db.port));
+                lines.push(format!("PGUSER={}", db.db_user));
+                lines.push(format!("PGPASSWORD={}", raw_pass));
+                lines.push(format!("PGDATABASE={}", db.db_name));
+                let _ = tokio::fs::write(&dotenv_path, lines.join("\n") + "\n").await;
+            }
+        }
+    }
+
+    log_audit(&state, &user.username, "database.link", Some(&db.name), Some(&format!("Linked database '{}' to {} '{}'", db.name, target_noun, p.name)));
     Ok(Json(serde_json::json!({
         "ok": true,
-        "message": format!("Database linked to {} and environment variables injected!", p.name)
+        "message": format!("Database linked to {} '{}' and credentials injected!", target_noun, p.name)
     })))
 }
 
@@ -4148,7 +4470,11 @@ async fn unlink_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    perform_database_action(&state, &headers, id, "database.unlink", "Unlinked database from website", async {
+    let db = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?.ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let old_proj = db.linked_project_id.and_then(|pid| state.projects.get(pid).ok().flatten());
+    let target_noun = if old_proj.as_ref().map(|p| p.project_kind.as_str()) == Some("service") { "service" } else { "website" };
+    let desc = format!("Unlinked database from {}", target_noun);
+    perform_database_action(&state, &headers, id, "database.unlink", &desc, async {
         state.databases.set_linked_project(id, None)
     }).await
 }

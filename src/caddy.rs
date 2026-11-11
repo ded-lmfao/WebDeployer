@@ -57,6 +57,9 @@ impl Caddy {
         );
 
         for p in projects {
+            if p.project_kind == "service" && (p.domains.is_empty() || p.port.is_none()) {
+                continue;
+            }
             master.push_str(&self.generate_config(p));
             master.push('\n');
         }

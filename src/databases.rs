@@ -22,6 +22,7 @@ pub struct ManagedDatabase {
     pub is_superuser: bool,
     pub access_mode: String,
     pub allowed_ips: String,
+    pub domain: String,
     pub status: String,
     pub container_id: Option<String>,
     pub data_dir: String,
@@ -53,6 +54,8 @@ pub struct CreateDatabaseInput {
     pub access_mode: Option<String>,
     #[serde(default, alias = "allowedIps", alias = "allowed_ips")]
     pub allowed_ips: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
     #[serde(default, alias = "linkedProjectId", alias = "linked_project_id")]
     pub linked_project_id: Option<i64>,
 }
@@ -63,6 +66,8 @@ pub struct UpdateDatabaseAccessInput {
     pub access_mode: String,
     #[serde(default, alias = "allowedIps", alias = "allowed_ips")]
     pub allowed_ips: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,7 +220,7 @@ impl Databases {
             .prepare(
                 "SELECT d.id, d.name, d.engine, d.db_name, d.db_user, d.db_password, d.port,
                         d.is_superuser, d.access_mode, d.allowed_ips, d.status, d.container_id,
-                        d.data_dir, d.linked_project_id, p.name, d.created_at, d.updated_at
+                        d.data_dir, d.linked_project_id, p.name, d.domain, d.created_at, d.updated_at
                  FROM databases d
                  LEFT JOIN projects p ON p.id = d.linked_project_id
                  ORDER BY d.id DESC",
@@ -239,13 +244,19 @@ impl Databases {
                 let data_dir: String = r.get(12)?;
                 let linked_project_id: Option<i64> = r.get(13)?;
                 let linked_project_name: Option<String> = r.get(14)?;
-                let created_at: i64 = r.get(15)?;
-                let updated_at: i64 = r.get(16)?;
+                let domain: String = r.get::<_, Option<String>>(15)?.unwrap_or_default();
+                let created_at: i64 = r.get(16)?;
+                let updated_at: i64 = r.get(17)?;
 
                 let raw_pass = self.vault.decrypt(&enc_pass).unwrap_or(enc_pass);
                 let internal_url = format!("postgresql://{}:{}@127.0.0.1:{}/{}", db_user, raw_pass, port, db_name);
-                let external_url = format!("postgresql://{}:{}@{}:{}/{}?sslmode=prefer", db_user, raw_pass, self.public_ip, port, db_name);
-                let psql_command = format!("psql -h 127.0.0.1 -p {} -U {} -d {}", port, db_user, db_name);
+                let host = if !domain.trim().is_empty() {
+                    domain.trim()
+                } else {
+                    &self.public_ip
+                };
+                let external_url = format!("postgresql://{}:{}@{}:{}/{}?sslmode=prefer", db_user, raw_pass, host, port, db_name);
+                let psql_command = format!("psql -h {} -p {} -U {} -d {}", host, port, db_user, db_name);
 
                 Ok(ManagedDatabase {
                     id,
@@ -258,6 +269,7 @@ impl Databases {
                     is_superuser,
                     access_mode,
                     allowed_ips,
+                    domain,
                     status,
                     container_id,
                     data_dir,
@@ -322,10 +334,26 @@ impl Databases {
         let engine = input.engine.unwrap_or_else(|| "postgres".to_string());
         let access_mode = input.access_mode.unwrap_or_else(|| "local".to_string());
         let allowed_ips = input.allowed_ips.unwrap_or_default().trim().to_string();
+        let domain = input.domain.unwrap_or_default().trim().to_string();
         let is_superuser = input.is_superuser.unwrap_or(false);
 
         let port = match input.port {
-            Some(p) if p > 1024 => p,
+            Some(p) if p > 1024 => {
+                let conn = self.db.lock().map_err(|e| e.to_string())?;
+                let in_use: bool = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM databases WHERE port = ?",
+                        params![p],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map(|c| c > 0)
+                    .unwrap_or(false);
+                if in_use || std::net::TcpListener::bind(("127.0.0.1", p)).is_err() {
+                    self.find_next_free_port(p)?
+                } else {
+                    p
+                }
+            }
             _ => self.find_next_free_port(5432)?,
         };
 
@@ -338,8 +366,8 @@ impl Databases {
         let id = {
             let conn = self.db.lock().map_err(|e| e.to_string())?;
             conn.execute(
-                "INSERT INTO databases(name, engine, db_name, db_user, db_password, port, is_superuser, access_mode, allowed_ips, status, data_dir, linked_project_id, created_at, updated_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', '', ?, ?, ?)",
+                "INSERT INTO databases(name, engine, db_name, db_user, db_password, port, is_superuser, access_mode, allowed_ips, domain, status, data_dir, linked_project_id, created_at, updated_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', '', ?, ?, ?)",
                 params![
                     name,
                     engine,
@@ -350,6 +378,7 @@ impl Databases {
                     if is_superuser { 1 } else { 0 },
                     access_mode,
                     allowed_ips,
+                    domain,
                     input.linked_project_id,
                     ts,
                     ts,
@@ -418,10 +447,9 @@ impl Databases {
         Self::sync_firewall_rules(db_rec.port, &db_rec.access_mode, &db_rec.allowed_ips).await;
 
         // Quick check: if postgres is already running and accepting TCP connections, update status immediately!
-        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", db_rec.port)).await.is_ok() {
-            let pid = read_pg_pid(&db_dir.join("data"))
-                .or_else(|| crate::runtime::Runtime::find_pids_on_port(db_rec.port).into_iter().next())
-                .unwrap_or_else(std::process::id);
+        let own_pid = read_pg_pid(&db_dir.join("data")).filter(|p| is_process_alive(*p));
+        if own_pid.is_some() && tokio::net::TcpStream::connect(format!("127.0.0.1:{}", db_rec.port)).await.is_ok() {
+            let pid = own_pid.unwrap_or_else(std::process::id);
             let conn = self.db.lock().map_err(|e| e.to_string())?;
             conn.execute(
                 "UPDATE databases SET status = 'running', container_id = ?, updated_at = ? WHERE id = ?",
@@ -523,11 +551,12 @@ impl Databases {
                 .await;
         }
 
+        let domain = input.domain.unwrap_or_else(|| db_rec.domain.clone()).trim().to_string();
         {
             let conn = self.db.lock().map_err(|e| e.to_string())?;
             conn.execute(
-                "UPDATE databases SET access_mode = ?, allowed_ips = ?, updated_at = ? WHERE id = ?",
-                params![input.access_mode, allowed_ips, now(), id],
+                "UPDATE databases SET access_mode = ?, allowed_ips = ?, domain = ?, updated_at = ? WHERE id = ?",
+                params![input.access_mode, allowed_ips, domain, now(), id],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -679,7 +708,19 @@ impl Databases {
         );
         let data_str = to_clean_path_str(&data_dir);
         let log_str = to_clean_path_str(&log_file);
-        let port_opt = format!("-p {}", port);
+        // Pin the port in postgresql.conf (passing '-o "-p N"' is mangled by Windows argument quoting)
+        {
+            let conf_path = data_dir.join("postgresql.conf");
+            if let Ok(existing) = tokio::fs::read_to_string(&conf_path).await {
+                let mut cleaned: Vec<&str> = existing
+                    .lines()
+                    .filter(|l| !l.trim_start().starts_with("port =") && !l.trim_start().starts_with("port="))
+                    .collect();
+                let pin = format!("port = {}", port);
+                cleaned.push(&pin);
+                let _ = tokio::fs::write(&conf_path, cleaned.join("\n") + "\n").await;
+            }
+        }
 
         // Check if there is a stale postmaster.pid from an unexpected termination
         let pid_file = data_dir.join("postmaster.pid");
@@ -699,8 +740,6 @@ impl Databases {
             &data_str,
             "-l",
             &log_str,
-            "-o",
-            &port_opt,
             "-W",
             "start",
         ]);
@@ -710,9 +749,24 @@ impl Databases {
 
         let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), start_cmd.status()).await;
 
-        let pid = wait_for_pg_ready(port, &data_dir, 6000)
-            .await
-            .ok_or_else(|| format!("PostgreSQL failed to open port {} within 6s. Check Server Logs.", port))?;
+        let pid = match wait_for_pg_ready(port, &data_dir, 20000).await {
+            Some(p) => p,
+            None => {
+                let tail = std::fs::read_to_string(&log_file)
+                    .map(|s| {
+                        let lines: Vec<&str> = s.lines().collect();
+                        lines[lines.len().saturating_sub(8)..].join(" | ")
+                    })
+                    .unwrap_or_default();
+                let foreign = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await.is_ok();
+                let reason = if foreign {
+                    format!("Port {} is already used by another program (for example a system PostgreSQL service). Stop it or delete and recreate this database so it gets a free port.", port)
+                } else {
+                    format!("PostgreSQL failed to start on port {}.", port)
+                };
+                return Err(format!("{} Log: {}", reason, tail));
+            }
+        };
         self.logs.add(
             None,
             None,
@@ -721,21 +775,25 @@ impl Databases {
             &format!("[DB #{}] PostgreSQL engine running (PID: {}) on port {}. Ready for connections.", id, pid, port),
         );
 
-        // 4. Create custom database if new, different from bootstrap user and not "postgres"
-        if is_new && db_name != db_user && db_name != "postgres" {
-            let mut create_cmd = Command::new(&pg_bins.createdb);
-            create_cmd.args([
+        // 4. Ensure custom database exists and is owned by db_user
+        if db_name != "postgres" {
+            let sql = format!(r#"CREATE DATABASE "{}" OWNER "{}";"#, db_name, db_user);
+            let mut psql_cmd = Command::new(&pg_bins.psql);
+            psql_cmd.args([
                 "-h",
                 "127.0.0.1",
                 "-p",
                 &port.to_string(),
                 "-U",
                 db_user,
-                db_name,
+                "-d",
+                "postgres",
+                "-c",
+                &sql,
             ]);
-            create_cmd.stdin(std::process::Stdio::null());
-            create_cmd.env("PGPASSWORD", db_pass);
-            let _ = tokio::time::timeout(tokio::time::Duration::from_secs(4), create_cmd.output()).await;
+            psql_cmd.stdin(std::process::Stdio::null());
+            psql_cmd.env("PGPASSWORD", db_pass);
+            let _ = tokio::time::timeout(tokio::time::Duration::from_secs(6), psql_cmd.output()).await;
         }
 
         // 5. Restrict superuser privileges if is_superuser is false and cluster is new
@@ -840,7 +898,10 @@ fn generate_pg_hba(access_mode: &str, allowed_ips: &str) -> String {
     let mut hba = String::new();
     hba.push_str("# PostgreSQL Client Authentication Configuration File (WebDep Managed)\n");
     hba.push_str("# TYPE  DATABASE        USER            ADDRESS                 METHOD\n");
-    hba.push_str("local   all             all                                     trust\n");
+    // Unix-socket ("local") rules are not supported on Windows and make PostgreSQL reject pg_hba.conf
+    if !cfg!(windows) {
+        hba.push_str("local   all             all                                     trust\n");
+    }
     hba.push_str("host    all             all             127.0.0.1/32            scram-sha-256\n");
     hba.push_str("host    all             all             ::1/128                 scram-sha-256\n");
 
@@ -892,28 +953,16 @@ async fn wait_for_pg_ready(port: u16, data_dir: &Path, max_wait_ms: u64) -> Opti
     let start = std::time::Instant::now();
     let addr = format!("127.0.0.1:{}", port);
     while start.elapsed().as_millis() < max_wait_ms as u128 {
-        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-            if let Some(pid) = read_pg_pid(data_dir) {
-                return Some(pid);
-            }
-            if let Some(pid) = crate::runtime::Runtime::find_pids_on_port(port).into_iter().next() {
-                return Some(pid);
-            }
-            return Some(std::process::id());
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
-    }
-    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+        // Only count it as ready when OUR postmaster (data_dir/postmaster.pid) is alive and the port accepts connections.
+        // This prevents mistaking another program already holding the port for this database.
         if let Some(pid) = read_pg_pid(data_dir) {
-            return Some(pid);
+            if is_process_alive(pid) && tokio::net::TcpStream::connect(&addr).await.is_ok() {
+                return Some(pid);
+            }
         }
-        if let Some(pid) = crate::runtime::Runtime::find_pids_on_port(port).into_iter().next() {
-            return Some(pid);
-        }
-        Some(std::process::id())
-    } else {
-        None
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
+    None
 }
 
 fn is_process_alive(pid: u32) -> bool {

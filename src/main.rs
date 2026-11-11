@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cache = Arc::new(AppCache::new());
     let caddy = Arc::new(Caddy::new(&config.data_dir));
     let runtime = Arc::new(Runtime::new(db.clone(), (*logs).clone()));
+    runtime.start_background_monitor();
     let deployer = Arc::new(Deployer::new(
         db.clone(),
         (*logs).clone(),

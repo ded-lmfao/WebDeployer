@@ -156,6 +156,9 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         ensure_column(conn, "projects", &cols, "ssl_enabled", "INTEGER NOT NULL DEFAULT 0");
         ensure_column(conn, "projects", &cols, "ssl_email", "TEXT DEFAULT ''");
         ensure_column(conn, "projects", &cols, "nginx_configured", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column(conn, "projects", &cols, "project_kind", "TEXT NOT NULL DEFAULT 'web'");
+        ensure_column(conn, "projects", &cols, "access_mode", "TEXT NOT NULL DEFAULT 'local'");
+        ensure_column(conn, "projects", &cols, "allowed_ips", "TEXT NOT NULL DEFAULT ''");
     }
 
     let version: i32 = conn
@@ -207,6 +210,9 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 ssl_enabled INTEGER NOT NULL DEFAULT 0,
                 ssl_email TEXT DEFAULT '',
                 nginx_configured INTEGER NOT NULL DEFAULT 0,
+                project_kind TEXT NOT NULL DEFAULT 'web',
+                access_mode TEXT NOT NULL DEFAULT 'local',
+                allowed_ips TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -371,6 +377,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             db_password TEXT NOT NULL,
             port INTEGER NOT NULL,
             is_superuser INTEGER NOT NULL DEFAULT 0,
+            domain TEXT NOT NULL DEFAULT '',
             access_mode TEXT NOT NULL DEFAULT 'local',
             allowed_ips TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'stopped',
@@ -433,6 +440,10 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
              ) WHERE project_id IS NULL AND target IS NOT NULL;",
         );
     }
+
+    // Dynamically ensure databases table has domain column for custom hostname routing
+    let d_cols = get_table_columns(conn, "databases");
+    ensure_column(conn, "databases", &d_cols, "domain", "TEXT NOT NULL DEFAULT ''");
 
     // Auto-seed github_token into SQLite settings if not yet configured
     let existing_token: String = conn

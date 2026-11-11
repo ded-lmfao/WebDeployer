@@ -98,9 +98,9 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     let cache_control = if is_html {
         "no-cache, must-revalidate"
     } else if has_version_query {
-        "public, max-age=31536000, immutable"
-    } else {
         "public, max-age=86400, stale-while-revalidate=604800"
+    } else {
+        "no-cache, must-revalidate"
     };
 
     // FAST-PATH: If the file exists directly on disk in ./public, serve with RAM-backed cache & 304 ETag verification!

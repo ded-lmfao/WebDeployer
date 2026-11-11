@@ -587,8 +587,8 @@ async function onAuthenticated(isFreshLogin = false) {
     if (navEl) navEl.style.display = hasPower(pwr) ? '' : 'none';
   });
 
-  // Load projects before revealing the main application shell
-  await loadProjects();
+  // Load projects and databases before revealing the main application shell
+  await Promise.all([loadProjects(), loadDatabases()]);
 
   document.getElementById('login-view').style.display = 'none';
   stopLoginCanvasAnimation();
@@ -624,16 +624,20 @@ const WEBSITE_WORKSPACE_TABS = new Set([
   'github',
   'logs',
   'env',
+  'files',
   'releases',
   'rollbacks',
   'monitor',
   'audit',
 ]);
 
-function openWebsiteWorkspace(projectId, tab = 'deployments') {
+function openWebsiteWorkspace(projectId, tab = null) {
   state.selectedProjectId = Number(projectId);
   prefetchWebsiteWorkspace(state.selectedProjectId);
-  navigateTo(tab, state.selectedProjectId);
+  const p = state.projects.find((x) => x.id === state.selectedProjectId);
+  const isLocalService = p && p.project_kind === 'service' && (!p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink')));
+  const targetTab = tab || (isLocalService ? 'files' : 'deployments');
+  navigateTo(targetTab, state.selectedProjectId);
 }
 window.openWebsiteWorkspace = openWebsiteWorkspace;
 
@@ -698,6 +702,7 @@ function updateBreadcrumbs() {
     github: 'GitHub & Commits',
     logs: 'Live Logs',
     env: 'Environment (.env)',
+    files: 'Files',
     releases: 'Releases',
     rollbacks: 'Rollbacks',
     monitor: 'Monitoring',
@@ -705,11 +710,14 @@ function updateBreadcrumbs() {
   };
 
   if (isInsideCard && p) {
-    secEl.innerHTML = `<span style="cursor:pointer; color:var(--text-muted);" onclick="navigateTo('projects')">Websites</span> &rsaquo; <strong style="color:var(--text-main);">${escapeHtml(p.name)}</strong> &rsaquo; <span style="color:var(--accent-light);">${escapeHtml(tabLabels[state.currentView] || state.currentView)}</span>`;
+    const parentView = p.project_kind === 'service' ? 'services' : 'projects';
+    const parentLabel = p.project_kind === 'service' ? 'Services' : 'Websites';
+    secEl.innerHTML = `<span style="cursor:pointer; color:var(--text-muted);" onclick="navigateTo('${parentView}')">${parentLabel}</span> &rsaquo; <strong style="color:var(--text-main);">${escapeHtml(p.name)}</strong> &rsaquo; <span style="color:var(--accent-light);">${escapeHtml(tabLabels[state.currentView] || state.currentView)}</span>`;
   } else {
     const globalLabels = {
       overview: 'System Overview',
       projects: 'Hosted Websites',
+      services: 'Backend Services & Bots',
       databases: 'Managed Databases',
       settings: 'Platform Settings',
     };
@@ -731,6 +739,7 @@ function renderWebsiteWorkspaceHeader() {
   banner.style.display = 'block';
   const isOnline = p.app_status === 'running';
   const isMaintenance = p.app_status === 'maintenance';
+  const isService = p.project_kind === 'service';
 
   const dot = document.getElementById('ws-status-dot');
   if (dot) dot.className = `status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}`;
@@ -740,6 +749,21 @@ function renderWebsiteWorkspaceHeader() {
 
   const breadcrumbSlug = document.getElementById('ws-breadcrumb-slug');
   if (breadcrumbSlug) breadcrumbSlug.textContent = p.name;
+
+  const backCrumb = document.querySelector('.ws-back-crumb');
+  if (backCrumb) {
+    if (isService) {
+      backCrumb.setAttribute('onclick', "navigateTo('services')");
+      backCrumb.setAttribute('title', 'Back to Backend Services');
+      const s = backCrumb.querySelector('span');
+      if (s) s.textContent = 'Services';
+    } else {
+      backCrumb.setAttribute('onclick', "navigateTo('projects')");
+      backCrumb.setAttribute('title', 'Back to Hosted Websites');
+      const s = backCrumb.querySelector('span');
+      if (s) s.textContent = 'Websites';
+    }
+  }
 
   const badge = document.getElementById('ws-status-badge');
   if (badge) {
@@ -755,49 +779,104 @@ function renderWebsiteWorkspaceHeader() {
     }
   }
 
-  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}`;
+  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}`;
   if (state.lastWsBannerSig !== bannerSig) {
     state.lastWsBannerSig = bannerSig;
 
     const links = document.getElementById('ws-project-links');
     if (links) {
-      const url = p.port ? `http://127.0.0.1:${p.port}` : null;
       const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
-      const customDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
-      const primaryLinkHtml = customDomains.length
-        ? `<a class="ws-meta-link active" href="https://${escapeHtml(customDomains[0])}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Open https://${escapeHtml(customDomains[0])}">
-             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-             <span>${escapeHtml(customDomains[0])}</span>
-           </a>`
-        : url
-          ? `<a class="ws-meta-link active" href="${url}" target="_blank" title="Open ${url}">
-               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-               <span>${url}</span>
-             </a>`
+      if (isService) {
+        let typeLabel = '🤖 Service';
+        const pt = (p.project_type || '').toLowerCase();
+        if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) typeLabel = '☕ Lavalink Audio Server';
+        else if (pt.includes('discord')) typeLabel = '🤖 Discord Bot';
+        else if (pt.includes('telegram')) typeLabel = '✈️ Telegram Bot';
+        else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) typeLabel = '🐍 Python Daemon';
+        else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) typeLabel = '⚡ Node.js Worker';
+        else if (pt.includes('worker')) typeLabel = '⚙️ Queue Worker';
+
+        const isLocal = !p.repo_url || p.repo_url === 'local' || pt.includes('lavalink');
+        const serviceDomainLink = (p.domains && p.domains.length > 0)
+          ? `<a class="ws-meta-link active" href="https://${escapeHtml(p.domains[0])}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Custom Domain: https://${escapeHtml(p.domains[0])}">
+               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+               <span>${escapeHtml(p.domains[0])}</span>
+             </a><span class="ws-meta-sep">&bull;</span>`
           : '';
 
-      links.innerHTML = `
-        ${primaryLinkHtml ? `${primaryLinkHtml}<span class="ws-meta-sep">&bull;</span>` : ''}
-        <span class="ws-meta-item" title="Git Branch">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
-          <span style="color:var(--text-main); font-weight:600;">${escapeHtml(p.branch || 'main')}</span>
-        </span>
-        <span class="ws-meta-sep">&bull;</span>
-        <span class="ws-meta-item" title="Deployed Commit SHA">
-          <code class="ws-meta-sha">${escapeHtml(sha)}</code>
-        </span>
-        ${p.port ? `
+        let accessText = '🔒 Localhost';
+        if (p.access_mode === 'allowlist') accessText = '🛡️ Allowlist';
+        else if (p.access_mode === 'public') accessText = '🌐 Public';
+
+        links.innerHTML = `
+          ${serviceDomainLink}
+          <span class="ws-meta-item" style="color:var(--accent-light); font-weight:600;">
+            ${escapeHtml(typeLabel)}
+          </span>
           <span class="ws-meta-sep">&bull;</span>
-          <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
-        ` : ''}
-      `;
+          ${isLocal ? `
+            <span class="ws-meta-item" title="Deployment Mode">
+              <span class="badge badge-neutral" style="font-size:11px; padding: 2px 7px;">📁 Manual Upload</span>
+            </span>
+          ` : `
+            <span class="ws-meta-item" title="Git Branch">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+              <span style="color:var(--text-main); font-weight:600;">${escapeHtml(p.branch || 'main')}</span>
+            </span>
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="Deployed Commit SHA">
+              <code class="ws-meta-sha">${escapeHtml(sha)}</code>
+            </span>
+          `}
+          ${p.port ? `
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="Listening Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
+          ` : ''}
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Network Access Policy" style="font-size:11px;">${accessText}</span>
+          ${p.app_pid ? `
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="Process PID">PID <strong style="color:var(--text-main); font-weight:600;">${p.app_pid}</strong></span>
+          ` : ''}
+        `;
+      } else {
+        const url = p.port ? `http://127.0.0.1:${p.port}` : null;
+        const customDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
+        const primaryLinkHtml = customDomains.length
+          ? `<a class="ws-meta-link active" href="https://${escapeHtml(customDomains[0])}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Open https://${escapeHtml(customDomains[0])}">
+               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+               <span>${escapeHtml(customDomains[0])}</span>
+             </a>`
+          : url
+            ? `<a class="ws-meta-link active" href="${url}" target="_blank" title="Open ${url}">
+                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                 <span>${url}</span>
+               </a>`
+            : '';
+
+        links.innerHTML = `
+          ${primaryLinkHtml ? `${primaryLinkHtml}<span class="ws-meta-sep">&bull;</span>` : ''}
+          <span class="ws-meta-item" title="Git Branch">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+            <span style="color:var(--text-main); font-weight:600;">${escapeHtml(p.branch || 'main')}</span>
+          </span>
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Deployed Commit SHA">
+            <code class="ws-meta-sha">${escapeHtml(sha)}</code>
+          </span>
+          ${p.port ? `
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="Local Port">Port <strong style="color:var(--text-main); font-weight:600;">${p.port}</strong></span>
+          ` : ''}
+        `;
+      }
     }
 
     const actions = document.getElementById('ws-project-actions');
     if (actions) {
       actions.innerHTML = `
         <div class="ws-actions-group">
-          ${hasPower('deploy') ? `
+          ${hasPower('deploy') && (!isService || (p.repo_url && p.repo_url !== 'local')) ? `
             <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id})">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="13 2 13 9 20 9"></polyline><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
               <span>Deploy</span>
@@ -812,7 +891,7 @@ function renderWebsiteWorkspaceHeader() {
               : ''
             }
             ${isOnline || isMaintenance
-              ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop website and release port">
+              ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
                    <span>Stop</span>
                  </button>`
@@ -822,26 +901,28 @@ function renderWebsiteWorkspaceHeader() {
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
               <span>Restart</span>
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode'}" style="${isMaintenance ? 'background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-              <span>${isMaintenance ? 'Exit Maint.' : 'Maint.'}</span>
-            </button>
+            ${!isService ? `
+              <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode'}" style="${isMaintenance ? 'background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                <span>${isMaintenance ? 'Exit Maint.' : 'Maint.'}</span>
+              </button>
+            ` : ''}
           ` : ''}
         </div>
 
         <div class="ws-actions-group">
-          ${hasPower('domains') ? `
+          ${!isService && hasPower('domains') ? `
             <button class="btn btn-secondary btn-sm" onclick="openNginxModal(${p.id})" title="Domains &amp; SSL">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               <span>Domains</span>
             </button>
           ` : ''}
           ${hasPower('projects_manage') ? `
-            <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})" title="Website Settings">
+            <button class="btn btn-secondary btn-sm" onclick="${isService ? `openEditServiceModal(${p.id})` : `openEditWebsiteModal(${p.id})`}" title="${isService ? 'Service Settings' : 'Website Settings'}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
               <span>Settings</span>
             </button>
-            <button class="btn btn-sm ws-btn-delete" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="Delete Website">
+            <button class="btn btn-sm ws-btn-delete" onclick="deleteProject(${p.id}, '${escapeHtml(p.slug)}')" title="${isService ? 'Delete Service' : 'Delete Website'}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
           ` : ''}
@@ -861,7 +942,14 @@ function renderWebsiteWorkspaceHeader() {
     const tab = btn.getAttribute('data-ws-tab');
     const reqPower = tabPowerMap[tab];
     const isActive = tab === state.currentView;
-    if ((reqPower && !hasPower(reqPower)) || (hiddenSecondaryTabs.has(tab) && !isActive)) {
+    const isLocalService = isService && (!p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink')));
+    if (tab === 'files' && !isService) {
+      btn.style.display = 'none';
+    } else if (isLocalService && (tab === 'github' || tab === 'deployments' || tab === 'releases' || tab === 'rollbacks')) {
+      btn.style.display = 'none';
+    } else if (tab === 'env' && isService) {
+      btn.style.display = 'none';
+    } else if ((reqPower && !hasPower(reqPower)) || (hiddenSecondaryTabs.has(tab) && !isActive)) {
       btn.style.display = 'none';
     } else {
       btn.style.display = '';
@@ -911,6 +999,24 @@ function syncProjectSelectors() {
   renderWebsiteWorkspaceHeader();
 }
 
+// Which kind of item the global "Add" button should create for the current view (null = hide it)
+function getGlobalAddKind() {
+  const v = state.currentView;
+  if (v === 'services') return 'service';
+  if (v === 'projects') return 'website';
+  if (WEBSITE_WORKSPACE_TABS.has(v)) {
+    const cur = getSelectedProject();
+    return cur && cur.project_kind === 'service' ? 'service' : 'website';
+  }
+  return null;
+}
+
+function globalAddAction() {
+  if (getGlobalAddKind() === 'service') openAddServiceModal();
+  else openAddWebsiteModal();
+}
+window.globalAddAction = globalAddAction;
+
 function renderCurrentView() {
   updateBreadcrumbs();
   renderWebsiteWorkspaceHeader();
@@ -925,14 +1031,37 @@ function renderCurrentView() {
   document.querySelector('.sidebar')?.classList.remove('mobile-open');
   document.getElementById('sidebar-backdrop')?.classList.remove('active');
 
-  // Update sidebar active classes (highlight 'projects' when inside a website card workspace)
-  const activeSidebarView = WEBSITE_WORKSPACE_TABS.has(state.currentView) ? 'projects' : state.currentView;
+  // Update sidebar active classes (highlight 'projects' or 'services' when inside a workspace)
+  const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
+  const curP = isInsideCard ? getSelectedProject() : null;
+  const activeSidebarView = isInsideCard
+    ? (curP && curP.project_kind === 'service' ? 'services' : 'projects')
+    : state.currentView;
   document.querySelectorAll('.nav-item').forEach((item) => {
     item.classList.toggle('active', item.getAttribute('data-view') === activeSidebarView);
   });
   document.querySelectorAll('#mobile-bottom-nav .mobile-nav-item[data-mobile-view]').forEach((item) => {
     item.classList.toggle('active', item.getAttribute('data-mobile-view') === activeSidebarView);
   });
+
+  // Adapt global header action button to the active section (website vs backend service)
+  const globalAddBtn = document.getElementById('global-add-website-btn');
+  if (globalAddBtn) {
+    const ctxKind = getGlobalAddKind();
+    if (!ctxKind || !hasPower('projects_manage')) {
+      globalAddBtn.style.display = 'none';
+    } else {
+      globalAddBtn.style.display = '';
+      const label = ctxKind === 'service' ? 'Add Service' : 'Add Website';
+      globalAddBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>${label}</span>
+      `;
+    }
+  }
 
   // Switch view section visibility
   document.querySelectorAll('.view-section').forEach((sec) => {
@@ -945,7 +1074,8 @@ function renderCurrentView() {
   // Load relevant view data
   switch (state.currentView) {
     case 'overview': void loadOverview(); break;
-    case 'projects': renderProjectsList(); break;
+    case 'projects': void loadProjectsView(); break;
+    case 'services': void loadServicesView(); break;
     case 'databases': void loadDatabasesView(); break;
     case 'github': void loadGithubView(); break;
     case 'deployments': void loadDeploymentsView(); break;
@@ -953,6 +1083,7 @@ function renderCurrentView() {
     case 'rollbacks': void loadRollbacksView(); break;
     case 'logs': void loadLogsView(); break;
     case 'env': void loadEnvView(); break;
+    case 'files': void loadFilesView(); break;
     case 'monitor': void loadMonitorView(); break;
     case 'settings': void loadSettingsView(); break;
     case 'audit': void loadAuditView(); break;
@@ -965,8 +1096,17 @@ function renderCurrentView() {
 async function loadProjects() {
   try {
     state.projects = await api('/api/projects', { noCache: true });
+    const websites = (state.projects || []).filter((p) => p.project_kind !== 'service');
+    const services = (state.projects || []).filter((p) => p.project_kind === 'service');
+
     const badgeEl = document.getElementById('badge-projects-count');
-    if (badgeEl) badgeEl.textContent = state.projects.length;
+    if (badgeEl) badgeEl.textContent = websites.length;
+
+    const badgeServicesEl = document.getElementById('badge-services-count');
+    if (badgeServicesEl) badgeServicesEl.textContent = services.length;
+
+    // Keep databases count badge continuously synchronized
+    loadDatabases().catch(() => {});
 
     if (state.projects.length > 0 && !state.selectedProjectId) {
       state.selectedProjectId = state.projects[0].id;
@@ -976,6 +1116,18 @@ async function loadProjects() {
     toast(`Failed to load projects: ${err.message}`, 'error');
   }
 }
+
+async function loadProjectsView() {
+  await loadProjects();
+  renderProjectsList();
+}
+window.loadProjectsView = loadProjectsView;
+
+async function loadServicesView() {
+  await loadProjects();
+  renderServicesList();
+}
+window.loadServicesView = loadServicesView;
 
 function getSelectedProject() {
   return state.projects.find((p) => p.id === state.selectedProjectId) || state.projects[0] || null;
@@ -991,11 +1143,25 @@ async function loadOverview() {
 
     // Server Stats
     const m = data.monitor || {};
-    document.getElementById('stat-total-projects').textContent = data.projects.length;
+    const ovWeb = (data.projects || []).filter((x) => x.project.project_kind !== 'service');
+    const ovSvc = (data.projects || []).filter((x) => x.project.project_kind === 'service');
+    document.getElementById('stat-total-projects').textContent = ovWeb.length;
+    document.getElementById('stat-total-services').textContent = ovSvc.length;
+
+    // Keep navigation sidebar counts updated immediately
+    const badgeWebEl = document.getElementById('badge-projects-count');
+    if (badgeWebEl) badgeWebEl.textContent = ovWeb.length;
+    const badgeSvcEl = document.getElementById('badge-services-count');
+    if (badgeSvcEl) badgeSvcEl.textContent = ovSvc.length;
+    loadDatabases().catch(() => {});
+
+    const svcOnline = ovSvc.filter((x) => x.app?.running).length;
+    document.getElementById('stat-services-online').textContent = svcOnline;
+    document.getElementById('stat-services-offline').textContent = ovSvc.length - svcOnline;
     
     let online = 0;
     let offline = 0;
-    data.projects.forEach((item) => {
+    ovWeb.forEach((item) => {
       if (item.app?.running) online++; else offline++;
     });
     document.getElementById('stat-online-count').textContent = online;
@@ -1043,17 +1209,22 @@ async function loadOverview() {
       state.lastOverviewSig = sig;
 
       // Websites Table
-      const tbody = document.getElementById('overview-projects-table');
-      if (!data.projects.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px;">No websites created yet. Click "Add Website" to get started.</td></tr>';
-      } else {
-        tbody.innerHTML = data.projects.map((item) => {
+      const renderOverviewRows = (tbody, items, emptyMsg) => {
+        if (!tbody) return;
+        if (!items.length) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px;">' + emptyMsg + '</td></tr>';
+          return;
+        }
+        tbody.innerHTML = items.map((item) => {
           const p = item.project;
           const isOnline = p.app_status === 'running';
           const isMaintenance = p.app_status === 'maintenance';
+          const isService = p.project_kind === 'service';
           const domains = p.domains && p.domains.length ? p.domains : [];
-          const domainLinks = domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
-            (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>');
+          const domainLinks = isService
+            ? `<span class="badge badge-neutral" style="font-size: 11px;">🤖 ${escapeHtml(p.project_type ? p.project_type.toUpperCase() : 'SERVICE')}</span>`
+            : (domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
+              (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>'));
           const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">None</span>';
           
           let behindAhead = '--';
@@ -1080,7 +1251,17 @@ async function loadOverview() {
             </tr>
           `;
         }).join('');
-      }
+      };
+      renderOverviewRows(
+        document.getElementById('overview-projects-table'),
+        data.projects.filter((x) => x.project.project_kind !== 'service'),
+        'No websites created yet. Click "Add Website" to get started.'
+      );
+      renderOverviewRows(
+        document.getElementById('overview-services-table'),
+        data.projects.filter((x) => x.project.project_kind === 'service'),
+        'No backend services yet. Open the Services tab to add a bot or worker.'
+      );
 
       // Recent Deployments (paginated max 20 per page)
       const recBody = document.getElementById('overview-recent-table');
@@ -1107,9 +1288,11 @@ function renderProjectsList() {
   const container = document.getElementById('projects-cards-container');
   if (!container) return;
 
+  const websites = (state.projects || []).filter((p) => p.project_kind !== 'service');
+
   // Update filter pill counts
-  const countAll = state.projects.length;
-  const countRunning = state.projects.filter((p) => p.app_status === 'running').length;
+  const countAll = websites.length;
+  const countRunning = websites.filter((p) => p.app_status === 'running').length;
   const countStopped = countAll - countRunning;
   const elAll = document.getElementById('filter-count-all');
   const elRunning = document.getElementById('filter-count-running');
@@ -1124,7 +1307,7 @@ function renderProjectsList() {
   });
 
   const search = (document.getElementById('projects-search-input')?.value || '').toLowerCase();
-  const filtered = state.projects.filter((p) => {
+  const filtered = websites.filter((p) => {
     const isOnline = p.app_status === 'running';
     if (state.projectStatusFilter === 'running' && !isOnline) return false;
     if (state.projectStatusFilter === 'stopped' && isOnline) return false;
@@ -1206,11 +1389,707 @@ document.querySelectorAll('#projects-status-filters .pill').forEach((btn) => {
 });
 
 // ============================================================================
+// View 2.5: Backend Services & Bots
+// ============================================================================
+function renderServicesList() {
+  const container = document.getElementById('services-cards-container');
+  if (!container) return;
+
+  const services = (state.projects || []).filter((p) => p.project_kind === 'service');
+
+  if (!state.serviceStatusFilter) state.serviceStatusFilter = 'all';
+
+  const countAll = services.length;
+  const countRunning = services.filter((p) => p.app_status === 'running').length;
+  const countStopped = countAll - countRunning;
+  const elAll = document.getElementById('services-filter-count-all');
+  const elRunning = document.getElementById('services-filter-count-running');
+  const elStopped = document.getElementById('services-filter-count-stopped');
+  if (elAll) elAll.textContent = countAll;
+  if (elRunning) elRunning.textContent = countRunning;
+  if (elStopped) elStopped.textContent = countStopped;
+
+  document.querySelectorAll('#services-status-filters .pill').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-filter') === state.serviceStatusFilter);
+  });
+
+  const search = (document.getElementById('services-search-input')?.value || '').toLowerCase();
+  const filtered = services.filter((p) => {
+    const isOnline = p.app_status === 'running';
+    if (state.serviceStatusFilter === 'running' && !isOnline) return false;
+    if (state.serviceStatusFilter === 'stopped' && isOnline) return false;
+    return p.name.toLowerCase().includes(search) ||
+      p.slug.toLowerCase().includes(search) ||
+      (p.start_cmd && p.start_cmd.toLowerCase().includes(search)) ||
+      (p.project_type && p.project_type.toLowerCase().includes(search));
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
+        <div style="font-size: 38px; margin-bottom: 12px;">🤖</div>
+        <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No backend services or bots yet</p>
+        <p style="color: var(--text-muted); font-size: 13.5px; max-width: 460px; margin: 0 auto 20px auto; line-height: 1.5;">
+          Deploy 24/7 Discord bots, Telegram bots, queue workers, and background scripts directly on your server with automatic process supervision.
+        </p>
+        <button class="btn btn-primary" onclick="openAddServiceModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>New Service / Bot</span>
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map((p) => {
+    const isOnline = p.app_status === 'running';
+    const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
+
+    let typeIcon = '🤖';
+    let typeName = 'Backend Service';
+    const pt = (p.project_type || '').toLowerCase();
+    if (pt.includes('discord')) {
+      typeIcon = '🤖';
+      typeName = 'Discord Bot';
+    } else if (pt.includes('telegram')) {
+      typeIcon = '✈️';
+      typeName = 'Telegram Bot';
+    } else if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) {
+      typeIcon = '☕';
+      typeName = 'Lavalink Audio Server';
+    } else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) {
+      typeIcon = '🐍';
+      typeName = 'Python Daemon';
+    } else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) {
+      typeIcon = '⚡';
+      typeName = 'Node.js Worker';
+    } else if (pt.includes('worker')) {
+      typeIcon = '⚙️';
+      typeName = 'Queue Worker';
+    }
+
+    const uptimeText = isOnline && p.app_started_at
+      ? `Started ${formatRelativeTime(p.app_started_at)}`
+      : (isOnline ? 'Active process' : 'Process inactive');
+
+    const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
+    const defaultTab = isLocal ? 'files' : 'deployments';
+
+        let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
+        if (p.access_mode === 'allowlist') {
+          const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
+          accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
+        } else if (p.access_mode === 'public') {
+          accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
+        }
+
+        const domainBadge = (p.domains && p.domains.length > 0)
+          ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">🌐 ${escapeHtml(p.domains[0])}</span>`
+          : '';
+        const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
+
+        return `
+      <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
+        <div class="project-card-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 38px; height: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 20px;">
+              ${typeIcon}
+            </div>
+            <div>
+              <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+                <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+                <span>${escapeHtml(p.name)}</span>
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                ${escapeHtml(typeName)} &bull; ${isLocal ? '📁 Manual Files' : escapeHtml(p.branch || 'main')}
+              </div>
+            </div>
+          </div>
+          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
+        </div>
+
+        <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden;">
+          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 75%;">
+            $ ${escapeHtml(p.start_cmd || 'node index.js')}
+          </span>
+          ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">PID ${p.app_pid}</span>` : ''}
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;">
+          ${accessBadge}
+          ${domainBadge}
+          ${portBadge}
+        </div>
+
+        <div class="project-meta-row" style="margin-bottom: 12px;">
+          <div class="project-meta-item">
+            <span>${isLocal ? 'Source: <strong style="color:var(--text-main);">📁 Manual Upload</strong>' : `Commit: <strong>${sha}</strong>`}</span>
+          </div>
+          <div class="project-meta-item">
+            <span style="font-size: 11.5px; color: var(--text-muted);">${uptimeText}</span>
+          </div>
+        </div>
+
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px;">
+          <div style="display: flex; gap: 6px;">
+            ${isOnline
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+            }
+            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" title="Upload and manage service files">Files</button>
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" title="View live logs">Logs</button>
+            <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" title="Service, Network &amp; Domain Settings">⚙️</button>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
+            Manage &rarr;
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+window.renderServicesList = renderServicesList;
+
+// Services search & filter bindings
+document.getElementById('services-search-input')?.addEventListener('input', renderServicesList);
+document.querySelectorAll('#services-status-filters .pill').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.serviceStatusFilter = btn.getAttribute('data-filter') || 'all';
+    renderServicesList();
+  });
+});
+
+// ============================================================================
+// Add / Edit Backend Service Modal
+// ============================================================================
+function setServiceSourceMode(mode) {
+  const hiddenInput = document.getElementById('service-source-mode');
+  if (hiddenInput) hiddenInput.value = mode;
+
+  const btnManual = document.getElementById('service-source-mode-manual');
+  const btnGit = document.getElementById('service-source-mode-git');
+  if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
+  if (btnGit) btnGit.classList.toggle('active', mode === 'git');
+
+  const repoGroup = document.getElementById('service-repo-group');
+  const branchGroup = document.getElementById('service-branch-group');
+  const infoBox = document.getElementById('service-manual-info-box');
+  const gridRow = document.getElementById('service-name-branch-row');
+
+  if (mode === 'manual') {
+    if (repoGroup) repoGroup.style.display = 'none';
+    if (branchGroup) branchGroup.style.display = 'none';
+    if (infoBox) infoBox.style.display = 'block';
+    if (gridRow) gridRow.style.gridTemplateColumns = '1fr';
+    const repoInput = document.getElementById('service-repo');
+    if (repoInput) repoInput.value = '';
+  } else {
+    if (repoGroup) repoGroup.style.display = 'block';
+    if (branchGroup) branchGroup.style.display = 'block';
+    if (infoBox) infoBox.style.display = 'none';
+    if (gridRow) gridRow.style.gridTemplateColumns = '2fr 1fr';
+  }
+}
+window.setServiceSourceMode = setServiceSourceMode;
+
+function openAddServiceModal() {
+  const form = document.getElementById('service-form');
+  if (form) form.reset();
+  document.getElementById('service-form-id').value = '';
+  document.getElementById('modal-service-title').textContent = 'Add Backend Service / Bot';
+  document.getElementById('save-service-submit-btn').textContent = 'Create Service';
+  document.getElementById('service-name').value = '';
+  document.getElementById('service-slug').value = '';
+  document.getElementById('service-deploy-dir').value = '';
+  document.getElementById('service-repo').value = '';
+  document.getElementById('service-branch').value = 'main';
+  document.getElementById('service-branch').dataset.touched = '';
+  document.getElementById('service-install-cmd').value = '';
+  document.getElementById('service-start-cmd').value = '';
+
+  const portInput = document.getElementById('service-port');
+  if (portInput) portInput.value = '';
+  const domainInput = document.getElementById('service-domain');
+  if (domainInput) domainInput.value = '';
+  const accessInput = document.getElementById('service-access-mode');
+  if (accessInput) accessInput.value = 'local';
+  const ipsInput = document.getElementById('service-allowed-ips');
+  if (ipsInput) ipsInput.value = '';
+  toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap');
+
+  applyServicePreset('lavalink');
+  openModal('modal-service');
+}
+window.openAddServiceModal = openAddServiceModal;
+
+function applyServicePreset(preset) {
+  const hiddenPreset = document.getElementById('service-preset-type');
+  if (hiddenPreset) hiddenPreset.value = preset;
+
+  document.querySelectorAll('#service-preset-buttons .preset-chip').forEach((c) => {
+    c.classList.toggle('active', c.getAttribute('data-service-preset') === preset);
+  });
+
+  const nameInput = document.getElementById('service-name');
+  const installInput = document.getElementById('service-install-cmd');
+  const startInput = document.getElementById('service-start-cmd');
+  const portInput = document.getElementById('service-port');
+
+  switch (preset) {
+    case 'lavalink':
+      setServiceSourceMode('manual');
+      if (nameInput) {
+        nameInput.value = 'Lavalink';
+        nameInput.dispatchEvent(new Event('input'));
+      }
+      if (installInput) installInput.value = '';
+      if (startInput) startInput.value = 'java -jar Lavalink.jar';
+      if (portInput) portInput.value = '1112';
+      break;
+    case 'discord-node':
+      setServiceSourceMode('git');
+      if (nameInput) {
+        nameInput.value = 'Discord Bot';
+        nameInput.dispatchEvent(new Event('input'));
+      }
+      if (installInput) installInput.value = 'npm ci';
+      if (startInput) startInput.value = 'node index.js';
+      if (portInput) portInput.value = '';
+      break;
+    case 'discord-py':
+      setServiceSourceMode('git');
+      if (nameInput) {
+        nameInput.value = 'Discord Bot';
+        nameInput.dispatchEvent(new Event('input'));
+      }
+      if (installInput) installInput.value = 'pip install -r requirements.txt';
+      if (startInput) startInput.value = 'python -u bot.py';
+      if (portInput) portInput.value = '';
+      break;
+    case 'telegram-py':
+      setServiceSourceMode('git');
+      if (nameInput) {
+        nameInput.value = 'Telegram Bot';
+        nameInput.dispatchEvent(new Event('input'));
+      }
+      if (installInput) installInput.value = 'pip install -r requirements.txt';
+      if (startInput) startInput.value = 'python -u main.py';
+      if (portInput) portInput.value = '';
+      break;
+    case 'worker-py':
+      setServiceSourceMode('manual');
+      if (nameInput) {
+        nameInput.value = 'Queue Worker';
+        nameInput.dispatchEvent(new Event('input'));
+      }
+      if (installInput) installInput.value = 'pip install -r requirements.txt';
+      if (startInput) startInput.value = 'python -u worker.py';
+      if (portInput) portInput.value = '';
+      break;
+    case 'custom':
+      if (nameInput && ['Lavalink', 'Discord Bot', 'Telegram Bot', 'Queue Worker'].includes(nameInput.value)) {
+        nameInput.value = '';
+        nameInput.dispatchEvent(new Event('input'));
+      }
+      if (installInput) installInput.value = '';
+      if (startInput) startInput.value = '';
+      if (portInput) portInput.value = '';
+      break;
+  }
+}
+window.applyServicePreset = applyServicePreset;
+
+function openEditServiceModal(id) {
+  const p = state.projects.find((x) => x.id === id);
+  if (!p) return;
+
+  document.getElementById('service-form-id').value = p.id;
+  document.getElementById('modal-service-title').textContent = 'Edit Backend Service / Bot';
+  document.getElementById('save-service-submit-btn').textContent = 'Update Service';
+  document.getElementById('service-name').value = p.name || '';
+  document.getElementById('service-slug').value = p.slug || '';
+  document.getElementById('service-branch').value = p.branch || 'main';
+  document.getElementById('service-repo').value = p.repo_url === 'local' ? '' : (p.repo_url || '');
+  document.getElementById('service-deploy-dir').value = p.deploy_dir || '';
+  document.getElementById('service-install-cmd').value = p.install_cmd || '';
+  document.getElementById('service-start-cmd').value = p.start_cmd || '';
+
+  const isLocal = !p.repo_url || p.repo_url === 'local';
+  setServiceSourceMode(isLocal ? 'manual' : 'git');
+
+  const portInput = document.getElementById('service-port');
+  if (portInput) portInput.value = p.port || '';
+  const domainInput = document.getElementById('service-domain');
+  if (domainInput) domainInput.value = (p.domains && p.domains[0]) || '';
+  const accessInput = document.getElementById('service-access-mode');
+  if (accessInput) accessInput.value = p.access_mode || 'local';
+  const ipsInput = document.getElementById('service-allowed-ips');
+  if (ipsInput) ipsInput.value = p.allowed_ips || '';
+  toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap');
+
+  const pt = p.project_type || 'custom';
+  document.querySelectorAll('#service-preset-buttons .preset-chip').forEach((c) => {
+    c.classList.toggle('active', c.getAttribute('data-service-preset') === pt);
+  });
+
+  openModal('modal-service');
+}
+window.openEditServiceModal = openEditServiceModal;
+
+// Service Preset Chips Click
+document.querySelectorAll('#service-preset-buttons .preset-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const preset = chip.getAttribute('data-service-preset');
+    if (preset) applyServicePreset(preset);
+  });
+});
+
+// Auto-derive service slug
+document.getElementById('service-name')?.addEventListener('input', (e) => {
+  if (!document.getElementById('service-form-id').value) {
+    const slug = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    document.getElementById('service-slug').value = slug;
+    document.getElementById('service-deploy-dir').value = slug ? `./data/services/${slug}` : '';
+  }
+});
+
+// Browse GitHub repos for service
+document.getElementById('service-browse-github-repos-btn')?.addEventListener('click', async () => {
+  const sel = document.getElementById('service-github-repos-select');
+  const input = document.getElementById('service-repo');
+  try {
+    toast('Fetching visible GitHub repositories...', 'info');
+    const repos = await api('/api/github/repos');
+    if (!repos.length) {
+      toast('No repositories found for configured token.', 'info');
+      return;
+    }
+    sel.innerHTML = '<option value="">-- Choose a repository --</option>' +
+      repos.map((r) => {
+        const prefix = r.token_label ? `[${escapeHtml(r.token_label)}] ` : '';
+        return `<option value="${escapeHtml(r.clone_url)}">${prefix}${escapeHtml(r.full_name)} (${r.private ? 'Private' : 'Public'})</option>`;
+      }).join('');
+    sel.style.display = 'block';
+    sel.onchange = () => {
+      if (sel.value) {
+        input.value = sel.value;
+        const selected = repos.find((r) => r.clone_url === sel.value);
+        if (selected) {
+          if (document.getElementById('service-branch').dataset.touched !== '1') document.getElementById('service-branch').value = selected.default_branch || 'main';
+          if (!document.getElementById('service-name').value) {
+            const shortName = selected.full_name.split('/')[1] || selected.full_name;
+            document.getElementById('service-name').value = shortName;
+            document.getElementById('service-name').dispatchEvent(new Event('input'));
+          }
+        }
+      }
+    };
+  } catch (err) {
+    toast(`Could not load repos: ${err.message}. Configure your GitHub token in Settings.`, 'warning');
+  }
+});
+
+// Remember when the user typed a branch so GitHub repo selection never overwrites it
+['service-branch', 'website-branch'].forEach((bid) => {
+  document.getElementById(bid)?.addEventListener('input', (ev) => { ev.target.dataset.touched = '1'; });
+});
+
+// Submit Add / Edit Service Form
+document.getElementById('save-service-submit-btn')?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const form = document.getElementById('service-form');
+  if (!form.reportValidity()) return;
+
+  const submitBtn = document.getElementById('save-service-submit-btn');
+  const originalText = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="status-dot online" style="display:inline-block; margin-right:6px; animation: pulse 1s infinite;"></span> Saving...';
+
+  const id = document.getElementById('service-form-id').value;
+  const name = document.getElementById('service-name').value.trim();
+  const startCmd = document.getElementById('service-start-cmd').value.trim();
+  let slug = document.getElementById('service-slug').value.trim();
+  if (!slug) {
+    slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  }
+
+  let projectType = 'custom';
+  const scLower = startCmd.toLowerCase();
+  if (scLower.includes('lavalink') || scLower.includes('.jar')) {
+    projectType = 'lavalink';
+  } else if (scLower.includes('python') || scLower.includes('.py')) {
+    projectType = 'python';
+  } else if (scLower.includes('node') || scLower.includes('.js')) {
+    projectType = 'node';
+  }
+
+  const sourceMode = document.getElementById('service-source-mode')?.value || 'manual';
+  const repoVal = document.getElementById('service-repo')?.value.trim() || '';
+  const isManual = sourceMode === 'manual' || !repoVal;
+
+  const portVal = document.getElementById('service-port')?.value.trim();
+  const domainVal = document.getElementById('service-domain')?.value.trim();
+  const accessMode = document.getElementById('service-access-mode')?.value || 'local';
+  const allowedIps = document.getElementById('service-allowed-ips')?.value.trim() || '';
+
+  const payload = {
+    name,
+    slug,
+    repo_url: isManual ? 'local' : repoVal,
+    branch: isManual ? 'local' : (document.getElementById('service-branch').value.trim() || 'main'),
+    project_kind: 'service',
+    project_type: projectType,
+    deploy_method: 'managed',
+    deploy_dir: document.getElementById('service-deploy-dir').value.trim() || `./data/services/${slug}`,
+    install_cmd: document.getElementById('service-install-cmd').value.trim(),
+    build_cmd: '',
+    start_cmd: document.getElementById('service-start-cmd').value.trim(),
+    health_url: '',
+    port: portVal ? Number(portVal) : null,
+    domains: domainVal ? [domainVal] : [],
+    access_mode: accessMode,
+    allowed_ips: allowedIps,
+    auto_deploy: false,
+  };
+
+  try {
+    let targetId = id;
+    if (id) {
+      await api(`/api/projects/${id}`, { method: 'PUT', body: payload });
+      toast('Service updated!', 'success');
+    } else {
+      const res = await api('/api/projects', { method: 'POST', body: payload });
+      targetId = res.project ? res.project.id : res.id;
+      toast(`Service "${payload.name}" created!`, 'success');
+      state.selectedProjectId = targetId;
+    }
+    closeModal('modal-service');
+    await loadProjects();
+    if (isManual) {
+      toast(`Service "${payload.name}" ready! Upload your files in the Files tab.`, 'info');
+      openWebsiteWorkspace(targetId, 'files');
+    } else {
+      navigateTo('services');
+    }
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalText;
+  }
+});
+
+// ============================================================================
+// Backend Service File Browser
+// ============================================================================
+state.filesPath = '';
+state.filesOpenPath = null;
+state.filesProjectId = null;
+
+function filesJoin(dir, name) {
+  return dir ? `${dir}/${name}` : name;
+}
+
+async function loadFilesView() {
+  const p = getSelectedProject();
+  if (!p) return;
+  if (state.filesProjectId !== p.id) {
+    state.filesProjectId = p.id;
+    state.filesPath = '';
+    filesCloseEditor();
+  }
+  const listEl = document.getElementById('files-list');
+  const crumbEl = document.getElementById('files-breadcrumb');
+  if (!listEl) return;
+
+  const parts = state.filesPath ? state.filesPath.split('/') : [];
+  let acc = '';
+  crumbEl.innerHTML = `<a href="javascript:void(0)" onclick="filesGo('')">app</a>` + parts.map((seg) => {
+    acc = filesJoin(acc, seg);
+    return ` / <a href="javascript:void(0)" onclick="filesGo('${escapeHtml(acc).replace(/'/g, '&#39;')}')">${escapeHtml(seg)}</a>`;
+  }).join('');
+
+  try {
+    const res = await api(`/api/projects/${p.id}/files?path=${encodeURIComponent(state.filesPath)}`, { noCache: true });
+    const rows = [];
+    if (state.filesPath) {
+      const up = parts.slice(0, -1).join('/');
+      rows.push(`<div class="files-row" style="padding:9px 14px; cursor:pointer; border-bottom:1px solid var(--border);" onclick="filesGo('${escapeHtml(up)}')">📁 ..</div>`);
+    }
+    if (!res.entries.length && !state.filesPath) {
+      rows.push(`<div style="padding:24px; text-align:center; color:var(--text-muted); font-size:13px;">Folder is empty. Deploy from GitHub or create files here.</div>`);
+    }
+    res.entries.forEach((e) => {
+      const full = filesJoin(state.filesPath, e.name);
+      const safe = escapeHtml(full).replace(/'/g, '&#39;');
+      const size = e.is_dir ? '' : (e.size < 1024 ? `${e.size} B` : `${(e.size / 1024).toFixed(1)} KB`);
+      rows.push(`
+        <div class="files-row" style="display:flex; align-items:center; justify-content:space-between; padding:9px 14px; border-bottom:1px solid var(--border);">
+          <span style="cursor:pointer; flex:1; font-family:var(--font-mono); font-size:13px;" onclick="${e.is_dir ? `filesGo('${safe}')` : `filesOpen('${safe}')`}">${e.is_dir ? '📁' : '📄'} ${escapeHtml(e.name)}</span>
+          <span style="color:var(--text-dim); font-size:11.5px; margin-right:14px;">${size}</span>
+          <button class="btn btn-danger btn-sm" onclick="filesDelete('${safe}')">Delete</button>
+        </div>`);
+    });
+    listEl.innerHTML = rows.join('');
+  } catch (err) {
+    listEl.innerHTML = `<div style="padding:20px; color:var(--text-muted);">${escapeHtml(err.message)}</div>`;
+  }
+}
+window.loadFilesView = loadFilesView;
+
+function filesGo(path) {
+  state.filesPath = path;
+  void loadFilesView();
+}
+window.filesGo = filesGo;
+
+async function filesOpen(path) {
+  const p = getSelectedProject();
+  if (!p) return;
+  try {
+    const res = await api(`/api/projects/${p.id}/files/content?path=${encodeURIComponent(path)}`, { noCache: true });
+    state.filesOpenPath = path;
+    document.getElementById('files-editor-name').textContent = path;
+    document.getElementById('files-editor').value = res.content;
+    document.getElementById('files-editor-card').style.display = 'block';
+    document.getElementById('files-editor-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+window.filesOpen = filesOpen;
+
+function filesCloseEditor() {
+  state.filesOpenPath = null;
+  const card = document.getElementById('files-editor-card');
+  if (card) card.style.display = 'none';
+}
+window.filesCloseEditor = filesCloseEditor;
+
+async function filesSaveCurrent() {
+  const p = getSelectedProject();
+  if (!p || !state.filesOpenPath) return;
+  const btn = document.getElementById('files-save-btn');
+  btn.disabled = true;
+  try {
+    await api(`/api/projects/${p.id}/files/content`, {
+      method: 'PUT',
+      body: { path: state.filesOpenPath, content: document.getElementById('files-editor').value },
+    });
+    toast(`Saved ${state.filesOpenPath}. Restart the service to apply changes.`, 'success');
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+window.filesSaveCurrent = filesSaveCurrent;
+
+async function filesNewFile() {
+  const p = getSelectedProject();
+  if (!p) return;
+  const input = await showPromptDialog({
+    title: 'New File',
+    message: 'Create a file in the current folder.',
+    placeholder: 'e.g. .env or config.json',
+    confirmText: 'Create File',
+  });
+  const name = (input || '').trim();
+  if (!name) return;
+  const path = filesJoin(state.filesPath, name);
+  try {
+    await api(`/api/projects/${p.id}/files/content`, { method: 'PUT', body: { path, content: '' } });
+    await loadFilesView();
+    await filesOpen(path);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+window.filesNewFile = filesNewFile;
+
+async function filesNewFolder() {
+  const p = getSelectedProject();
+  if (!p) return;
+  const input = await showPromptDialog({
+    title: 'New Folder',
+    message: 'Create a folder in the current location.',
+    placeholder: 'e.g. src',
+    confirmText: 'Create Folder',
+  });
+  const name = (input || '').trim();
+  if (!name) return;
+  try {
+    await api(`/api/projects/${p.id}/files/mkdir`, { method: 'POST', body: { path: filesJoin(state.filesPath, name) } });
+    await loadFilesView();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+window.filesNewFolder = filesNewFolder;
+
+async function filesDelete(path) {
+  const p = getSelectedProject();
+  if (!p) return;
+  const ok = await showConfirmDialog({
+    title: 'Delete File or Folder',
+    message: `Delete "${path}"? This cannot be undone.`,
+    confirmText: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/projects/${p.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    if (state.filesOpenPath === path) filesCloseEditor();
+    await loadFilesView();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+window.filesDelete = filesDelete;
+
+async function handleFilesUpload(e) {
+  const p = getSelectedProject();
+  if (!p) return;
+  const files = e.target?.files;
+  if (!files || !files.length) return;
+
+  const formData = new FormData();
+  for (let i = 0; i < files.length; i++) {
+    formData.append('file', files[i]);
+  }
+
+  try {
+    toast(`Uploading ${files.length} file(s)...`, 'info');
+    const pathParam = encodeURIComponent(state.filesPath || '');
+    const res = await fetch(`/api/projects/${p.id}/files/upload?path=${pathParam}`, {
+      method: 'POST',
+      headers: {
+        'x-csrf-token': state.csrf || '',
+      },
+      body: formData,
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || 'Upload failed');
+    }
+    toast(`Uploaded ${files.length} file(s) successfully!`, 'success');
+    await loadFilesView();
+  } catch (err) {
+    toast(`Upload failed: ${err.message}`, 'error');
+  } finally {
+    if (e.target) e.target.value = '';
+  }
+}
+window.handleFilesUpload = handleFilesUpload;
+
+// ============================================================================
 // Add Website Workflow Modal
 // ============================================================================
 function openAddWebsiteModal() {
   const form = document.getElementById('website-form');
   form.reset();
+  document.getElementById('website-branch').dataset.touched = '';
   document.getElementById('website-form-id').value = '';
   document.getElementById('modal-website-title').textContent = 'Add New Website';
   document.getElementById('save-website-submit-btn').textContent = 'Create Website';
@@ -1341,7 +2220,7 @@ document.getElementById('browse-github-repos-btn')?.addEventListener('click', as
         input.value = sel.value;
         const selected = repos.find((r) => r.clone_url === sel.value);
         if (selected) {
-          document.getElementById('website-branch').value = selected.default_branch || 'main';
+          if (document.getElementById('website-branch').dataset.touched !== '1') document.getElementById('website-branch').value = selected.default_branch || 'main';
           if (!document.getElementById('website-name').value) {
             const shortName = selected.full_name.split('/')[1] || selected.full_name;
             document.getElementById('website-name').value = shortName;
@@ -1416,11 +2295,15 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
 
 // Delete Project
 async function deleteProject(id, slug) {
+  const delProj = (state.projects || []).find((x) => x.id === id);
+  const delIsService = !!delProj && delProj.project_kind === 'service';
+  const delNoun = delIsService ? 'service' : 'website';
+  const delNounCap = delIsService ? 'Service' : 'Website';
   const confirmSlug = await showPromptDialog({
-    title: 'Delete Website',
-    message: `CAUTION: Deleting this website will remove its configuration from SQLite and stop its running process.\n\nType the website slug "${slug}" below to confirm deletion:`,
+    title: `Delete ${delNounCap}`,
+    message: `CAUTION: Deleting this ${delNoun} will remove its configuration and stop its running process.\n\nType the ${delNoun} slug "${slug}" below to confirm deletion:`,
     placeholder: slug,
-    confirmText: 'Delete Website',
+    confirmText: `Delete ${delNounCap}`,
     danger: true,
   });
   if (confirmSlug === null) return;
@@ -1431,10 +2314,10 @@ async function deleteProject(id, slug) {
 
   try {
     await api(`/api/projects/${id}`, { method: 'DELETE', body: { confirm: slug } });
-    toast(`Website "${slug}" deleted.`, 'success');
+    toast(`${delNounCap} "${slug}" deleted.`, 'success');
     if (state.selectedProjectId === id) state.selectedProjectId = null;
     await loadProjects();
-    navigateTo('projects');
+    navigateTo(delIsService ? 'services' : 'projects');
   } catch (err) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
@@ -1689,6 +2572,7 @@ function updateWaterDOM(pipeline) {
   const activeIdx = pipeline.activeStageIdx ?? -1;
   const failedIdx = isFailed ? pipeline.failedStageIdx : -1;
   const isDraining = (pipeline.targetProgress < pipeline.currentProgress) || (pipeline.status === 'idle' && P > 0);
+  const drainStageIdx = isDraining ? Math.min(stages.length - 1, Math.max(0, Math.floor(P))) : -1;
 
   stages.forEach((s, idx) => {
     const unit = container.querySelector(`.water-stage-unit[data-unit-idx="${idx}"]`);
@@ -1701,93 +2585,174 @@ function updateWaterDOM(pipeline) {
     const cross = unit.querySelector('.water-vial-cross');
     const name = unit.querySelector('.water-node-name');
     const sub = unit.querySelector('.water-node-sub');
+    const pipeLiquid = unit.querySelector('.water-pipe-liquid');
+    const meniscus = unit.querySelector('.water-pipe-meniscus');
 
-    // Stage fill level: fills between P = idx and P = idx + 0.6
     let vialHeight = 0;
-    if (P >= idx + 0.6) {
-      vialHeight = 100;
-    } else if (P > idx) {
-      vialHeight = Math.min(100, Math.max(0, ((P - idx) / 0.6) * 100));
-    }
 
-    if (liquid) liquid.style.height = `${vialHeight.toFixed(1)}%`;
-
-    // 1. Failed Stage
-    if (isFailed && idx === failedIdx && P >= idx + 0.5) {
-      if (vial) vial.className = 'water-node-vial failed';
-      if (num) num.style.display = 'none';
-      if (check) check.style.display = 'none';
-      if (cross) cross.style.display = 'block';
-      if (sub) { sub.textContent = 'Failed'; sub.className = 'water-node-sub failed'; }
-      if (name) name.className = 'water-node-name failed';
-    }
-    // 2. Completed Stage:
-    // Past stage already completed by backend AND water has poured through it,
-    // OR entire pipeline is successful and water reached this stage!
-    else if (!isDraining && ((idx < activeIdx && P >= idx + 0.6) || (isSuccess && P >= idx + 0.6))) {
-      if (vial) vial.className = 'water-node-vial completed';
-      if (num) num.style.display = 'none';
-      if (check) check.style.display = 'block';
-      if (cross) cross.style.display = 'none';
-      if (sub) { sub.textContent = 'Done'; sub.className = 'water-node-sub completed'; }
-      if (name) name.className = 'water-node-name completed';
-    }
-    // 3. Active / Draining Stage: currently filling/emptying or holding water
-    else if (P > idx) {
-      if (isDraining) {
-        if (vial) vial.className = 'water-node-vial draining';
+    // ========================================================================
+    // A. EMPTYING / DRAINING (Exact mirror opposite of filling progression)
+    // ========================================================================
+    if (isDraining) {
+      if (idx > drainStageIdx) {
+        // Stage already completely drained: 0% liquid, queued/idle
+        vialHeight = 0;
+        if (vial) vial.className = 'water-node-vial queued';
         if (num) num.style.display = 'block';
         if (check) check.style.display = 'none';
         if (cross) cross.style.display = 'none';
         if (sub) {
-          sub.textContent = 'Emptying...';
-          sub.className = 'water-node-sub draining';
+          sub.textContent = pipeline.status === 'idle' ? 'Idle' : 'Queued';
+          sub.className = 'water-node-sub queued';
         }
-        if (name) name.className = 'water-node-name';
+        if (name) name.className = 'water-node-name queued';
+        if (pipeLiquid) {
+          pipeLiquid.style.width = '0%';
+          pipeLiquid.className = 'water-pipe-liquid empty';
+          if (meniscus) meniscus.style.opacity = '0';
+        }
+      } else if (idx < drainStageIdx) {
+        // Stage has not drained yet: remains 100% full, holding liquid with checkmark!
+        vialHeight = 100;
+        if (vial) vial.className = 'water-node-vial completed';
+        if (num) num.style.display = 'none';
+        if (check) check.style.display = 'block';
+        if (cross) cross.style.display = 'none';
+        if (sub) {
+          sub.textContent = 'Done';
+          sub.className = 'water-node-sub completed';
+        }
+        if (name) name.className = 'water-node-name completed';
+        if (pipeLiquid) {
+          pipeLiquid.style.width = '100%';
+          pipeLiquid.className = 'water-pipe-liquid filled';
+          if (meniscus) meniscus.style.opacity = '0';
+        }
       } else {
+        // Actively draining stage: idx === drainStageIdx
+        const fraction = Math.max(0, Math.min(1.0, P - idx));
+
+        if (idx < stages.length - 1) {
+          // Has an outgoing pipe to the next stage
+          if (fraction >= 0.6) {
+            // Step 1 of draining: Outgoing pipe empties backward from 100% to 0%
+            const pipeFrac = (fraction - 0.6) / 0.4;
+            const pipeWidth = Math.min(100, Math.max(0, pipeFrac * 100));
+            if (pipeLiquid) {
+              pipeLiquid.style.width = `${pipeWidth.toFixed(1)}%`;
+              pipeLiquid.className = 'water-pipe-liquid draining';
+              if (meniscus) meniscus.style.opacity = '0';
+            }
+            // Vial remains 100% full while pipe liquid recedes
+            vialHeight = 100;
+            if (vial) vial.className = 'water-node-vial active';
+            if (num) num.style.display = 'block';
+            if (check) check.style.display = 'none';
+            if (cross) cross.style.display = 'none';
+            if (sub) {
+              sub.textContent = 'Emptying...';
+              sub.className = 'water-node-sub draining active';
+            }
+            if (name) name.className = 'water-node-name active';
+          } else {
+            // Step 2 of draining: Pipe has emptied (0%), now vial liquid level drops 100% -> 0%
+            if (pipeLiquid) {
+              pipeLiquid.style.width = '0%';
+              pipeLiquid.className = 'water-pipe-liquid empty';
+              if (meniscus) meniscus.style.opacity = '0';
+            }
+            vialHeight = Math.min(100, Math.max(0, (fraction / 0.6) * 100));
+            if (vial) vial.className = 'water-node-vial draining';
+            if (num) num.style.display = 'block';
+            if (check) check.style.display = 'none';
+            if (cross) cross.style.display = 'none';
+            if (sub) {
+              sub.textContent = 'Emptying...';
+              sub.className = 'water-node-sub draining';
+            }
+            if (name) name.className = 'water-node-name active';
+          }
+        } else {
+          // Last stage (no outgoing pipe): Vial liquid level drops smoothly 100% -> 0%
+          vialHeight = Math.min(100, Math.max(0, (fraction / 0.8) * 100));
+          if (vial) vial.className = 'water-node-vial draining';
+          if (num) num.style.display = 'block';
+          if (check) check.style.display = 'none';
+          if (cross) cross.style.display = 'none';
+          if (sub) {
+            sub.textContent = 'Emptying...';
+            sub.className = 'water-node-sub draining';
+          }
+          if (name) name.className = 'water-node-name active';
+        }
+      }
+    }
+    // ========================================================================
+    // B. FORWARD FILLING (Poured left-to-right)
+    // ========================================================================
+    else {
+      // Stage fill level: fills between P = idx and P = idx + 0.6
+      if (P >= idx + 0.6) {
+        vialHeight = 100;
+      } else if (P > idx) {
+        vialHeight = Math.min(100, Math.max(0, ((P - idx) / 0.6) * 100));
+      }
+
+      // 1. Failed Stage
+      if (isFailed && idx === failedIdx && P >= idx + 0.5) {
+        if (vial) vial.className = 'water-node-vial failed';
+        if (num) num.style.display = 'none';
+        if (check) check.style.display = 'none';
+        if (cross) cross.style.display = 'block';
+        if (sub) { sub.textContent = 'Failed'; sub.className = 'water-node-sub failed'; }
+        if (name) name.className = 'water-node-name failed';
+      }
+      // 2. Completed Stage
+      else if ((idx < activeIdx && P >= idx + 0.6) || (isSuccess && P >= idx + 0.6)) {
+        if (vial) vial.className = 'water-node-vial completed';
+        if (num) num.style.display = 'none';
+        if (check) check.style.display = 'block';
+        if (cross) cross.style.display = 'none';
+        if (sub) { sub.textContent = 'Done'; sub.className = 'water-node-sub completed'; }
+        if (name) name.className = 'water-node-name completed';
+      }
+      // 3. Active Stage: currently filling
+      else if (P > idx) {
         if (vial) vial.className = 'water-node-vial active';
         if (num) num.style.display = 'block';
         if (check) check.style.display = 'none';
         if (cross) cross.style.display = 'none';
         if (sub) {
-          if (vialHeight >= 99) {
-            sub.textContent = `${s.label}...`;
-          } else {
-            sub.textContent = 'Filling...';
-          }
+          sub.textContent = vialHeight >= 99 ? `${s.label}...` : 'Filling...';
           sub.className = 'water-node-sub active';
         }
         if (name) name.className = 'water-node-name active';
       }
-    }
-    // 4. Queued / Idle Stage
-    else {
-      if (vial) vial.className = 'water-node-vial queued';
-      if (num) num.style.display = 'block';
-      if (check) check.style.display = 'none';
-      if (cross) cross.style.display = 'none';
-      if (sub) {
-        sub.textContent = pipeline.status === 'idle' ? 'Idle' : 'Queued';
-        sub.className = 'water-node-sub queued';
+      // 4. Queued / Idle Stage
+      else {
+        if (vial) vial.className = 'water-node-vial queued';
+        if (num) num.style.display = 'block';
+        if (check) check.style.display = 'none';
+        if (cross) cross.style.display = 'none';
+        if (sub) {
+          sub.textContent = pipeline.status === 'idle' ? 'Idle' : 'Queued';
+          sub.className = 'water-node-sub queued';
+        }
+        if (name) name.className = 'water-node-name queued';
       }
-      if (name) name.className = 'water-node-name queued';
-    }
 
-    // Pipe fill level (pipe idx connects stage idx to stage idx + 1):
-    // Pipe idx fills between P = idx + 0.6 and P = idx + 1.0
-    if (idx < stages.length - 1) {
-      const pipeLiquid = unit.querySelector('.water-pipe-liquid');
-      const meniscus = unit.querySelector('.water-pipe-meniscus');
-      if (pipeLiquid) {
+      // Pipe fill level (pipe idx connects stage idx to stage idx + 1):
+      // Fills between P = idx + 0.6 and P = idx + 1.0
+      if (idx < stages.length - 1 && pipeLiquid) {
         let pipeWidth = 0;
         if (P >= idx + 1.0) {
           pipeWidth = 100;
-          pipeLiquid.className = isDraining ? 'water-pipe-liquid draining' : 'water-pipe-liquid filled';
+          pipeLiquid.className = 'water-pipe-liquid filled';
           if (meniscus) meniscus.style.opacity = '0';
         } else if (P > idx + 0.6) {
           pipeWidth = Math.min(100, Math.max(0, ((P - (idx + 0.6)) / 0.4) * 100));
-          pipeLiquid.className = isDraining ? 'water-pipe-liquid draining' : 'water-pipe-liquid flowing';
-          if (meniscus) meniscus.style.opacity = isDraining ? '0' : '1';
+          pipeLiquid.className = 'water-pipe-liquid flowing';
+          if (meniscus) meniscus.style.opacity = '1';
         } else {
           pipeWidth = 0;
           pipeLiquid.className = 'water-pipe-liquid empty';
@@ -1796,6 +2761,8 @@ function updateWaterDOM(pipeline) {
         pipeLiquid.style.width = `${pipeWidth.toFixed(1)}%`;
       }
     }
+
+    if (liquid) liquid.style.height = `${vialHeight.toFixed(1)}%`;
   });
 
   // When all stages are filled and operation succeeded, mark pipeline status deployed!
@@ -1813,6 +2780,22 @@ function updateWaterDOM(pipeline) {
       }
       renderWebsiteWorkspaceHeader();
     }
+  } else if (isDraining && P > 0.1) {
+    if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
+      const badge = document.getElementById('pipeline-status-badge');
+      if (badge && !badge.textContent.includes('STOPPING')) {
+        badge.textContent = 'STOPPING...';
+        badge.className = 'badge badge-warning';
+      }
+    }
+  } else if (pipeline.status === 'idle' && P <= 0.05) {
+    if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
+      const badge = document.getElementById('pipeline-status-badge');
+      if (badge && badge.textContent !== 'IDLE') {
+        badge.textContent = 'IDLE';
+        badge.className = 'badge badge-neutral';
+      }
+    }
   }
 }
 
@@ -1829,14 +2812,15 @@ function startWaterLoop(pipeline) {
 
     const diff = pipeline.targetProgress - pipeline.currentProgress;
 
-    // Organic, steady water pouring pace (~2.3s per stage at 60fps) from commit 889b779
+    // Organic, steady water pouring/draining pace (~2.3s per stage at 60fps)
     const speed = 0.007;
 
     if (Math.abs(diff) > 0.0005) {
       if (diff > 0) {
         pipeline.currentProgress = Math.min(pipeline.targetProgress, pipeline.currentProgress + speed);
       } else {
-        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed * 3);
+        // Draining uses the same steady, organic pace as filling (exact mirror opposite)
+        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed);
       }
       updateWaterDOM(pipeline);
       requestAnimationFrame(step);
@@ -1955,6 +2939,23 @@ window.simulateWaterDeploy = function() {
       renderPipelineStages(track, 'health_checking', 'success', Date.now());
     }
   }, 2600);
+};
+
+window.simulateWaterDrain = function() {
+  const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
+  const badge = document.getElementById('pipeline-status-badge');
+  if (badge) {
+    badge.textContent = 'STOPPING...';
+    badge.className = 'badge badge-warning';
+  }
+  const p = waterPipelines[track];
+  if (p) {
+    p.targetProgress = 0.0;
+    p.status = 'idle';
+    p.activeStageIdx = -1;
+    p.failedStageIdx = -1;
+    startWaterLoop(p);
+  }
 };
 
 function renderDeploymentRow(d, isOverview = false) {
@@ -2295,10 +3296,59 @@ function appendTerminalLogs(newLines) {
   }
 }
 
+function ansiToHtml(str) {
+  if (!str) return '';
+  const escaped = escapeHtml(str);
+  const ansiRegex = /(?:\x1b|\u001b)\[([0-9;]*)m/g;
+  const colors = {
+    '30': 'var(--text-dim)',
+    '31': '#ef4444',
+    '32': '#10b981',
+    '33': '#f59e0b',
+    '34': '#3b82f6',
+    '35': '#ec4899',
+    '36': '#06b6d4',
+    '37': '#f3f4f6',
+    '90': '#6b7280',
+    '91': '#f87171',
+    '92': '#34d399',
+    '93': '#fbbf24',
+    '94': '#60a5fa',
+    '95': '#f472b6',
+    '96': '#22d3ee',
+    '97': '#ffffff',
+  };
+
+  let openSpan = false;
+  let converted = escaped.replace(ansiRegex, (_, code) => {
+    if (!code || code === '0') {
+      if (openSpan) {
+        openSpan = false;
+        return '</span>';
+      }
+      return '';
+    }
+    const color = colors[code];
+    if (color) {
+      const prefix = openSpan ? '</span>' : '';
+      openSpan = true;
+      return `${prefix}<span style="color:${color}">`;
+    }
+    if (code === '1') {
+      const prefix = openSpan ? '</span>' : '';
+      openSpan = true;
+      return `${prefix}<span style="font-weight:600">`;
+    }
+    return '';
+  });
+
+  return openSpan ? converted + '</span>' : converted;
+}
+
 function formatLogLine(l) {
   const time = l.ts ? new Date(l.ts).toLocaleTimeString() : '--:--:--';
   const lvlClass = `log-lvl-${l.level || 'info'}`;
-  return `<div class="log-line"><span class="log-ts">${time}</span><span class="log-chan">[${l.channel}]</span><span class="${lvlClass}">${escapeHtml(l.message)}</span></div>`;
+  return `<div class="log-line"><span class="log-ts">${time}</span><span class="log-chan">[${l.channel}]</span><span class="${lvlClass}">${ansiToHtml(l.message)}</span></div>`;
 }
 
 // Log filters bindings
@@ -4086,6 +5136,7 @@ document.getElementById('nginx-certbot-btn')?.addEventListener('click', async ()
 async function refreshCurrentViewsAfterLifecycle() {
   await loadProjects();
   renderProjectsList();
+  renderServicesList();
   if (state.currentView === 'overview') await loadOverview();
   if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
     state.lastWsBannerSig = null;
@@ -4283,17 +5334,15 @@ function renderDatabasesList() {
     const statusClass = isRunning ? 'badge-success' : (isError ? 'badge-danger' : 'badge-neutral');
     const statusText = isRunning ? 'RUNNING' : (isError ? 'ERROR' : 'STOPPED');
 
+    const accessMode = db.accessMode || db.access_mode || 'local';
+    const allowedIps = db.allowedIps || db.allowed_ips || '';
     let accessBadge = '<span class="badge badge-neutral" style="font-size: 11px;">🔒 Localhost Only (127.0.0.1)</span>';
-    if (db.accessMode === 'allowlist') {
-      const ipList = db.allowedIps ? db.allowedIps.split(/[,;\n]/).filter(Boolean).length : 0;
+    if (accessMode === 'allowlist') {
+      const ipList = allowedIps ? allowedIps.split(/[,;\n]/).filter(Boolean).length : 0;
       accessBadge = `<span class="badge badge-primary" style="font-size: 11px;">🛡️ Remote Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
-    } else if (db.accessMode === 'public') {
+    } else if (accessMode === 'public') {
       accessBadge = '<span class="badge badge-warning" style="font-size: 11px;">🌐 Public (0.0.0.0)</span>';
     }
-
-    const linkedBadge = db.linkedProjectId
-      ? `<span class="badge badge-success" style="font-size: 11px; cursor: pointer;" onclick="openWebsiteWorkspace(${db.linkedProjectId}, 'env')">🔗 Linked to ${escapeHtml(db.linkedProjectName || 'Website')}</span>`
-      : `<span class="badge badge-neutral" style="font-size: 11px;">Standalone</span>`;
 
     return `
       <div class="card project-card" id="db-card-${db.id}" style="display: flex; flex-direction: column; justify-content: space-between; position: relative;">
@@ -4305,7 +5354,7 @@ function renderDatabasesList() {
               </div>
               <div>
                 <h3 style="font-size: 15px; font-weight: 600; margin: 0;">${escapeHtml(db.name)}</h3>
-                <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(db.dbName)} (${escapeHtml(db.dbUser)})</span>
+                <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(db.dbName || db.db_name || '')} (${escapeHtml(db.dbUser || db.db_user || '')})</span>
               </div>
             </div>
             <span class="badge ${statusClass}" id="db-card-status-badge-${db.id}">${statusText}</span>
@@ -4326,14 +5375,18 @@ function renderDatabasesList() {
 
           <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
             ${accessBadge}
-            ${linkedBadge}
-            <span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);">Port ${db.port}</span>
+            ${db.domain ? `<span class="badge badge-primary" style="font-size: 11px; font-family: var(--font-mono);">🌐 ${escapeHtml(db.domain)}:${db.port}</span>` : `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);">Port ${db.port}</span>`}
             ${db.isSuperuser ? '<span class="badge badge-primary" style="font-size: 11px;">Superuser</span>' : ''}
           </div>
 
-          <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 14px; word-break: break-all;">
-            <span style="color: var(--text-dim);">Internal:</span> <span style="color: var(--text-main); font-weight: 500;">postgresql://${escapeHtml(db.dbUser)}:••••@127.0.0.1:${db.port}/${escapeHtml(db.dbName)}</span>
+          <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 8px; word-break: break-all;">
+            <span style="color: var(--text-dim);">Internal:</span> <span style="color: var(--text-main); font-weight: 500;">postgresql://${escapeHtml(db.dbUser || db.db_user || '')}:••••@127.0.0.1:${db.port}/${escapeHtml(db.dbName || db.db_name || '')}</span>
           </div>
+          ${(db.domain || accessMode !== 'local') ? `
+            <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 14px; word-break: break-all;">
+              <span style="color: var(--text-dim);">${db.domain ? 'Domain:' : 'External:'}</span> <span style="color: var(--accent-light); font-weight: 500;">${escapeHtml(db.externalUrl || db.external_url || '')}</span>
+            </div>
+          ` : '<div style="margin-bottom: 6px;"></div>'}
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px;">
@@ -4351,9 +5404,6 @@ function renderDatabasesList() {
           <div style="display: flex; gap: 6px;">
             <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openDatabaseAccessModal(${db.id})">
               <span>Access & IPs</span>
-            </button>
-            <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openDatabaseLinkModal(${db.id})">
-              <span>${db.linkedProjectId ? 'Change Link' : 'Link to Web'}</span>
             </button>
             <button class="btn btn-danger btn-sm" onclick="deleteDatabase(${db.id}, '${escapeHtml(db.name)}')" title="Delete Database">
               <span>Delete</span>
@@ -4383,12 +5433,6 @@ function openCreateDatabaseModal() {
   const modal = document.getElementById('modal-create-database');
   if (!modal) return;
 
-  const projSelect = document.getElementById('db-create-link-project');
-  if (projSelect) {
-    projSelect.innerHTML = '<option value="">Do not link (Standalone database)</option>' +
-      (state.projects || []).map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-  }
-
   const portInput = document.getElementById('db-create-port');
   if (portInput) {
     const usedPorts = new Set((state.databases || []).map((d) => d.port));
@@ -4402,6 +5446,8 @@ function openCreateDatabaseModal() {
   document.getElementById('db-create-name').value = '';
   document.getElementById('db-create-dbname').value = '';
   document.getElementById('db-create-user').value = 'app_user';
+  const domCreateInput = document.getElementById('db-create-domain');
+  if (domCreateInput) domCreateInput.value = '';
   document.getElementById('db-create-superuser').checked = false;
   document.getElementById('db-create-access-mode').value = 'local';
   document.getElementById('db-create-allowed-ips').value = '';
@@ -4454,7 +5500,7 @@ async function handleCreateDatabaseSubmit(e) {
   const is_superuser = document.getElementById('db-create-superuser').checked;
   const access_mode = document.getElementById('db-create-access-mode').value;
   const allowed_ips = document.getElementById('db-create-allowed-ips').value.trim();
-  const link_proj = document.getElementById('db-create-link-project').value;
+  const domain = document.getElementById('db-create-domain')?.value.trim() || null;
 
   if (access_mode === 'allowlist' && !allowed_ips) {
     toast('Please specify at least one remote IP or CIDR for the allowlist.', 'warning');
@@ -4515,17 +5561,9 @@ async function handleCreateDatabaseSubmit(e) {
         isSuperuser: is_superuser,
         accessMode: access_mode,
         allowedIps: allowed_ips,
-        linkedProjectId: link_proj ? Number(link_proj) : null,
+        domain: domain || undefined,
       },
     });
-
-    if (link_proj) {
-      await api(`/api/databases/${created.id}/link`, {
-        method: 'POST',
-        timeoutMs: 30000,
-        body: { projectId: Number(link_proj) },
-      });
-    }
 
     clearTimeout(t1);
     clearTimeout(t2);
@@ -4576,18 +5614,20 @@ function showDatabaseDetails(id) {
   const modal = document.getElementById('modal-database-details');
   if (!modal) return;
 
+  const accessMode = db.accessMode || db.access_mode || 'local';
   document.getElementById('db-details-title').textContent = `Connection Details — ${db.name}`;
-  document.getElementById('db-detail-internal-url').value = db.internalUrl || '';
-  document.getElementById('db-detail-external-url').value = db.externalUrl || '';
-  document.getElementById('db-detail-dbname').value = db.dbName || '';
-  document.getElementById('db-detail-user').value = db.dbUser || '';
+  document.getElementById('db-detail-internal-url').value = db.internalUrl || db.internal_url || '';
+  document.getElementById('db-detail-external-url').value = db.externalUrl || db.external_url || '';
+  document.getElementById('db-detail-dbname').value = db.dbName || db.db_name || '';
+  document.getElementById('db-detail-user').value = db.dbUser || db.db_user || '';
   document.getElementById('db-detail-port').value = db.port || 5432;
-  document.getElementById('db-detail-password').value = db.dbPassword || '';
-  document.getElementById('db-detail-psql').value = db.psqlCommand || '';
+  document.getElementById('db-detail-password').value = db.dbPassword || db.db_password || '';
+  document.getElementById('db-detail-psql').value = db.psqlCommand || db.psql_command || '';
 
   const extWrap = document.getElementById('db-detail-external-url-wrap');
   if (extWrap) {
-    extWrap.style.display = db.accessMode === 'local' ? 'none' : 'block';
+    const isLocalOnly = accessMode === 'local' && !db.domain;
+    extWrap.style.display = isLocalOnly ? 'none' : 'block';
   }
 
   modal.classList.add('active');
@@ -4786,8 +5826,10 @@ function openDatabaseAccessModal(id) {
   if (!modal) return;
 
   document.getElementById('db-access-id').value = db.id;
-  document.getElementById('db-access-mode').value = db.accessMode || 'local';
-  document.getElementById('db-access-allowed-ips').value = db.allowedIps || '';
+  const domInput = document.getElementById('db-access-domain');
+  if (domInput) domInput.value = db.domain || '';
+  document.getElementById('db-access-mode').value = db.accessMode || db.access_mode || 'local';
+  document.getElementById('db-access-allowed-ips').value = db.allowedIps || db.allowed_ips || '';
   toggleDatabaseAccessIpFields('db-access-mode', 'db-access-allowed-ips-wrap');
 
   modal.classList.add('active');
@@ -4797,6 +5839,7 @@ window.openDatabaseAccessModal = openDatabaseAccessModal;
 async function handleUpdateDatabaseAccessSubmit(e) {
   e.preventDefault();
   const id = Number(document.getElementById('db-access-id').value);
+  const domain = document.getElementById('db-access-domain')?.value.trim() || '';
   const access_mode = document.getElementById('db-access-mode').value;
   const allowed_ips = document.getElementById('db-access-allowed-ips').value.trim();
 
@@ -4806,9 +5849,10 @@ async function handleUpdateDatabaseAccessSubmit(e) {
       body: {
         accessMode: access_mode,
         allowedIps: allowed_ips,
+        domain: domain,
       },
     });
-    toast('Network access and firewall rules updated successfully!', 'success');
+    toast('Network access and domain settings updated successfully!', 'success');
     document.getElementById('modal-database-access')?.classList.remove('active');
     await loadDatabases();
     renderDatabasesList();
@@ -4817,52 +5861,6 @@ async function handleUpdateDatabaseAccessSubmit(e) {
   }
 }
 window.handleUpdateDatabaseAccessSubmit = handleUpdateDatabaseAccessSubmit;
-
-function openDatabaseLinkModal(id) {
-  const db = (state.databases || []).find((d) => d.id === Number(id));
-  if (!db) return;
-
-  const modal = document.getElementById('modal-database-link');
-  if (!modal) return;
-
-  document.getElementById('db-link-id').value = db.id;
-  const select = document.getElementById('db-link-project-select');
-  if (select) {
-    select.innerHTML = '<option value="">-- Choose Website to Link --</option>' +
-      (state.projects || []).map((p) => {
-        const selected = p.id === db.linkedProjectId ? 'selected' : '';
-        return `<option value="${p.id}" ${selected}>${escapeHtml(p.name)}</option>`;
-      }).join('');
-  }
-
-  modal.classList.add('active');
-}
-window.openDatabaseLinkModal = openDatabaseLinkModal;
-
-async function handleLinkDatabaseSubmit(e) {
-  e.preventDefault();
-  const id = Number(document.getElementById('db-link-id').value);
-  const projectId = document.getElementById('db-link-project-select').value;
-
-  try {
-    if (!projectId) {
-      await api(`/api/databases/${id}/unlink`, { method: 'POST' });
-      toast('Database unlinked from website.', 'info');
-    } else {
-      const res = await api(`/api/databases/${id}/link`, {
-        method: 'POST',
-        body: { projectId: Number(projectId) },
-      });
-      toast(res.message || 'Database linked and credentials injected into website .env!', 'success');
-    }
-    document.getElementById('modal-database-link')?.classList.remove('active');
-    await loadDatabases();
-    renderDatabasesList();
-  } catch (err) {
-    toast(`Link failed: ${err.message}`, 'error');
-  }
-}
-window.handleLinkDatabaseSubmit = handleLinkDatabaseSubmit;
 
 async function deleteDatabase(id, name) {
   const ok = await showConfirmDialog({
@@ -4903,8 +5901,18 @@ function startPolling() {
     if (pollInFlight) return;
     pollInFlight = true;
     try {
+      // Keep sidebar badges (databases & projects & services) constantly up-to-date across all tabs
+      await Promise.all([
+        loadProjects().catch(() => {}),
+        loadDatabases().catch(() => {})
+      ]);
+
       if (state.currentView === 'overview') {
         await loadOverview();
+      } else if (state.currentView === 'services') {
+        renderServicesList();
+      } else if (state.currentView === 'projects') {
+        renderProjectsList();
       } else if (state.currentView === 'deployments') {
         await loadProjects();
         renderWebsiteWorkspaceHeader();
@@ -4964,7 +5972,7 @@ document.querySelectorAll('.nav-item').forEach((item) => {
 });
 
 document.getElementById('overview-refresh-btn')?.addEventListener('click', loadOverview);
-document.getElementById('global-add-website-btn')?.addEventListener('click', openAddWebsiteModal);
+document.getElementById('global-add-website-btn')?.addEventListener('click', globalAddAction);
 document.getElementById('add-website-btn')?.addEventListener('click', openAddWebsiteModal);
 
 // Login Form & Two-Factor Challenge

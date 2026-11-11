@@ -40,6 +40,80 @@ fn copy_dir_files_if_missing(src_dir: &Path, dst_dir: &Path) {
     }
 }
 
+/// Locate Java executable and JDK/JRE home across environment variables, common installation directories, and system PATH.
+pub fn detect_java_exe() -> Option<(PathBuf, PathBuf)> {
+    // 1. Check JAVA_HOME environment variable
+    if let Ok(jh) = std::env::var("JAVA_HOME") {
+        let p = PathBuf::from(&jh);
+        #[cfg(windows)]
+        let exe = p.join("bin").join("java.exe");
+        #[cfg(not(windows))]
+        let exe = p.join("bin").join("java");
+        if exe.exists() {
+            return Some((exe, p));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // 2. Scan standard Windows JDK/JRE directories
+        let search_dirs = [
+            r"C:\Program Files\Eclipse Adoptium",
+            r"C:\Program Files\Java",
+            r"C:\Program Files\Microsoft",
+            r"C:\Program Files\Amazon Corretto",
+            r"C:\Program Files\BellSoft",
+            r"C:\Program Files\Zulu",
+            r"C:\Program Files (x86)\Java",
+        ];
+
+        for root_str in &search_dirs {
+            let root = Path::new(root_str);
+            if let Ok(entries) = std::fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let java_exe = path.join("bin").join("java.exe");
+                        if java_exe.exists() {
+                            return Some((java_exe, path));
+                        }
+                        if let Ok(subentries) = std::fs::read_dir(&path) {
+                            for sub in subentries.flatten() {
+                                let subpath = sub.path();
+                                if subpath.is_dir() {
+                                    let sub_java = subpath.join("bin").join("java.exe");
+                                    if sub_java.exists() {
+                                        return Some((sub_java, subpath));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Scan PATH
+    #[cfg(windows)]
+    let java_name = "java.exe";
+    #[cfg(not(windows))]
+    let java_name = "java";
+
+    if let Ok(path_var) = std::env::var("PATH") {
+        let separator = if cfg!(windows) { ';' } else { ':' };
+        for part in path_var.split(separator) {
+            let candidate = Path::new(part).join(java_name);
+            if candidate.exists() {
+                let home = Path::new(part).parent().unwrap_or(Path::new(part)).to_path_buf();
+                return Some((candidate, home));
+            }
+        }
+    }
+
+    None
+}
+
 pub struct Runtime {
     db: DbPool,
     logs: Logs,
@@ -461,7 +535,9 @@ impl Runtime {
         }
 
         let port = p.port.unwrap_or(3000);
-        self.allow_firewall_port(port, Some(p.id));
+        if p.port.is_some() {
+            self.allow_firewall_port(port, Some(p.id));
+        }
 
         let container = WebsiteContainer {
             container_id: format!("webdep-ctr-{}-{}", p.id, safe_slug),
@@ -781,24 +857,141 @@ impl Runtime {
         }
         #[cfg(windows)]
         {
-            let fut = tokio::process::Command::new("taskkill")
+            // 1. First taskkill /F /T /PID to take out the entire process tree while parent is still recognized
+            let _ = tokio::process::Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status();
-            let _ = tokio::time::timeout(Duration::from_secs(3), fut).await;
+                .status()
+                .await;
+            // 2. Also taskkill /F /PID directly in case /T fails because the process has no children
+            let _ = tokio::process::Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
         }
         #[cfg(unix)]
         {
-            let fut = tokio::process::Command::new("kill")
+            let _ = tokio::process::Command::new("kill")
+                .args(["-9", &format!("-{}", pid)])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
+            let _ = tokio::process::Command::new("kill")
                 .args(["-9", &pid.to_string()])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status();
-            let _ = tokio::time::timeout(Duration::from_secs(3), fut).await;
+                .status()
+                .await;
         }
+    }
+
+    /// Comprehensively locate ALL OS processes belonging to this project (parent, children,
+    /// detached subprocesses, multi-bot workers) using sysinfo inspection.
+    pub fn find_project_processes_sysinfo(
+        project_id: i64,
+        slug: &str,
+        base_dir: &Path,
+        known_pids: &HashSet<u32>,
+    ) -> HashSet<u32> {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let mut matched_pids = HashSet::new();
+        let self_pid = std::process::id();
+
+        let base_dir_str = base_dir.to_string_lossy().to_lowercase();
+        let slug_lower = slug.to_lowercase();
+        let env_proj_id = format!("WEBDEP_PROJECT_ID={}", project_id);
+        let env_slug = format!("WEBDEP_PROJECT_SLUG={}", slug);
+
+        for (pid, proc_) in sys.processes() {
+            let pid_u32 = pid.as_u32();
+            if pid_u32 == 0 || pid_u32 == self_pid {
+                continue;
+            }
+
+            // 1. Direct PID match with known project PIDs
+            if known_pids.contains(&pid_u32) {
+                matched_pids.insert(pid_u32);
+                continue;
+            }
+
+            // 2. Direct parent PID match
+            if let Some(parent) = proc_.parent() {
+                if known_pids.contains(&parent.as_u32()) {
+                    matched_pids.insert(pid_u32);
+                    continue;
+                }
+            }
+
+            // 3. Environment variable match (injected by WebDep on process spawn)
+            let mut env_match = false;
+            for env in proc_.environ() {
+                let s = env.to_string_lossy();
+                if s == env_proj_id || s == env_slug {
+                    env_match = true;
+                    break;
+                }
+            }
+            if env_match {
+                matched_pids.insert(pid_u32);
+                continue;
+            }
+
+            // 4. Working directory match (inside base_dir or app dir)
+            if let Some(cwd) = proc_.cwd() {
+                let cwd_str = cwd.to_string_lossy().to_lowercase();
+                if !base_dir_str.is_empty() && (cwd_str == base_dir_str || cwd_str.starts_with(&base_dir_str)) {
+                    matched_pids.insert(pid_u32);
+                    continue;
+                }
+            }
+
+            // 5. Command line match (references services/<slug> or containers/<slug>)
+            let mut cmd_match = false;
+            for arg in proc_.cmd() {
+                let arg_lower = arg.to_string_lossy().to_lowercase();
+                if (!base_dir_str.is_empty() && arg_lower.contains(&base_dir_str))
+                    || arg_lower.contains(&format!("services\\{}", slug_lower))
+                    || arg_lower.contains(&format!("services/{}", slug_lower))
+                    || arg_lower.contains(&format!("containers\\{}", slug_lower))
+                    || arg_lower.contains(&format!("containers/{}", slug_lower))
+                {
+                    cmd_match = true;
+                    break;
+                }
+            }
+            if cmd_match {
+                matched_pids.insert(pid_u32);
+            }
+        }
+
+        // 6. Transitive child expansion: find all children and grandchildren of any matched process
+        let mut expanded = true;
+        while expanded {
+            expanded = false;
+            for (pid, proc_) in sys.processes() {
+                let pid_u32 = pid.as_u32();
+                if pid_u32 == 0 || pid_u32 == self_pid || matched_pids.contains(&pid_u32) {
+                    continue;
+                }
+                if let Some(parent) = proc_.parent() {
+                    if matched_pids.contains(&parent.as_u32()) {
+                        matched_pids.insert(pid_u32);
+                        expanded = true;
+                    }
+                }
+            }
+        }
+
+        matched_pids
     }
 
     pub async fn is_port_accepting(port: u16) -> bool {
@@ -811,7 +1004,7 @@ impl Runtime {
         .unwrap_or(false)
     }
 
-    /// Comprehensively shut down all processes, child trees, port listeners, and containers for a website.
+    /// Comprehensively shut down all processes, child trees, port listeners, and containers for a website or service.
     async fn kill_project_everything(&self, p: &Project) {
         // First stop any maintenance responder bound to this project's port
         self.stop_maintenance_server(p.id);
@@ -820,22 +1013,34 @@ impl Runtime {
         let container = self.ensure_container(p);
         let mut pids_to_kill: HashSet<u32> = HashSet::new();
 
-        // 1. In-memory Child handle
+        // 1. In-memory Child handle: record PID, but DO NOT call start_kill() yet!
+        // Calling start_kill() terminates the parent prematurely, causing taskkill /T to fail
+        // on Windows because the dead parent's process tree link is broken.
         let old_child = {
             let mut map = self.processes.lock().unwrap();
             map.remove(&p.id)
         };
-        if let Some(mut child) = old_child {
+        if let Some(ref child) = old_child {
             if let Some(pid) = child.id() {
                 pids_to_kill.insert(pid);
             }
-            let _ = child.start_kill();
         }
 
         // 2. SQLite recorded PID
         if let Some(old_pid) = p.app_pid {
             if old_pid > 0 {
                 pids_to_kill.insert(old_pid);
+            }
+        }
+        if let Ok(conn) = self.db.lock() {
+            if let Ok(Some(db_pid)) = conn.query_row(
+                "SELECT app_pid FROM projects WHERE id = ?",
+                rusqlite::params![p.id],
+                |r| r.get::<_, Option<u32>>(0),
+            ) {
+                if db_pid > 0 {
+                    pids_to_kill.insert(db_pid);
+                }
             }
         }
 
@@ -851,12 +1056,41 @@ impl Runtime {
             }
         }
 
-        // Kill all collected PIDs and their child trees
-        for pid in pids_to_kill {
-            Self::kill_pid_tree(pid).await;
+        // 5. Deep Scan with sysinfo: Find ALL child, grandchild, detached, and matching processes
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let base_dir = if Path::new(&p.deploy_dir).is_absolute() {
+            PathBuf::from(&p.deploy_dir)
+        } else {
+            cwd.join(p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\"))
+        };
+        let sysinfo_pids = Self::find_project_processes_sysinfo(p.id, &p.slug, &base_dir, &pids_to_kill);
+        for spid in sysinfo_pids {
+            pids_to_kill.insert(spid);
         }
 
-        // Verify the website's port is completely freed (retry up to 1.5s if child processes re-bound)
+        // 6. Kill all collected PIDs and their process trees while the parents are still known
+        for pid in &pids_to_kill {
+            Self::kill_pid_tree(*pid).await;
+        }
+
+        // 7. Now reap the old child handle
+        if let Some(mut child) = old_child {
+            let _ = child.start_kill();
+        }
+
+        // 8. Re-scan sysinfo with up to 6 rounds of verification to catch and kill any stubborn or surviving child processes
+        for _ in 0..6 {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            let lingering = Self::find_project_processes_sysinfo(p.id, &p.slug, &base_dir, &HashSet::new());
+            if lingering.is_empty() {
+                break;
+            }
+            for pid in lingering {
+                Self::kill_pid_tree(pid).await;
+            }
+        }
+
+        // 9. Verify the website's port is completely freed (retry up to 1.5s if child processes re-bound)
         if let Some(port) = p.port {
             for _ in 0..12 {
                 let remaining_pids = Self::find_pids_on_port(port);
@@ -953,15 +1187,29 @@ impl Runtime {
 
         let work_dir = match work_dir {
             Some(d) => d,
-            None => return Err("NOT_DEPLOYED_YET".to_string()),
+            None => {
+                if p.project_kind == "service" {
+                    let app_dir = base_dir.join("app");
+                    let _ = tokio::fs::create_dir_all(&app_dir).await;
+                    app_dir
+                } else {
+                    return Err("NOT_DEPLOYED_YET".to_string());
+                }
+            }
         };
 
         // Link `<work_dir>/data` into the isolated container's `db/` directory
-        self.link_work_dir_to_container(&work_dir, &container);
+        let is_service = p.project_kind == "service";
+        if !is_service {
+            self.link_work_dir_to_container(&work_dir, &container);
+        }
 
         // Build isolated container environment and write `.env` into working directory
+        // (backend services own their files, so their .env is never rewritten)
         let (isolated_env, dotenv_body) = self.build_container_env(p, &env_vars, &container);
-        let _ = tokio::fs::write(work_dir.join(".env"), dotenv_body).await;
+        if !is_service {
+            let _ = tokio::fs::write(work_dir.join(".env"), dotenv_body).await;
+        }
 
         // Shell execution: supports npx, npm, node, yarn, python, uvicorn on any OS
         let mut final_cmd = resolved_cmd;
@@ -969,10 +1217,15 @@ impl Runtime {
             final_cmd = "node server.js".to_string();
         }
 
+        let java_info = detect_java_exe();
+
         #[cfg(windows)]
         let mut cmd = tokio::process::Command::new("cmd");
         #[cfg(windows)]
-        cmd.args(["/C", &final_cmd]);
+        {
+            cmd.arg("/C");
+            cmd.raw_arg(&final_cmd);
+        }
 
         #[cfg(unix)]
         let mut cmd = tokio::process::Command::new("sh");
@@ -984,6 +1237,27 @@ impl Runtime {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
+
+        // Force UTF-8 output so Python/Node apps printing emoji or arrows never crash on the
+        // Windows 'charmap' codec when stdout is piped. User env vars below can still override these.
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUTF8", "1");
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("WEBDEP_PROJECT_ID", p.id.to_string());
+        cmd.env("WEBDEP_PROJECT_SLUG", &p.slug);
+        cmd.env("WEBDEP_CONTAINER_ID", &container.container_id);
+
+        if let Some((_, ref java_home)) = java_info {
+            let bin_dir = java_home.join("bin");
+            let cur_path = std::env::var("PATH").unwrap_or_default();
+            #[cfg(windows)]
+            let new_path = format!("{};{}", bin_dir.display(), cur_path);
+            #[cfg(unix)]
+            let new_path = format!("{}:{}", bin_dir.display(), cur_path);
+
+            cmd.env("PATH", new_path);
+            cmd.env("JAVA_HOME", java_home);
+        }
 
         for (k, v) in &isolated_env {
             cmd.env(k, v);
@@ -1002,14 +1276,39 @@ impl Runtime {
         self.record_container_pid(&container, pid);
 
         // Asynchronously drain stdout and stderr to prevent OS pipe buffers from filling and blocking the child process
+        let run_dir = container.run_dir.clone();
         if let Some(stdout) = child.stdout.take() {
             let logs_clone = self.logs.clone();
             let proj_id = p.id;
+            let run_dir_clone = run_dir.clone();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
                 let mut reader = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     logs_clone.add(Some(proj_id), None, "app", "info", &line);
+                    // Dynamically detect any child worker PIDs spawned by multi-bot launchers or subprocesses
+                    // e.g. "[MULTI-BOT] Spawned bot 'bot1' (PID 75100)" or "PID: 1234"
+                    if let Some(pos) = line.find("PID") {
+                        let rem = &line[pos + 3..];
+                        let num_str: String = rem
+                            .chars()
+                            .skip_while(|c| !c.is_ascii_digit())
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect();
+                        if let Ok(cpid) = num_str.parse::<u32>() {
+                            if cpid > 0 {
+                                let pid_file = run_dir_clone.join("pids.txt");
+                                if let Ok(mut f) = std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(&pid_file)
+                                {
+                                    use std::io::Write;
+                                    let _ = writeln!(f, "{}", cpid);
+                                }
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -1026,10 +1325,20 @@ impl Runtime {
             });
         }
 
-        // Wait briefly (250ms) and also record any listening port PID into container pids.txt
+        // Wait briefly (250ms) and verify child process didn't immediately fail/exit
         tokio::time::sleep(Duration::from_millis(250)).await;
-        for port_pid in Self::find_pids_on_port(container.port) {
-            self.record_container_pid(&container, port_pid);
+
+        if let Ok(Some(status)) = child.try_wait() {
+            self.mark_project_stopped(p.id);
+            let err_msg = format!("Process exited immediately with code {}", status);
+            self.logs.add(Some(p.id), None, "app", "warn", &err_msg);
+            return Err(err_msg);
+        }
+
+        if p.port.is_some() {
+            for port_pid in Self::find_pids_on_port(container.port) {
+                self.record_container_pid(&container, port_pid);
+            }
         }
 
         // Update database status
@@ -1048,14 +1357,24 @@ impl Runtime {
             None,
             "app",
             "info",
-            &format!(
-                "Started container '{}' process '{}' (PID: {}, Port: {}, DB: {})",
-                container.container_id,
-                final_cmd,
-                pid,
-                container.port,
-                container.db_dir.display()
-            ),
+            &if p.project_kind == "service" {
+                format!(
+                    "Started service '{}' with command '{}' (PID: {}, folder: {})",
+                    p.name,
+                    final_cmd,
+                    pid,
+                    work_dir.display()
+                )
+            } else {
+                format!(
+                    "Started container '{}' process '{}' (PID: {}, Port: {}, DB: {})",
+                    container.container_id,
+                    final_cmd,
+                    pid,
+                    container.port,
+                    container.db_dir.display()
+                )
+            },
         );
 
         {
@@ -1094,11 +1413,15 @@ impl Runtime {
             None,
             "app",
             "info",
-            &format!(
-                "Stopped website container '{}' (Port {} released and all processes terminated)",
-                p.name,
-                p.port.unwrap_or(3000)
-            ),
+            &if p.project_kind == "service" {
+                format!("Stopped service '{}' (all processes terminated)", p.name)
+            } else {
+                format!(
+                    "Stopped website container '{}' (Port {} released and all processes terminated)",
+                    p.name,
+                    p.port.unwrap_or(3000)
+                )
+            },
         );
 
         Ok(())
@@ -1157,8 +1480,63 @@ impl Runtime {
     }
 
     pub fn is_running(&self, project_id: i64) -> bool {
-        let map = self.processes.lock().unwrap();
-        map.contains_key(&project_id)
+        let mut map = match self.processes.lock() {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        if let Some(child) = map.get_mut(&project_id) {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    map.remove(&project_id);
+                    false
+                }
+                Ok(None) => true,
+                Err(_) => {
+                    map.remove(&project_id);
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Background task to continuously supervise long-running processes (services, bots, servers)
+    /// and immediately mark them stopped in SQLite and log warnings when they exit or crash.
+    pub fn start_background_monitor(self: &Arc<Self>) {
+        let rt = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let mut exited = Vec::new();
+                {
+                    if let Ok(mut map) = rt.processes.lock() {
+                        for (&proj_id, child) in map.iter_mut() {
+                            match child.try_wait() {
+                                Ok(Some(status)) => {
+                                    exited.push((proj_id, Some(status)));
+                                }
+                                Err(_) => {
+                                    exited.push((proj_id, None));
+                                }
+                                Ok(None) => {}
+                            }
+                        }
+                        for (proj_id, _) in &exited {
+                            map.remove(proj_id);
+                        }
+                    }
+                }
+                for (proj_id, status) in exited {
+                    rt.mark_project_stopped(proj_id);
+                    let msg = match status {
+                        Some(s) => format!("Process exited ({})", s),
+                        None => "Process terminated unexpectedly".to_string(),
+                    };
+                    rt.logs.add(Some(proj_id), None, "app", "warn", &msg);
+                }
+            }
+        });
     }
 
     pub async fn health_check(&self, url: &str, timeout_s: u64) -> Result<(), String> {

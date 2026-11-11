@@ -508,11 +508,32 @@ impl Deployer {
 
         // Stage 2: Pulling
         self.update_stage(dep_id, "pulling");
-        let release_dir = Path::new(&p.deploy_dir).join("releases").join(format!("rel-{}", dep_id));
+        let is_service = p.project_kind == "service";
+        let mut release_dir = Path::new(&p.deploy_dir).join("releases").join(format!("rel-{}", dep_id));
         if let Err(e) = Git::checkout(&repo_dir, &head, &release_dir) {
             self.logs.add(Some(p.id), Some(dep_id), "deployment", "error", &format!("Checkout error: {}", e));
             self.finish_deployment(dep_id, "failed", Some(&e));
             return;
+        }
+
+        // Backend services: merge only the changed/tracked files into the persistent `app/` folder.
+        // Untracked files (.env, local configs, databases, uploads) are never deleted or overwritten.
+        if is_service {
+            let app_dir = Path::new(&p.deploy_dir).join("app");
+            if let Err(e) = merge_copy_dir(&release_dir, &app_dir) {
+                self.logs.add(Some(p.id), Some(dep_id), "deployment", "error", &format!("Merge error: {}", e));
+                self.finish_deployment(dep_id, "failed", Some(&e));
+                return;
+            }
+            let _ = std::fs::remove_dir_all(&release_dir);
+            self.logs.add(
+                Some(p.id),
+                Some(dep_id),
+                "deployment",
+                "info",
+                "Merged repository files into live service folder (existing .env and untracked files preserved)",
+            );
+            release_dir = app_dir;
         }
 
         let commit_info = Git::get_commit_info(&repo_dir, &head).unwrap_or(CommitInfo {
@@ -540,10 +561,12 @@ impl Deployer {
         }
 
         // Link release `data/` folder to isolated container DB and write container-isolated .env
-        self.runtime.link_work_dir_to_container(&release_dir, &container);
-        let env_map = self.projects.get_env_map(p.id);
-        let (_isolated_env, dotenv_body) = self.runtime.build_container_env(&p, &env_map, &container);
-        let _ = tokio::fs::write(release_dir.join(".env"), dotenv_body).await;
+        if !is_service {
+            self.runtime.link_work_dir_to_container(&release_dir, &container);
+            let env_map = self.projects.get_env_map(p.id);
+            let (_isolated_env, dotenv_body) = self.runtime.build_container_env(&p, &env_map, &container);
+            let _ = tokio::fs::write(release_dir.join(".env"), dotenv_body).await;
+        }
 
         // Stage 3: Installing dependencies
         let has_pkg_json = release_dir.join("package.json").exists();
@@ -762,6 +785,28 @@ impl Deployer {
     }
 }
 
+/// Recursively copy `src` into `dst`, overwriting same-named files but never deleting anything in `dst`.
+/// The `.git` folder is skipped.
+fn merge_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        if name == ".git" {
+            continue;
+        }
+        let from = entry.path();
+        let to = dst.join(&name);
+        let ft = entry.file_type().map_err(|e| e.to_string())?;
+        if ft.is_dir() {
+            merge_copy_dir(&from, &to)?;
+        } else if ft.is_file() {
+            fs::copy(&from, &to).map_err(|e| format!("{}: {}", to.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
 fn switch_current(current_link: &Path, target_dir: &Path) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let abs_link = if current_link.is_absolute() {
@@ -819,7 +864,10 @@ async fn run_shell_cmd(
     #[cfg(windows)]
     let mut cmd = tokio::process::Command::new("cmd");
     #[cfg(windows)]
-    cmd.args(["/C", cmd_str]);
+    {
+        cmd.arg("/C");
+        cmd.raw_arg(cmd_str);
+    }
 
     #[cfg(unix)]
     let mut cmd = tokio::process::Command::new("sh");
@@ -834,6 +882,17 @@ async fn run_shell_cmd(
         .env("npm_config_progress", "false");
     if std::env::var("NODE_OPTIONS").is_err() {
         cmd.env("NODE_OPTIONS", "--max-old-space-size=448");
+    }
+    if let Some((_, ref java_home)) = crate::runtime::detect_java_exe() {
+        let bin_dir = java_home.join("bin");
+        let cur_path = std::env::var("PATH").unwrap_or_default();
+        #[cfg(windows)]
+        let new_path = format!("{};{}", bin_dir.display(), cur_path);
+        #[cfg(unix)]
+        let new_path = format!("{}:{}", bin_dir.display(), cur_path);
+
+        cmd.env("PATH", new_path);
+        cmd.env("JAVA_HOME", java_home);
     }
     let out = cmd.output().await.map_err(|e| e.to_string())?;
 

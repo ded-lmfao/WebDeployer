@@ -7,6 +7,8 @@ use crate::db::{now, DbPool};
 use crate::vault::Vault;
 
 fn default_branch() -> String { "main".to_string() }
+fn default_project_kind() -> String { "web".to_string() }
+fn default_access_mode() -> String { "local".to_string() }
 fn default_project_type() -> String { "node".to_string() }
 fn default_deploy_method() -> String { "managed".to_string() }
 fn default_app_status() -> String { "stopped".to_string() }
@@ -101,6 +103,12 @@ pub struct Project {
     pub created_at: i64,
     #[serde(default)]
     pub updated_at: i64,
+    #[serde(default = "default_project_kind")]
+    pub project_kind: String,
+    #[serde(default = "default_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_ips: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -126,7 +134,7 @@ const SELECT_PROJECT_FIELDS: &str = "\
     stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention, \
     persistent_paths, current_release_id, deployed_sha, last_poll_at, app_status, \
     app_pid, app_started_at, domains, ssl_enabled, ssl_email, nginx_configured, \
-    created_at, updated_at";
+    created_at, updated_at, project_kind, access_mode, allowed_ips";
 
 fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
     let p_paths_str: String = r.get(21)?;
@@ -169,6 +177,9 @@ fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
         nginx_configured: r.get::<_, i64>(31)? != 0,
         created_at: r.get(32)?,
         updated_at: r.get(33)?,
+        project_kind: r.get::<_, Option<String>>(34)?.unwrap_or_else(default_project_kind),
+        access_mode: r.get::<_, Option<String>>(35)?.unwrap_or_else(default_access_mode),
+        allowed_ips: r.get::<_, Option<String>>(36)?.unwrap_or_default(),
     })
 }
 
@@ -223,8 +234,8 @@ impl Projects {
                 install_cmd, build_cmd, start_cmd, health_url, health_cmd, health_timeout_s,
                 stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention,
                 persistent_paths, app_status, domains, ssl_enabled, ssl_email, nginx_configured,
-                created_at, updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                created_at, updated_at, project_kind, access_mode, allowed_ips
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 p.name,
                 p.slug,
@@ -253,7 +264,10 @@ impl Projects {
                 p.ssl_email,
                 if p.nginx_configured { 1 } else { 0 },
                 ts,
-                ts
+                ts,
+                p.project_kind,
+                p.access_mode,
+                p.allowed_ips,
             ],
         )?;
 
@@ -272,7 +286,8 @@ impl Projects {
                 name=?, repo_url=?, branch=?, project_type=?, deploy_method=?, deploy_dir=?, port=?,
                 install_cmd=?, build_cmd=?, start_cmd=?, health_url=?, health_cmd=?, health_timeout_s=?,
                 stability_s=?, preflight=?, auto_deploy=?, poll_interval_s=?, retention=?,
-                persistent_paths=?, domains=?, ssl_enabled=?, ssl_email=?, nginx_configured=?, updated_at=?
+                persistent_paths=?, domains=?, ssl_enabled=?, ssl_email=?, nginx_configured=?, updated_at=?,
+                project_kind=?, access_mode=?, allowed_ips=?
              WHERE id=?",
             params![
                 p.name,
@@ -299,6 +314,9 @@ impl Projects {
                 p.ssl_email,
                 if p.nginx_configured { 1 } else { 0 },
                 ts,
+                p.project_kind,
+                p.access_mode,
+                p.allowed_ips,
                 id
             ],
         )?;
@@ -596,5 +614,59 @@ mod tests {
         assert_eq!(parsed[3], ("DEBUG".into(), "true".into()));
         assert_eq!(parsed[4], ("SPACED_KEY".into(), "value with spaces".into()));
         assert_eq!(parsed[5], ("EMPTY_LINE_BEFORE".into(), "123".into()));
+    }
+
+    #[test]
+    fn test_project_kind_service_and_default() {
+        let json_default = r#"{
+            "name": "My Web App",
+            "slug": "my-web-app",
+            "repo_url": "https://github.com/org/repo"
+        }"#;
+        let proj_web: Project = serde_json::from_str(json_default).unwrap();
+        assert_eq!(proj_web.project_kind, "web");
+
+        let json_service = r#"{
+            "name": "Discord Music Bot",
+            "slug": "discord-music-bot",
+            "repo_url": "https://github.com/org/bot",
+            "project_kind": "service",
+            "project_type": "discord-node",
+            "start_cmd": "node index.js"
+        }"#;
+        let proj_service: Project = serde_json::from_str(json_service).unwrap();
+        assert_eq!(proj_service.project_kind, "service");
+        assert_eq!(proj_service.project_type, "discord-node");
+        assert_eq!(proj_service.start_cmd, "node index.js");
+    }
+
+    #[test]
+    fn test_project_db_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-test-{}", now()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let pool = crate::db::open_db(&temp_dir).unwrap();
+        let vault = Arc::new(crate::vault::Vault::new(&temp_dir).unwrap());
+        let projects = Projects::new(pool, vault, temp_dir.clone());
+
+        let json_service = r#"{
+            "name": "Discord Music Bot",
+            "slug": "discord-music-bot",
+            "repo_url": "https://github.com/org/bot",
+            "project_kind": "service",
+            "project_type": "discord-node",
+            "start_cmd": "node index.js"
+        }"#;
+        let mut proj: Project = serde_json::from_str(json_service).unwrap();
+        proj.deploy_dir = temp_dir.to_string_lossy().to_string();
+        let id = projects.create(&proj).unwrap();
+        let fetched = projects.get(id).unwrap().unwrap();
+        assert_eq!(fetched.project_kind, "service");
+        assert_eq!(fetched.name, "Discord Music Bot");
+        assert_eq!(fetched.port, None);
+
+        let list = projects.list().unwrap();
+        assert!(list.iter().any(|p| p.id == id && p.project_kind == "service"));
+
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }

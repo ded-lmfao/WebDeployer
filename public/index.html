@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.9.7">
+  <link rel="stylesheet" href="/style.css?v=3.10.8">
 </head>
 
 <body>
@@ -176,6 +176,22 @@
           <span>Websites</span>
           <span class="nav-badge" id="badge-projects-count">0</span>
         </a>
+        <a class="nav-item" data-view="services">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+            <line x1="9" y1="1" x2="9" y2="4"></line>
+            <line x1="15" y1="1" x2="15" y2="4"></line>
+            <line x1="9" y1="20" x2="9" y2="23"></line>
+            <line x1="15" y1="20" x2="15" y2="23"></line>
+            <line x1="20" y1="9" x2="23" y2="9"></line>
+            <line x1="20" y1="14" x2="23" y2="14"></line>
+            <line x1="1" y1="9" x2="4" y2="9"></line>
+            <line x1="1" y1="14" x2="4" y2="14"></line>
+          </svg>
+          <span>Services</span>
+          <span class="nav-badge" id="badge-services-count">0</span>
+        </a>
         <a class="nav-item" data-view="databases">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
@@ -318,6 +334,12 @@
               </svg>
               <span>Logs</span>
             </button>
+            <button class="ws-tab-item" data-ws-tab="files" onclick="switchWebsiteTab('files')" style="display:none;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>Files</span>
+            </button>
             <button class="ws-tab-item" data-ws-tab="env" onclick="switchWebsiteTab('env')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 2l-2 2m-6 6l7 7a2 2 0 0 1-2.83 2.83l-7-7m-6-6L2 8l4 4 4-4-2-2z"></path>
@@ -366,6 +388,13 @@
               <div class="stat-meta"><span id="stat-online-count"
                   style="color: var(--success); font-weight: 600;">0</span> online &bull; <span
                   id="stat-offline-count">0</span> stopped</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Backend Services</div>
+              <div class="stat-value" id="stat-total-services">0</div>
+              <div class="stat-meta"><span id="stat-services-online"
+                  style="color: var(--success); font-weight: 600;">0</span> running &bull; <span
+                  id="stat-services-offline">0</span> stopped</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">CPU</div>
@@ -433,6 +462,34 @@
             </div>
           </div>
 
+          <!-- Backend Services Quick Grid -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Backend Services &amp; Bots</span>
+              <button class="btn btn-secondary btn-sm" onclick="navigateTo('services')">All Services &rarr;</button>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-overview-projects">
+                  <thead>
+                    <tr>
+                      <th>Service</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Commit</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-services-table">
+                    <tr>
+                      <td colspan="5" style="text-align: center; padding: 24px;">No backend services yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
           <!-- Recent Deployments -->
           <div class="card">
             <div class="card-header">
@@ -485,6 +542,37 @@
 
           <div class="projects-grid" id="projects-cards-container">
             <!-- Dynamic cards injected via JS -->
+          </div>
+        </section>
+
+        <!-- ==================== BACKEND SERVICES & BOTS VIEW ==================== -->
+        <section id="view-services" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Backend Services & Bots</h1>
+              <p>Run 24/7 background daemons, Discord bots, Telegram bots, queue workers, and scripts</p>
+            </div>
+            <div class="view-actions">
+              <div class="filter-pills" id="services-status-filters">
+                <button class="pill active" data-filter="all">All (<span id="services-filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span id="services-filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span id="services-filter-count-stopped">0</span>)</button>
+              </div>
+              <input type="text" id="services-search-input" class="form-control"
+                placeholder="Search services or bots..." style="width: 220px;"
+                aria-label="Search services or bots">
+              <button class="btn btn-primary" onclick="openAddServiceModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Service / Bot</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="projects-grid" id="services-cards-container">
+            <!-- Dynamic service cards injected via JS -->
           </div>
         </section>
 
@@ -793,6 +881,48 @@
         </section>
 
         <!-- ==================== 8. ENVIRONMENT VARIABLES VIEW ==================== -->
+        <!-- ==================== SERVICE FILE BROWSER VIEW ==================== -->
+        <section id="view-files" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Service Files</h1>
+              <p>Browse and edit the live service folder. Deploys only merge repository files — your <code>.env</code> and other untracked files are never deleted.</p>
+            </div>
+            <div class="view-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+              <input type="file" id="service-file-upload-input" multiple style="display: none;"
+                onchange="handleFilesUpload(event)" aria-label="Upload files to service directory">
+              <button class="btn btn-primary btn-sm"
+                onclick="document.getElementById('service-file-upload-input').click()"
+                title="Upload .jar, config, or assets directly into this service folder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: -2px;">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload File(s)
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="filesNewFile()">+ New File</button>
+              <button class="btn btn-secondary btn-sm" onclick="filesNewFolder()">+ New Folder</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadFilesView()">Refresh</button>
+            </div>
+          </div>
+          <div class="card" style="padding:0; overflow:hidden;">
+            <div id="files-breadcrumb" style="padding:10px 14px; font-family:var(--font-mono); font-size:12.5px; border-bottom:1px solid var(--border);"></div>
+            <div id="files-list"></div>
+          </div>
+          <div class="card" id="files-editor-card" style="display:none; margin-top:14px; padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <strong id="files-editor-name" style="font-family:var(--font-mono); font-size:13px;"></strong>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent()">Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()">Close</button>
+              </div>
+            </div>
+            <textarea id="files-editor" class="form-control" spellcheck="false"
+              style="width:100%; min-height:340px; font-family:var(--font-mono); font-size:12.5px; white-space:pre; resize:vertical;"></textarea>
+          </div>
+        </section>
+
         <section id="view-env" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
@@ -1305,7 +1435,14 @@
           </svg>
           <span>Websites</span>
         </button>
-        <button type="button" class="mobile-nav-item mobile-nav-add" onclick="openAddWebsiteModal()">
+        <button type="button" class="mobile-nav-item" data-mobile-view="services" onclick="navigateTo('services')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+          </svg>
+          <span>Services</span>
+        </button>
+        <button type="button" class="mobile-nav-item mobile-nav-add" onclick="globalAddAction()">
           <div class="mobile-nav-add-circle">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
               <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1439,6 +1576,131 @@
           onclick="detectProjectConfiguration()">Auto-Detect Commands</button>
         <button class="btn btn-secondary" data-close-modal>Cancel</button>
         <button class="btn btn-primary" id="save-website-submit-btn">Create Website</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD / EDIT BACKEND SERVICE / BOT MODAL -->
+  <div class="modal-overlay" id="modal-service">
+    <div class="modal-container" style="max-width: 620px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title" id="modal-service-title">Add Backend Service / Bot</h3>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">24/7 background daemon with automatic process supervision and environment secrets</div>
+        </div>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Service Template Preset Selector -->
+        <div style="margin-bottom: 14px;">
+          <label class="form-label" style="margin-bottom: 6px;">Service Template Preset</label>
+          <div class="preset-selector" id="service-preset-buttons">
+            <div class="preset-chip active" data-service-preset="lavalink">☕ Lavalink (Java)</div>
+            <div class="preset-chip" data-service-preset="discord-node">🤖 Discord.js (Node)</div>
+            <div class="preset-chip" data-service-preset="discord-py">🐍 Discord.py (Python)</div>
+            <div class="preset-chip" data-service-preset="telegram-py">✈️ Telegram Bot</div>
+            <div class="preset-chip" data-service-preset="worker-py">⚙️ Queue Worker</div>
+            <div class="preset-chip" data-service-preset="custom">🔧 Custom Daemon</div>
+          </div>
+        </div>
+
+        <!-- Deployment Source Selector (Manual File Upload vs GitHub Repo) -->
+        <div style="margin-bottom: 14px;">
+          <label class="form-label" style="margin-bottom: 6px;">Deployment Source</label>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-secondary btn-sm active" id="service-source-mode-manual" onclick="setServiceSourceMode('manual')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
+              📁 Manual File Upload (No Git)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="service-source-mode-git" onclick="setServiceSourceMode('git')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
+              🐙 GitHub Repository
+            </button>
+          </div>
+          <input type="hidden" id="service-source-mode" value="manual">
+        </div>
+
+        <!-- Informative note for manual file upload -->
+        <div id="service-manual-info-box" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; line-height: 1.45; color: var(--text-dim);">
+          <strong style="color: var(--text-main);">📁 Manual File Upload Mode:</strong> No Git repository required. Upload your application files, jar files, or scripts directly in the built-in <strong>Files</strong> tab after creating this service.
+        </div>
+
+        <form id="service-form" onsubmit="return false;">
+          <input type="hidden" id="service-form-id">
+          <input type="hidden" id="service-preset-type" value="custom">
+
+          <!-- Row 1: Name & Branch -->
+          <div id="service-name-branch-row" class="modal-grid-2" style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-name">Service / Bot Name *</label>
+              <input type="text" id="service-name" class="form-control" placeholder="e.g. My Service / Bot" required>
+            </div>
+            <div class="form-group" id="service-branch-group" style="margin-bottom: 0; display: none;">
+              <label class="form-label" for="service-branch">Branch *</label>
+              <input type="text" id="service-branch" class="form-control" value="main">
+            </div>
+          </div>
+
+          <!-- Row 2: GitHub Repository URL (shown only in Git mode) -->
+          <div class="form-group" id="service-repo-group" style="margin-bottom: 12px; display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label class="form-label" for="service-repo">GitHub Repository URL</label>
+              <a href="javascript:void(0)" id="service-browse-github-repos-btn"
+                style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse Repos &nearr;</a>
+            </div>
+            <input type="text" id="service-repo" class="form-control" placeholder="https://github.com/owner/repository.git">
+            <select id="service-github-repos-select" class="form-control"
+              style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
+          </div>
+
+          <!-- Row 3: Install & Start Commands -->
+          <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-install-cmd">Install Command <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="text" id="service-install-cmd" class="form-control" placeholder="e.g. npm ci or pip install -r requirements.txt">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-start-cmd">Start Command *</label>
+              <input type="text" id="service-start-cmd" class="form-control" placeholder="e.g. java -jar Lavalink.jar or node index.js" required>
+            </div>
+          </div>
+
+          <!-- Row 4: Listening Port & Custom Domain -->
+          <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-port">Listening Port <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="number" id="service-port" class="form-control" placeholder="e.g. 1112 or 8080" min="1" max="65535">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-domain">Custom Domain <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="text" id="service-domain" class="form-control" placeholder="e.g. service.yourdomain.com">
+            </div>
+          </div>
+
+          <!-- Row 6: Network Access Policy (Firewall & Direct Access) -->
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" for="service-access-mode">Network Access Policy</label>
+            <select id="service-access-mode" class="form-control" onchange="toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap')">
+              <option value="local">🔒 Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
+              <option value="allowlist">🛡️ Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
+              <option value="public">🌐 Public Access — Open port to external internet with auto firewall rules</option>
+            </select>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+              If a custom domain is configured, HTTPS &amp; WebSocket traffic is reverse-proxied through Caddy automatically. Direct TCP port exposure is governed by this policy.
+            </div>
+          </div>
+          <div class="form-group" id="service-allowed-ips-wrap" style="display: none; margin-bottom: 12px;">
+            <label class="form-label" for="service-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
+            <textarea id="service-allowed-ips" class="form-control" rows="2" placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)" style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port from these remote IPs.</span>
+          </div>
+
+          <input type="hidden" id="service-slug">
+          <input type="hidden" id="service-deploy-dir">
+        </form>
+      </div>
+      <div class="modal-footer" style="padding: 14px 22px;">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-service-submit-btn">Create Service</button>
       </div>
     </div>
   </div>
@@ -2078,6 +2340,11 @@
             </div>
           </div>
           <div class="form-group">
+            <label class="form-label" for="db-create-domain">Custom Domain / Hostname <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+            <input type="text" id="db-create-domain" class="form-control" placeholder="e.g. postgres.yourdomain.com">
+            <span class="form-hint">If set, external connection URLs and psql commands will use this hostname instead of the VPS IP address.</span>
+          </div>
+          <div class="form-group">
             <label class="form-label" for="db-create-access-mode">Network Access Policy</label>
             <select id="db-create-access-mode" class="form-control"
               onchange="toggleDatabaseAccessIpFields('db-create-access-mode', 'db-create-allowed-ips-wrap')">
@@ -2093,14 +2360,6 @@
               style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
             <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections from these
               remote IPs.</span>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="db-create-link-project">Link Directly to Website (Optional)</label>
-            <select id="db-create-link-project" class="form-control">
-              <option value="">Do not link (Standalone database)</option>
-            </select>
-            <span class="form-hint">Automatically injects DATABASE_URL and PG* connection variables into the website's
-              encrypted vault.</span>
           </div>
 
           <!-- Real-time database provisioning progress track -->
@@ -2212,6 +2471,11 @@
         <form id="database-access-form" onsubmit="handleUpdateDatabaseAccessSubmit(event)">
           <input type="hidden" id="db-access-id">
           <div class="form-group">
+            <label class="form-label" for="db-access-domain">Custom Domain / Hostname <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+            <input type="text" id="db-access-domain" class="form-control" placeholder="e.g. postgres.yourdomain.com">
+            <span class="form-hint">Used for external connection URLs and psql commands instead of the VPS IP.</span>
+          </div>
+          <div class="form-group">
             <label class="form-label" for="db-access-mode">Network Access Policy</label>
             <select id="db-access-mode" class="form-control"
               onchange="toggleDatabaseAccessIpFields('db-access-mode', 'db-access-allowed-ips-wrap')">
@@ -2230,35 +2494,6 @@
           <div class="modal-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--border);">
             <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
             <button type="submit" class="btn btn-primary">Save & Apply Rules</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL: LINK DATABASE TO WEBSITE -->
-  <div class="modal-overlay" id="modal-database-link">
-    <div class="modal-container" style="max-width: 460px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Link Database to Website</h3>
-        <button class="modal-close" data-close-modal>&times;</button>
-      </div>
-      <div class="modal-body">
-        <form id="database-link-form" onsubmit="handleLinkDatabaseSubmit(event)">
-          <input type="hidden" id="db-link-id">
-          <div class="form-group">
-            <label class="form-label" for="db-link-project-select">Select Website</label>
-            <select id="db-link-project-select" class="form-control" required></select>
-            <span class="form-hint" style="display: block; margin-top: 8px;">
-              This will automatically write the following variables into the website's encrypted vault:
-              <br>• <code>DATABASE_URL</code>
-              <br>• <code>PGHOST</code>, <code>PGPORT</code>, <code>PGUSER</code>, <code>PGPASSWORD</code>,
-              <code>PGDATABASE</code>
-            </span>
-          </div>
-          <div class="modal-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--border);">
-            <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
-            <button type="submit" class="btn btn-primary">Link & Inject Credentials</button>
           </div>
         </form>
       </div>
@@ -2317,7 +2552,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.9.7"></script>
+  <script type="module" src="/app.js?v=3.10.8"></script>
 </body>
 
 </html>
