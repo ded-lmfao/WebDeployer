@@ -191,7 +191,15 @@ fn make_pg_server_command(prog: &Path, args: &[&str]) -> Command {
                 .unwrap_or(false);
 
             if has_pg_user {
-                let mut cmd = Command::new("runuser");
+                let runuser_bin = if Path::new("/sbin/runuser").exists() {
+                    "/sbin/runuser"
+                } else if Path::new("/usr/sbin/runuser").exists() {
+                    "/usr/sbin/runuser"
+                } else {
+                    "runuser"
+                };
+
+                let mut cmd = Command::new(runuser_bin);
                 cmd.arg("-u").arg("postgres").arg("--").arg(prog);
                 for a in args {
                     cmd.arg(a);
@@ -211,6 +219,7 @@ fn ensure_pg_permissions(_db_dir: &Path, _data_dir: Option<&Path>) {
     #[cfg(unix)]
     {
         if unsafe { libc::getuid() } == 0 {
+            ensure_parent_traverse_permissions(_db_dir);
             let _ = std::process::Command::new("chown")
                 .args(["-R", "postgres:postgres", &_db_dir.to_string_lossy()])
                 .status();
@@ -218,6 +227,29 @@ fn ensure_pg_permissions(_db_dir: &Path, _data_dir: Option<&Path>) {
                 let _ = std::process::Command::new("chmod")
                     .args(["0700", &d.to_string_lossy()])
                     .status();
+            }
+        }
+    }
+}
+
+fn ensure_parent_traverse_permissions(_path: &Path) {
+    #[cfg(unix)]
+    {
+        if unsafe { libc::getuid() } == 0 {
+            let mut curr = _path.parent();
+            while let Some(dir) = curr {
+                if dir == Path::new("/") || dir.as_os_str().is_empty() {
+                    break;
+                }
+                if let Ok(meta) = std::fs::metadata(dir) {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = meta.permissions().mode();
+                    if mode & 0o001 == 0 {
+                        let new_mode = mode | 0o001;
+                        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(new_mode));
+                    }
+                }
+                curr = dir.parent();
             }
         }
     }
