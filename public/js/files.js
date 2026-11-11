@@ -557,10 +557,6 @@ function filesCloseEditor(force = false) {
   if (codeEl) codeEl.innerHTML = '';
   const textarea = document.getElementById('files-editor');
   if (textarea) textarea.value = '';
-  const codeEl = document.getElementById('files-editor-code');
-  if (codeEl) codeEl.innerHTML = '';
-  const textarea = document.getElementById('files-editor');
-  if (textarea) textarea.value = '';
   renderFilesTable();
 }
 window.filesCloseEditor = filesCloseEditor;
