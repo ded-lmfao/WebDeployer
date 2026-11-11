@@ -3,8 +3,11 @@
  * Resource usage breakdowns, CPU/RAM/Disk metrics, and live workloads table
  */
 
+import { icon } from './icons.js';
 import { state, PAGE_SIZE, paginateAndRender, escapeHtml, formatDate } from './state.js';
 import { api, toast } from './api.js';
+import { loadDatabases } from './databases.js';
+import { renderPipelineStages } from './deployments.js';
 
 // ============================================================================
 // View 1: Overview & Live Resource Consumption
@@ -41,7 +44,8 @@ function renderResourceBreakdown(resources) {
     const isMaintenance = r.status === 'maintenance';
     const kindUpper = r.kind.toUpperCase();
     const kindBadgeClass = `badge-res-${r.kind}`;
-    const icon = r.kind === 'panel' ? '⚡' : r.kind === 'database' ? '🗄️' : r.kind === 'service' ? '🤖' : '🌐';
+    const kindIconName = r.kind === 'panel' ? 'zap' : r.kind === 'database' ? 'database' : r.kind === 'service' ? 'bot' : 'globe';
+    const kindIconSvg = icon(kindIconName, { size: 16, cls: `res-icon-${r.kind}` });
     
     let subtitle = '';
     if (r.kind === 'panel') {
@@ -93,7 +97,7 @@ function renderResourceBreakdown(resources) {
       <tr ${rowClick}>
         <td>
           <div class="res-workload-title">
-            <div class="res-workload-icon">${icon}</div>
+            <div class="res-workload-icon">${kindIconSvg}</div>
             <div>
               <div class="res-workload-name">${escapeHtml(r.name)}</div>
               <div class="res-workload-sub">${subtitle}</div>

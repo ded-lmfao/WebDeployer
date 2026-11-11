@@ -3,6 +3,7 @@
  * Server monitoring, RBAC user administration, Caddy proxy domains, audit logs, and self-updater
  */
 
+import { icon } from './icons.js';
 import {
   state,
   PAGE_SIZE,
@@ -10,6 +11,7 @@ import {
   escapeHtml,
   formatDate,
   formatRelativeTime,
+  setHtmlIfChanged,
   openModal,
   closeModal,
   showConfirmDialog,
@@ -842,11 +844,11 @@ async function loadSystemVersionInfo(quiet = false) {
         badgeEl.style.background = 'rgba(234, 179, 8, 0.15)';
         badgeEl.style.color = '#eab308';
       } else if (v.ready_to_restart) {
-        badgeEl.textContent = '⚠️ Restart Required';
+        badgeEl.textContent = 'Restart Required';
         badgeEl.style.background = 'rgba(245, 158, 11, 0.15)';
         badgeEl.style.color = '#fbbf24';
       } else if (v.has_update) {
-        badgeEl.textContent = `🚀 Update Available (${v.remote_commit})`;
+        badgeEl.textContent = `Update Available (${v.remote_commit})`;
         badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
         badgeEl.style.color = 'var(--success)';
         if (updateBtn) {
@@ -854,7 +856,7 @@ async function loadSystemVersionInfo(quiet = false) {
           updateBtn.classList.add('btn-primary');
         }
       } else {
-        badgeEl.textContent = '● Up to Date';
+        badgeEl.textContent = 'Up to Date';
         badgeEl.style.background = 'rgba(99, 102, 241, 0.15)';
         badgeEl.style.color = 'var(--accent-light)';
       }
@@ -908,15 +910,15 @@ function updatePipelineStepIndicators(progress, isError = false) {
   }
   if (progress >= 45 && dot3) {
     if (progress >= 95) {
-      dot3.textContent = '✅';
+      dot3.innerHTML = icon('check', { size: 12 });
       if (card3) card3.style.borderColor = 'rgba(16, 185, 129, 0.4)';
     } else {
-      dot3.textContent = '🔄';
+      dot3.innerHTML = icon('refresh', { size: 12, cls: 'icon-spin' });
       if (card3) card3.style.borderColor = 'var(--accent-light)';
     }
   }
   if (progress >= 100 && dot4) {
-    dot4.textContent = isError ? '❌' : '🚀';
+    dot4.innerHTML = isError ? icon('x', { size: 12 }) : icon('check', { size: 12 });
     if (card4) card4.style.borderColor = isError ? 'var(--danger)' : 'rgba(16, 185, 129, 0.6)';
   }
 }
@@ -931,7 +933,7 @@ async function startPlatformUpdate() {
     &bull; <strong style="color:var(--success);">Safe & Non-Destructive:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file are completely untouched.<br>
     &bull; <strong style="color:var(--accent-light);">Resource-Safe:</strong> Compiled in low-RAM mode (<code>CARGO_BUILD_JOBS=1</code>) to prevent VPS out-of-memory errors.<br>
     &bull; <strong style="color:var(--text-main);">Zero Unplanned Downtime:</strong> Once compilation finishes, WebDep will pause and ask for your confirmation before restarting.`,
-    confirmText: '🚀 Fetch & Compile WebDep',
+    confirmText: 'Fetch & Compile WebDep',
     danger: false,
   });
   if (!ok) return;
@@ -951,7 +953,7 @@ async function startPlatformUpdate() {
   ['1', '2', '3', '4'].forEach((num) => {
     const dot = document.getElementById(`step-dot-${num}`);
     const card = document.getElementById(`step-card-${num}`);
-    if (dot) dot.textContent = num === '1' ? '🛡️' : num === '2' ? '🐙' : num === '3' ? '⚙️' : '🚀';
+    if (dot) dot.innerHTML = num === '1' ? icon('shield', { size: 12 }) : num === '2' ? icon('github', { size: 12 }) : num === '3' ? icon('settings', { size: 12 }) : icon('check-circle', { size: 12 });
     if (card) card.style.borderColor = 'var(--border)';
   });
 
@@ -1032,7 +1034,7 @@ async function executePostUpdateRestart() {
   const ok = await showConfirmDialog({
     title: 'Restart WebDep Panel',
     message: 'Restart the WebDep panel now to activate the new version? The dashboard will briefly reconnect in ~3 seconds.',
-    confirmText: '🚀 Restart Now',
+    confirmText: 'Restart Now',
     danger: false,
   });
   if (!ok) return;
@@ -1118,11 +1120,14 @@ async function pollReconnectionAfterUpdate() {
 
 window.loadMonitorView = loadMonitorView;
 window.loadSettingsView = loadSettingsView;
+window.renderSecurityStatusSummary = renderSecurityStatusSummary;
+window.cleanDomainList = cleanDomainList;
 
 export {
   loadMonitorView,
   loadSettingsView,
   renderSecurityStatusSummary,
+  cleanDomainList,
   loadAuditView,
   openNginxModal,
   removeSingleCaddyDomain,

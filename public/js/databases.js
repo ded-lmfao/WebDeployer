@@ -3,6 +3,7 @@
  * Database lifecycle, user credentials, access IP restrictions, backups, and live metrics
  */
 
+import { icon } from './icons.js';
 import {
   state,
   PAGE_SIZE,
@@ -16,6 +17,7 @@ import {
   PIPELINE_STAGES,
 } from './state.js';
 import { api, toast } from './api.js';
+import { renderPipelineStages, setBtnLoading } from './deployments.js';
 
 // ============================================================================
 // Managed Databases (PostgreSQL)
@@ -81,6 +83,7 @@ async function loadDatabasesView() {
   await loadDatabases();
   renderDatabasesList();
 }
+window.loadDatabases = loadDatabases;
 window.loadDatabasesView = loadDatabasesView;
 
 function renderDatabasesList() {
@@ -90,7 +93,7 @@ function renderDatabasesList() {
   if (!state.databases || state.databases.length === 0) {
     container.innerHTML = `
       <div class="empty-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius-lg);">
-        <div style="font-size: 38px; margin-bottom: 12px;">🐘</div>
+        <div style="margin-bottom: 12px; color: var(--text-dim);">${icon('database', { size: 40, stroke: 1.5 })}</div>
         <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">No PostgreSQL Databases Yet</h3>
         <p style="font-size: 13.5px; color: var(--text-muted); max-width: 440px; margin: 0 auto 18px auto; line-height: 1.5;">
           Deploy a fast, isolated PostgreSQL database on this VPS with customized database names, passwords, and remote IP access controls.
@@ -115,12 +118,12 @@ function renderDatabasesList() {
     const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === db.id || x.database_id === db.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
 
-    let accessBadge = '<span class="badge badge-neutral" style="font-size: 11px;">🔒 Localhost Only (127.0.0.1)</span>';
+    let accessBadge = `<span class="badge badge-neutral" style="font-size: 11px;">${icon('lock', { size: 11 })} Localhost Only (127.0.0.1)</span>`;
     if (accessMode === 'allowlist') {
       const ipList = allowedIps ? allowedIps.split(/[,;\n]/).filter(Boolean).length : 0;
-      accessBadge = `<span class="badge badge-primary" style="font-size: 11px;">🛡️ Remote Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
+      accessBadge = `<span class="badge badge-primary" style="font-size: 11px;">${icon('shield', { size: 11 })} Remote Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
     } else if (accessMode === 'public') {
-      accessBadge = '<span class="badge badge-warning" style="font-size: 11px;">🌐 Public (0.0.0.0)</span>';
+      accessBadge = `<span class="badge badge-warning" style="font-size: 11px;">${icon('globe', { size: 11 })} Public (0.0.0.0)</span>`;
     }
 
     return `
@@ -128,8 +131,8 @@ function renderDatabasesList() {
         <div>
           <div class="project-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(51, 103, 145, 0.15); color: #336791; display: flex; align-items: center; justify-content: center; font-size: 18px;">
-                🐘
+              <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(51, 103, 145, 0.15); color: #38bdf8; display: flex; align-items: center; justify-content: center;">
+                ${icon('database', { size: 20 })}
               </div>
               <div>
                 <h3 style="font-size: 15px; font-weight: 600; margin: 0;">${escapeHtml(db.name)}</h3>
@@ -154,9 +157,9 @@ function renderDatabasesList() {
 
           <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
             ${accessBadge}
-            ${db.domain ? `<span class="badge badge-primary" style="font-size: 11px; font-family: var(--font-mono);">🌐 ${escapeHtml(db.domain)}:${db.port}</span>` : `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);">Port ${db.port}</span>`}
+            ${db.domain ? `<span class="badge badge-primary" style="font-size: 11px; font-family: var(--font-mono);">${icon('globe', { size: 11 })} ${escapeHtml(db.domain)}:${db.port}</span>` : `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);">Port ${db.port}</span>`}
             ${db.isSuperuser ? '<span class="badge badge-primary" style="font-size: 11px;">Superuser</span>' : ''}
-            ${diskStr ? `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);" title="On-Disk PostgreSQL Storage">💾 ${diskStr}</span>` : ''}
+            ${diskStr ? `<span class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono);" title="On-Disk PostgreSQL Storage">${icon('hard-drive', { size: 11 })} ${diskStr}</span>` : ''}
           </div>
 
           <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 8px; word-break: break-all;">
@@ -422,7 +425,7 @@ async function showDatabaseLogs(id) {
   if (!modal || !pre) return;
 
   const db = (state.databases || []).find((d) => d.id === Number(id));
-  if (title) title.textContent = db ? `🐘 ${db.name} — Server Logs` : `Database #${id} Logs`;
+  if (title) title.textContent = db ? `${db.name} — Server Logs` : `Database #${id} Logs`;
   if (badge) {
     badge.textContent = db ? db.status.toUpperCase() : 'LOGS';
     badge.className = db?.status === 'running' ? 'badge badge-success' : (db?.status === 'error' ? 'badge badge-danger' : 'badge badge-neutral');

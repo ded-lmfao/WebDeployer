@@ -3,6 +3,7 @@
  * Hosted websites list, configuration detector, port allocator, and website modal workflows
  */
 
+import { icon } from './icons.js';
 import {
   state,
   PAGE_SIZE,
@@ -16,6 +17,8 @@ import {
   invalidateClientCache,
 } from './state.js';
 import { api, toast, prefetchWebsiteWorkspace } from './api.js';
+import { cleanDomainList } from './settings.js';
+import { renderPipelineStages } from './deployments.js';
 
 // ============================================================================
 // Projects Management
@@ -117,12 +120,12 @@ function renderProjectsList() {
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
 
-    let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost</span>';
+    let accessBadge = `<span class="badge badge-neutral" style="font-size: 10px;">${icon('lock', { size: 10 })} Localhost</span>`;
     if (p.access_mode === 'allowlist') {
       const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
-      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList})</span>`;
+      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">${icon('shield', { size: 10 })} Allowlist (${ipList})</span>`;
     } else if (p.access_mode === 'public') {
-      accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
+      accessBadge = `<span class="badge badge-warning" style="font-size: 10px;">${icon('globe', { size: 10 })} Public</span>`;
     }
 
     return `

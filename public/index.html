@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.11.2">
+  <link rel="stylesheet" href="/style.css?v=3.12.0">
 </head>
 
 <body>
@@ -999,7 +999,7 @@
           <div class="card file-editor-card" id="files-editor-card" style="display: none; margin-top: 16px; padding: 0; overflow: hidden; border: 1px solid var(--border-medium); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);">
             <div class="file-editor-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 8px;">
               <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-                <span id="files-editor-icon" style="font-size: 16px;">📄</span>
+                <span id="files-editor-icon" style="display: inline-flex; align-items: center; color: var(--text-dim);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></span>
                 <span id="files-editor-name" style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;"></span>
                 <span id="files-editor-dirty-badge" class="badge badge-warning" style="display: none; font-size: 10px; padding: 1px 7px;">● Unsaved</span>
                 <span id="files-editor-meta" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
@@ -1723,9 +1723,9 @@
           <div class="form-group" style="margin-bottom: 12px;">
             <label class="form-label" for="website-access-mode">Network Access Policy</label>
             <select id="website-access-mode" class="form-control" onchange="toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap')">
-              <option value="local">🔒 Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
-              <option value="allowlist">🛡️ Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
-              <option value="public">🌐 Public Access — Open port to external internet with auto firewall rules</option>
+              <option value="local">Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
+              <option value="allowlist">Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
+              <option value="public">Public Access — Open port to external internet with auto firewall rules</option>
             </select>
             <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
               If a custom domain is configured, HTTPS traffic is reverse-proxied through Caddy automatically. Direct TCP port exposure is governed by this policy.
@@ -1772,12 +1772,12 @@
         <div style="margin-bottom: 14px;">
           <label class="form-label" style="margin-bottom: 6px;">Service Template Preset</label>
           <div class="preset-selector" id="service-preset-buttons">
-            <div class="preset-chip active" data-service-preset="lavalink">☕ Lavalink (Java)</div>
-            <div class="preset-chip" data-service-preset="discord-node">🤖 Discord.js (Node)</div>
-            <div class="preset-chip" data-service-preset="discord-py">🐍 Discord.py (Python)</div>
-            <div class="preset-chip" data-service-preset="telegram-py">✈️ Telegram Bot</div>
-            <div class="preset-chip" data-service-preset="worker-py">⚙️ Queue Worker</div>
-            <div class="preset-chip" data-service-preset="custom">🔧 Custom Daemon</div>
+            <div class="preset-chip active" data-service-preset="lavalink">Lavalink (Java)</div>
+            <div class="preset-chip" data-service-preset="discord-node">Discord.js (Node)</div>
+            <div class="preset-chip" data-service-preset="discord-py">Discord.py (Python)</div>
+            <div class="preset-chip" data-service-preset="telegram-py">Telegram Bot</div>
+            <div class="preset-chip" data-service-preset="worker-py">Queue Worker</div>
+            <div class="preset-chip" data-service-preset="custom">Custom Daemon</div>
           </div>
         </div>
 
@@ -1786,10 +1786,10 @@
           <label class="form-label" style="margin-bottom: 6px;">Deployment Source</label>
           <div style="display: flex; gap: 8px;">
             <button type="button" class="btn btn-secondary btn-sm active" id="service-source-mode-manual" onclick="setServiceSourceMode('manual')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
-              📁 Manual File Upload (No Git)
+              Manual File Upload (No Git)
             </button>
             <button type="button" class="btn btn-secondary btn-sm" id="service-source-mode-git" onclick="setServiceSourceMode('git')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
-              🐙 GitHub Repository
+              GitHub Repository
             </button>
           </div>
           <input type="hidden" id="service-source-mode" value="manual">
@@ -1797,7 +1797,7 @@
 
         <!-- Informative note for manual file upload -->
         <div id="service-manual-info-box" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; line-height: 1.45; color: var(--text-dim);">
-          <strong style="color: var(--text-main);">📁 Manual File Upload Mode:</strong> No Git repository required. Upload your application files, jar files, or scripts directly in the built-in <strong>Files</strong> tab after creating this service.
+          <strong style="color: var(--text-main);">Manual File Upload Mode:</strong> No Git repository required. Upload your application files, jar files, or scripts directly in the built-in <strong>Files</strong> tab after creating this service.
         </div>
 
         <form id="service-form" onsubmit="return false;">
@@ -1856,9 +1856,9 @@
           <div class="form-group" style="margin-bottom: 12px;">
             <label class="form-label" for="service-access-mode">Network Access Policy</label>
             <select id="service-access-mode" class="form-control" onchange="toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap')">
-              <option value="local">🔒 Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
-              <option value="allowlist">🛡️ Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
-              <option value="public">🌐 Public Access — Open port to external internet with auto firewall rules</option>
+              <option value="local">Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
+              <option value="allowlist">Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
+              <option value="public">Public Access — Open port to external internet with auto firewall rules</option>
             </select>
             <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
               If a custom domain is configured, HTTPS &amp; WebSocket traffic is reverse-proxied through Caddy automatically. Direct TCP port exposure is governed by this policy.
@@ -1955,7 +1955,7 @@
           </button>
           <button type="button" class="env-mode-tab" id="tab-env-bulk" onclick="switchEnvModalTab('bulk')"
             style="flex: 1; padding: 8px 12px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
-            📄 Bulk .env File
+            Bulk .env File
           </button>
         </div>
 
@@ -2524,9 +2524,9 @@
             <label class="form-label" for="db-create-access-mode">Network Access Policy</label>
             <select id="db-create-access-mode" class="form-control"
               onchange="toggleDatabaseAccessIpFields('db-create-access-mode', 'db-create-allowed-ips-wrap')">
-              <option value="local">🔒 Localhost Only (127.0.0.1) — Safest (VPS Apps only)</option>
-              <option value="allowlist">🛡️ Specific Remote IP Allowlist — For remote VPS / dev machines</option>
-              <option value="public">🌐 Public Access (0.0.0.0) — Open to external networks</option>
+              <option value="local">Localhost Only (127.0.0.1) — Safest (VPS Apps only)</option>
+              <option value="allowlist">Specific Remote IP Allowlist — For remote VPS / dev machines</option>
+              <option value="public">Public Access (0.0.0.0) — Open to external networks</option>
             </select>
           </div>
           <div class="form-group" id="db-create-allowed-ips-wrap" style="display: none;">
@@ -2655,9 +2655,9 @@
             <label class="form-label" for="db-access-mode">Network Access Policy</label>
             <select id="db-access-mode" class="form-control"
               onchange="toggleDatabaseAccessIpFields('db-access-mode', 'db-access-allowed-ips-wrap')">
-              <option value="local">🔒 Localhost Only (127.0.0.1) — Safest</option>
-              <option value="allowlist">🛡️ Specific Remote IP Allowlist — Remote VPS / Office IPs</option>
-              <option value="public">🌐 Public Access (0.0.0.0) — Open to Internet</option>
+              <option value="local">Localhost Only (127.0.0.1) — Safest</option>
+              <option value="allowlist">Specific Remote IP Allowlist — Remote VPS / Office IPs</option>
+              <option value="public">Public Access (0.0.0.0) — Open to Internet</option>
             </select>
           </div>
           <div class="form-group" id="db-access-allowed-ips-wrap">
@@ -2772,7 +2772,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.11.2"></script>
+  <script type="module" src="/app.js?v=3.12.0"></script>
 </body>
 
 </html>

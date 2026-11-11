@@ -12,9 +12,15 @@ import {
   showCopyDialog,
   escapeHtml,
   formatDate,
+  formatRelativeTime,
   copyTextToClipboard,
+  invalidateClientCache,
 } from './state.js';
 import { api, toast } from './api.js';
+import { loadProjects } from './websites.js';
+import { loadDatabases } from './databases.js';
+import { navigateTo, handleHashRoute } from './workspace.js';
+import { renderSecurityStatusSummary, loadSettingsView } from './settings.js';
 
 // ============================================================================
 // Auth & Lifecycle
@@ -41,6 +47,7 @@ function stopPolling() {
     state.logEventSource = null;
   }
 }
+window.stopPolling = stopPolling;
 
 async function initAuth() {
   document.body.classList.remove('auth-verified');
@@ -181,7 +188,12 @@ async function onAuthenticated(isFreshLogin = false) {
   });
 
   // Load projects and databases before revealing the main application shell
-  await Promise.all([loadProjects(), loadDatabases()]);
+  await Promise.all([
+    typeof loadProjects === 'function' ? loadProjects() : (window.loadProjects ? window.loadProjects() : Promise.resolve()),
+    typeof loadDatabases === 'function' ? loadDatabases() : (window.loadDatabases ? window.loadDatabases() : Promise.resolve()),
+  ]).catch((err) => {
+    console.warn('Initial project/db load warning:', err);
+  });
 
   document.getElementById('login-view').style.display = 'none';
   stopLoginCanvasAnimation();
@@ -193,11 +205,13 @@ async function onAuthenticated(isFreshLogin = false) {
   document.body.classList.add('auth-verified');
 
   if (isFreshLogin) {
-    navigateTo('overview');
+    if (typeof navigateTo === 'function') navigateTo('overview');
+    else if (window.navigateTo) window.navigateTo('overview');
   } else {
-    handleHashRoute();
+    if (typeof handleHashRoute === 'function') handleHashRoute();
+    else if (window.handleHashRoute) window.handleHashRoute();
   }
-  startPolling();
+  if (typeof window.startPolling === 'function') window.startPolling();
 }
 
 async function applyAuthSuccess(res) {

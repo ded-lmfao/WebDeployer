@@ -1,0 +1,65 @@
+/**
+ * WebDep Icon System & Badges
+ */
+
+.icon {
+  display: inline-block;
+  vertical-align: -0.15em;
+  flex-shrink: 0;
+}
+
+.icon-spin {
+  animation: icon-spin 1.2s linear infinite;
+}
+
+@keyframes icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.icon-xs { width: 12px; height: 12px; }
+.icon-sm { width: 14px; height: 14px; }
+.icon-base { width: 16px; height: 16px; }
+.icon-lg { width: 20px; height: 20px; }
+.icon-xl { width: 24px; height: 24px; }
+
+/* File Explorer Category Tiles */
+.file-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.file-row:hover .file-kind-badge {
+  transform: scale(1.08);
+}
+
+.file-kind-folder {
+  background: rgba(234, 179, 8, 0.14);
+  color: #facc15;
+}
+
+.empty-icon-tile {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+  color: var(--text-dim);
+}
+
+/* Resource table kind icon tints */
+.res-icon-website { color: #38bdf8; }
+.res-icon-service { color: #a855f7; }
+.res-icon-database { color: #3b82f6; }
+.res-icon-panel { color: #f59e0b; }
+

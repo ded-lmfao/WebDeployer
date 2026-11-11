@@ -3,6 +3,7 @@
  * Workspace tabs navigation, breadcrumbs, banner, and direct process lifecycle controls
  */
 
+import { icon } from './icons.js';
 import { state, WEBSITE_WORKSPACE_TABS, invalidateClientCache } from './state.js';
 import { api, toast, prefetchWebsiteWorkspace } from './api.js';
 
@@ -59,6 +60,7 @@ function handleHashRoute() {
   if (pid) state.selectedProjectId = pid;
   renderCurrentView();
 }
+window.handleHashRoute = handleHashRoute;
 
 window.addEventListener('hashchange', handleHashRoute);
 window.addEventListener('pageshow', (e) => {
@@ -166,36 +168,36 @@ function renderWebsiteWorkspaceHeader() {
     if (links) {
       const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
       if (isService) {
-        let typeLabel = '🤖 Service';
+        let typeLabel = `${icon('bot', { size: 12 })} Service`;
         const pt = (p.project_type || '').toLowerCase();
-        if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) typeLabel = '☕ Lavalink Audio Server';
-        else if (pt.includes('discord')) typeLabel = '🤖 Discord Bot';
-        else if (pt.includes('telegram')) typeLabel = '✈️ Telegram Bot';
-        else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) typeLabel = '🐍 Python Daemon';
-        else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) typeLabel = '⚡ Node.js Worker';
-        else if (pt.includes('worker')) typeLabel = '⚙️ Queue Worker';
+        if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) typeLabel = `${icon('coffee', { size: 12 })} Lavalink Audio Server`;
+        else if (pt.includes('discord')) typeLabel = `${icon('bot', { size: 12 })} Discord Bot`;
+        else if (pt.includes('telegram')) typeLabel = `${icon('send', { size: 12 })} Telegram Bot`;
+        else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) typeLabel = `${icon('terminal', { size: 12 })} Python Daemon`;
+        else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) typeLabel = `${icon('zap', { size: 12 })} Node.js Worker`;
+        else if (pt.includes('worker')) typeLabel = `${icon('settings', { size: 12 })} Queue Worker`;
 
         const isLocal = !p.repo_url || p.repo_url === 'local' || pt.includes('lavalink');
         const serviceDomainLink = (p.domains && p.domains.length > 0)
           ? `<a class="ws-meta-link active" href="https://${escapeHtml(p.domains[0])}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Custom Domain: https://${escapeHtml(p.domains[0])}">
-               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+               ${icon('globe', { size: 12 })}
                <span>${escapeHtml(p.domains[0])}</span>
              </a><span class="ws-meta-sep">&bull;</span>`
           : '';
 
-        let accessText = '🔒 Localhost';
-        if (p.access_mode === 'allowlist') accessText = '🛡️ Allowlist';
-        else if (p.access_mode === 'public') accessText = '🌐 Public';
+        let accessText = `${icon('lock', { size: 11 })} Localhost`;
+        if (p.access_mode === 'allowlist') accessText = `${icon('shield', { size: 11 })} Allowlist`;
+        else if (p.access_mode === 'public') accessText = `${icon('globe', { size: 11 })} Public`;
 
         links.innerHTML = `
           ${serviceDomainLink}
-          <span class="ws-meta-item" style="color:var(--accent-light); font-weight:600;">
-            ${escapeHtml(typeLabel)}
+          <span class="ws-meta-item" style="color:var(--accent-light); font-weight:600; display: inline-flex; align-items: center; gap: 4px;">
+            ${typeLabel}
           </span>
           <span class="ws-meta-sep">&bull;</span>
           ${isLocal ? `
             <span class="ws-meta-item" title="Deployment Mode">
-              <span class="badge badge-neutral" style="font-size:11px; padding: 2px 7px;">📁 Manual Upload</span>
+              <span class="badge badge-neutral" style="font-size:11px; padding: 2px 7px;">${icon('folder', { size: 11 })} Manual Upload</span>
             </span>
           ` : `
             <span class="ws-meta-item" title="Git Branch">
@@ -227,7 +229,7 @@ function renderWebsiteWorkspaceHeader() {
         const customDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
         const primaryLinkHtml = customDomains.length
           ? `<a class="ws-meta-link active" href="https://${escapeHtml(customDomains[0])}" target="_blank" style="color:var(--accent-light); font-weight:600;" title="Open https://${escapeHtml(customDomains[0])}">
-               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+               ${icon('globe', { size: 12 })}
                <span>${escapeHtml(customDomains[0])}</span>
              </a>`
           : url
@@ -237,9 +239,9 @@ function renderWebsiteWorkspaceHeader() {
                </a>`
             : '';
 
-        let accessText = '🔒 Localhost';
-        if (p.access_mode === 'allowlist') accessText = '🛡️ Allowlist';
-        else if (p.access_mode === 'public') accessText = '🌐 Public';
+        let accessText = `${icon('lock', { size: 11 })} Localhost`;
+        if (p.access_mode === 'allowlist') accessText = `${icon('shield', { size: 11 })} Allowlist`;
+        else if (p.access_mode === 'public') accessText = `${icon('globe', { size: 11 })} Public`;
 
         links.innerHTML = `
           ${primaryLinkHtml ? `${primaryLinkHtml}<span class="ws-meta-sep">&bull;</span>` : ''}

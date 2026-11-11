@@ -3,6 +3,7 @@
  * Enterprise file manager, directory navigator, syntax editor, and file upload dropzone
  */
 
+import { icon, FILE_KINDS } from './icons.js';
 import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard } from './state.js';
 import { api, toast } from './api.js';
 
@@ -53,178 +54,37 @@ function formatFileDate(unixSec) {
 }
 
 function getFileMeta(entry) {
-  if (entry.is_dir) {
+  const build = (kindKey, extLabel, isEditable, isBinary, isDir = false) => {
+    const k = FILE_KINDS[kindKey] || FILE_KINDS.file;
     return {
-      isDir: true,
-      extLabel: 'DIR',
-      isEditable: false,
-      isBinary: false,
-      iconColor: '#eab308',
-      iconBg: 'rgba(234, 179, 8, 0.12)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+      isDir,
+      extLabel,
+      isEditable,
+      isBinary,
+      iconColor: k.color,
+      iconBg: k.bg,
+      iconSvg: icon(k.icon, { size: 16 }),
     };
-  }
+  };
+
+  if (entry.is_dir) return build('folder', 'DIR', false, false, true);
 
   const name = entry.name.toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop() : '';
 
-  // Java JAR / Class
-  if (ext === 'jar' || ext === 'war' || ext === 'class') {
-    return {
-      isDir: false,
-      extLabel: ext.toUpperCase(),
-      isEditable: false,
-      isBinary: true,
-      iconColor: '#f97316',
-      iconBg: 'rgba(249, 115, 22, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>`,
-    };
-  }
+  if (['jar', 'war', 'class'].includes(ext)) return build('java', ext.toUpperCase(), false, true);
+  if (['py', 'pyw', 'ipynb'].includes(ext)) return build('python', 'PY', true, false);
+  if (['js', 'mjs', 'cjs'].includes(ext)) return build('javascript', 'JS', true, false);
+  if (['ts', 'tsx'].includes(ext)) return build('typescript', 'TS', true, false);
+  if (name === '.env' || name.startsWith('.env.')) return build('env', 'ENV', true, false);
+  if (['json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'conf', 'config'].includes(ext)) return build('config', ext.toUpperCase() || 'CONF', true, false);
+  if (['sh', 'bash', 'bat', 'cmd', 'ps1'].includes(ext)) return build('shell', 'SHELL', true, false);
+  if (['md', 'txt', 'log'].includes(ext)) return build('doc', ext.toUpperCase(), true, false);
+  if (['html', 'htm', 'css', 'scss', 'sass', 'less'].includes(ext)) return build('web', ext.toUpperCase(), true, false);
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return build('image', 'IMG', false, true);
+  if (['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2'].includes(ext)) return build('archive', 'ZIP', false, true);
+  if (name === 'dockerfile' || name.startsWith('docker-compose')) return build('docker', 'DOCKER', true, false);
 
-  // Python
-  if (ext === 'py' || ext === 'pyw' || ext === 'ipynb') {
-    return {
-      isDir: false,
-      extLabel: 'PY',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#38bdf8',
-      iconBg: 'rgba(56, 189, 248, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9v-2h2v2zm0-4H9V7h2v5z"></path></svg>`,
-    };
-  }
-
-  // JavaScript
-  if (ext === 'js' || ext === 'mjs' || ext === 'cjs') {
-    return {
-      isDir: false,
-      extLabel: 'JS',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#eab308',
-      iconBg: 'rgba(234, 179, 8, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`,
-    };
-  }
-
-  // TypeScript
-  if (ext === 'ts' || ext === 'tsx') {
-    return {
-      isDir: false,
-      extLabel: 'TS',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#3b82f6',
-      iconBg: 'rgba(59, 130, 246, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>`,
-    };
-  }
-
-  // Secrets & Environment
-  if (name === '.env' || name.startsWith('.env.')) {
-    return {
-      isDir: false,
-      extLabel: 'ENV',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#10b981',
-      iconBg: 'rgba(16, 185, 129, 0.15)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
-    };
-  }
-
-  // JSON / YAML / Config
-  if (ext === 'json' || ext === 'yaml' || ext === 'yml' || ext === 'toml' || ext === 'xml' || ext === 'ini' || ext === 'conf' || ext === 'config') {
-    return {
-      isDir: false,
-      extLabel: ext.toUpperCase() || 'CONF',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#a855f7',
-      iconBg: 'rgba(168, 85, 247, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
-    };
-  }
-
-  // Shell scripts
-  if (ext === 'sh' || ext === 'bash' || ext === 'bat' || ext === 'cmd' || ext === 'ps1') {
-    return {
-      isDir: false,
-      extLabel: 'SHELL',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#22c55e',
-      iconBg: 'rgba(34, 197, 94, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>`,
-    };
-  }
-
-  // Markdown & Documentation
-  if (ext === 'md' || ext === 'txt' || ext === 'log') {
-    return {
-      isDir: false,
-      extLabel: ext.toUpperCase(),
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#60a5fa',
-      iconBg: 'rgba(96, 165, 250, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`,
-    };
-  }
-
-  // Web markup & styling
-  if (ext === 'html' || ext === 'htm' || ext === 'css' || ext === 'scss') {
-    return {
-      isDir: false,
-      extLabel: ext.toUpperCase(),
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#f59e0b',
-      iconBg: 'rgba(245, 158, 11, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`,
-    };
-  }
-
-  // Images
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) {
-    return {
-      isDir: false,
-      extLabel: 'IMG',
-      isEditable: false,
-      isBinary: true,
-      iconColor: '#ec4899',
-      iconBg: 'rgba(236, 72, 153, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`,
-    };
-  }
-
-  // Archives
-  if (['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2'].includes(ext)) {
-    return {
-      isDir: false,
-      extLabel: 'ZIP',
-      isEditable: false,
-      isBinary: true,
-      iconColor: '#f97316',
-      iconBg: 'rgba(249, 115, 22, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>`,
-    };
-  }
-
-  // Docker
-  if (name === 'dockerfile' || name.startsWith('docker-compose')) {
-    return {
-      isDir: false,
-      extLabel: 'DOCKER',
-      isEditable: true,
-      isBinary: false,
-      iconColor: '#0ea5e9',
-      iconBg: 'rgba(14, 165, 233, 0.14)',
-      iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>`,
-    };
-  }
-
-  // Generic File
   return {
     isDir: false,
     extLabel: ext ? ext.toUpperCase().slice(0, 4) : 'FILE',
@@ -232,7 +92,7 @@ function getFileMeta(entry) {
     isBinary: false,
     iconColor: 'var(--text-muted)',
     iconBg: 'rgba(255, 255, 255, 0.05)',
-    iconSvg: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`,
+    iconSvg: icon('file', { size: 16 }),
   };
 }
 
@@ -265,7 +125,7 @@ async function loadFilesView() {
   // Render modern breadcrumbs
   const parts = state.filesPath ? state.filesPath.split('/').filter(Boolean) : [];
   let crumbHtml = `<a href="javascript:void(0)" class="file-crumb-item ${parts.length === 0 ? 'active' : ''}" onclick="filesGo('')">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+    ${icon('folder-open', { size: 14 })}
     <span>app</span>
   </a>`;
 
@@ -274,7 +134,7 @@ async function loadFilesView() {
     acc = filesJoin(acc, seg);
     const isLast = idx === parts.length - 1;
     const safeAcc = escapeHtml(acc).replace(/'/g, '&#39;');
-    crumbHtml += `<span class="file-crumb-sep">/</span><a href="javascript:void(0)" class="file-crumb-item ${isLast ? 'active' : ''}" onclick="filesGo('${safeAcc}')">${escapeHtml(seg)}</a>`;
+    crumbHtml += `<span class="file-crumb-sep" style="display:inline-flex;align-items:center;opacity:0.4;">/</span><a href="javascript:void(0)" class="file-crumb-item ${isLast ? 'active' : ''}" onclick="filesGo('${safeAcc}')">${escapeHtml(seg)}</a>`;
   });
 
   if (crumbEl) crumbEl.innerHTML = crumbHtml;
@@ -321,21 +181,21 @@ function renderFilesTable() {
       emptyState.style.display = 'block';
       if (q) {
         emptyState.innerHTML = `
-          <div style="font-size: 28px; margin-bottom: 8px;">🔍</div>
+          <div style="margin-bottom: 8px; color: var(--text-dim);">${icon('search', { size: 30, stroke: 1.5 })}</div>
           <p style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 4px;">No matching files found</p>
           <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">No items match "${escapeHtml(q)}".</p>
           <button class="btn btn-secondary btn-sm" onclick="filesClearFilter()">Clear Filter</button>
         `;
       } else {
         emptyState.innerHTML = `
-          <div style="width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 12px; background: rgba(59, 130, 246, 0.1); color: var(--accent-light); display: flex; align-items: center; justify-content: center;">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <div class="empty-icon-tile">
+            ${icon('folder', { size: 30, stroke: 1.5 })}
           </div>
           <p style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 4px;">This folder is empty</p>
           <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">Drag and drop files here, or upload your scripts, binaries, and configurations.</p>
           <div style="display: flex; gap: 8px; justify-content: center;">
-            <button class="btn btn-primary btn-sm" onclick="document.getElementById('service-file-upload-input').click()">Upload Files</button>
-            <button class="btn btn-secondary btn-sm" onclick="filesNewFile()">Create File</button>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('service-file-upload-input').click()">${icon('upload', { size: 14 })} Upload Files</button>
+            <button class="btn btn-secondary btn-sm" onclick="filesNewFile()">${icon('plus', { size: 14 })} Create File</button>
           </div>
         `;
       }
@@ -379,21 +239,21 @@ function renderFilesTable() {
           <div class="file-actions-cell">
             ${meta.isEditable ? `
               <button class="file-btn-action" onclick="filesOpen('${safeFull}')" title="Edit in code editor">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                ${icon('edit', { size: 13 })}
                 <span>Edit</span>
               </button>
             ` : ''}
             ${!e.is_dir ? `
               <button class="file-btn-action" onclick="filesDownload('${safeFull}')" title="Download file to computer">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                ${icon('download', { size: 13 })}
                 <span>Download</span>
               </button>
             ` : ''}
             <button class="file-btn-action" onclick="filesRename('${safeFull}')" title="Rename item">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              ${icon('pencil', { size: 13 })}
             </button>
             <button class="file-btn-action danger" onclick="filesDelete('${safeFull}')" title="Delete file or folder">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              ${icon('trash', { size: 13 })}
             </button>
           </div>
         </td>
@@ -483,7 +343,7 @@ async function filesOpen(path) {
 
     if (iconEl) {
       const meta = getFileMeta({ name: path, is_dir: false });
-      iconEl.textContent = meta.extLabel === 'ENV' ? '🔒' : (meta.extLabel === 'JAR' ? '☕' : '📄');
+      iconEl.innerHTML = meta.iconSvg;
     }
 
     if (editorCard) {

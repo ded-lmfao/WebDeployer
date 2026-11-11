@@ -4,6 +4,7 @@
  */
 
 // Core Services & Shared Reactive State
+import './js/icons.js';
 import { state, WEBSITE_WORKSPACE_TABS } from './js/state.js';
 import { api, toast } from './js/api.js';
 import { initAuth, showLogin } from './js/auth.js';
@@ -69,6 +70,7 @@ function startPolling() {
     }
   }, 4000);
 }
+window.startPolling = startPolling;
 
 window.addEventListener('beforeunload', () => {
   if (state.logEventSource) {

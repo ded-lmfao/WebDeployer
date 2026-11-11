@@ -496,6 +496,7 @@ window.escapeHtml = escapeHtml;
 window.formatDate = formatDate;
 window.formatRelativeTime = formatRelativeTime;
 window.formatDuration = formatDuration;
+window.setHtmlIfChanged = setHtmlIfChanged;
 
 export {
   PAGE_SIZE,

@@ -3,12 +3,15 @@
  * Git integrations, Organic Fluid Water Pipeline engine, release history, rollbacks & .env editor
  */
 
+import { icon } from './icons.js';
 import {
   state,
   PAGE_SIZE,
   paginateAndRender,
   escapeHtml,
+  formatDate,
   formatRelativeTime,
+  setHtmlIfChanged,
   openModal,
   closeModal,
   showConfirmDialog,
@@ -18,6 +21,7 @@ import {
   PIPELINE_STAGES,
 } from './state.js';
 import { api, toast } from './api.js';
+import { formatLogLine } from './logs.js';
 
 // ============================================================================
 // View 3: GitHub View
@@ -1855,8 +1859,12 @@ document.getElementById('confirm-create-release-btn')?.addEventListener('click',
 window.waterPipelines = waterPipelines;
 window.loadGithubView = loadGithubView;
 window.loadEnvView = loadEnvView;
+window.renderPipelineStages = renderPipelineStages;
+window.setBtnLoading = setBtnLoading;
 
 export {
+  renderPipelineStages,
+  setBtnLoading,
   loadGithubView,
   generateDeployKey,
   rotateWebhookSecret,

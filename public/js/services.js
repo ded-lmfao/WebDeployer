@@ -11,6 +11,7 @@ window.loadServicesView = loadServicesView;
  * Background worker daemons, Telegram/Discord bots, and custom services
  */
 
+import { icon } from './icons.js';
 import {
   state,
   PAGE_SIZE,
@@ -24,6 +25,7 @@ import {
   PRESETS,
 } from './state.js';
 import { api, toast } from './api.js';
+import { renderPipelineStages } from './deployments.js';
 
 // ============================================================================
 // View 2.5: Backend Services & Bots
@@ -166,7 +168,7 @@ function renderServicesList() {
   if (!filtered.length) {
     container.innerHTML = `
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
-        <div style="font-size: 38px; margin-bottom: 12px;">🤖</div>
+        <div style="margin-bottom: 12px; color: var(--text-dim);">${icon('bot', { size: 40, stroke: 1.5 })}</div>
         <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No backend services or bots yet</p>
         <p style="color: var(--text-muted); font-size: 13.5px; max-width: 460px; margin: 0 auto 20px auto; line-height: 1.5;">
           Deploy 24/7 Discord bots, Telegram bots, queue workers, and background scripts directly on your server with automatic process supervision.
@@ -184,26 +186,26 @@ function renderServicesList() {
     const isOnline = p.app_status === 'running';
     const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
 
-    let typeIcon = '🤖';
+    let typeIconName = 'bot';
     let typeName = 'Backend Service';
     const pt = (p.project_type || '').toLowerCase();
     if (pt.includes('discord')) {
-      typeIcon = '🤖';
+      typeIconName = 'bot';
       typeName = 'Discord Bot';
     } else if (pt.includes('telegram')) {
-      typeIcon = '✈️';
+      typeIconName = 'send';
       typeName = 'Telegram Bot';
     } else if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) {
-      typeIcon = '☕';
+      typeIconName = 'coffee';
       typeName = 'Lavalink';
     } else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) {
-      typeIcon = '🐍';
+      typeIconName = 'terminal';
       typeName = 'Python Daemon';
     } else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) {
-      typeIcon = '⚡';
+      typeIconName = 'zap';
       typeName = 'Node.js Worker';
     } else if (pt.includes('worker')) {
-      typeIcon = '⚙️';
+      typeIconName = 'settings';
       typeName = 'Queue Worker';
     }
 
@@ -217,25 +219,25 @@ function renderServicesList() {
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
 
-        let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
-        if (p.access_mode === 'allowlist') {
-          const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
-          accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
-        } else if (p.access_mode === 'public') {
-          accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
-        }
+    let accessBadge = `<span class="badge badge-neutral" style="font-size: 10px;">${icon('lock', { size: 10 })} Localhost Only</span>`;
+    if (p.access_mode === 'allowlist') {
+      const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
+      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">${icon('shield', { size: 10 })} Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
+    } else if (p.access_mode === 'public') {
+      accessBadge = `<span class="badge badge-warning" style="font-size: 10px;">${icon('globe', { size: 10 })} Public</span>`;
+    }
 
-        const domainBadge = (p.domains && p.domains.length > 0)
-          ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">🌐 ${escapeHtml(p.domains[0])}</span>`
-          : '';
-        const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
+    const domainBadge = (p.domains && p.domains.length > 0)
+      ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">${icon('globe', { size: 10 })} ${escapeHtml(p.domains[0])}</span>`
+      : '';
+    const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
 
-        return `
+    return `
       <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; display: flex; flex-direction: column; justify-content: space-between;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
         <div class="project-card-header" style="min-height: 42px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 20px;">
-              ${typeIcon}
+            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); color: #818cf8; display: flex; align-items: center; justify-content: center;">
+              ${icon(typeIconName, { size: 18 })}
             </div>
             <div style="min-width: 0;">
               <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">

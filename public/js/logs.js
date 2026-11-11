@@ -227,5 +227,6 @@ window.openLogsForProject = openLogsForProject;
 
 window.loadLogsView = loadLogsView;
 window.openLogsForProject = openLogsForProject;
+window.formatLogLine = formatLogLine;
 
-export { loadLogsView, openLogsForProject };
+export { loadLogsView, openLogsForProject, formatLogLine };
