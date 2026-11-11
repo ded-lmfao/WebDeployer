@@ -1,0 +1,301 @@
+/**
+ * WebDep Modern Enterprise File Explorer & In-Browser IDE Editor
+ */
+/* ==========================================================================
+   Professional File System Explorer & IDE Editor
+   ========================================================================== */
+.file-explorer-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.file-explorer-card.drag-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.file-drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 11, 15, 0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: fadeIn 0.15s ease;
+}
+
+.file-drop-overlay-box {
+  text-align: center;
+  padding: 28px 36px;
+  background: rgba(17, 18, 23, 0.95);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+
+.file-breadcrumb-trail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  padding: 2px 0;
+}
+.file-breadcrumb-trail::-webkit-scrollbar {
+  display: none;
+}
+
+.file-crumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: var(--text-normal);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-crumb-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--accent-light);
+  border-color: var(--border-subtle);
+}
+
+.file-crumb-item.active {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-light);
+  font-weight: 600;
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.file-crumb-sep {
+  color: var(--text-dim);
+  font-size: 11px;
+  user-select: none;
+  padding: 0 1px;
+}
+
+.file-copy-path-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.file-copy-path-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+
+.file-search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.file-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.file-filter-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  padding: 5px 26px 5px 28px;
+  width: 155px;
+  transition: border-color 0.15s, width 0.2s, box-shadow 0.15s;
+}
+
+.file-filter-input:focus {
+  width: 210px;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  outline: none;
+}
+
+.file-filter-clear {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.file-filter-clear:hover {
+  color: var(--text-main);
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.file-tr {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.12s ease;
+}
+
+.file-tr:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.file-tr:last-child {
+  border-bottom: none;
+}
+
+.file-cell-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-main);
+  min-width: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-cell-name:hover .file-name-text {
+  color: var(--accent-light);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.file-icon-box {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.file-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.file-tag-ext {
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.85;
+}
+
+.file-actions-cell {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.file-btn-action {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 4px 7px;
+  font-size: 11.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  font-family: var(--font-sans);
+}
+
+.file-btn-action:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-medium);
+  color: var(--text-main);
+}
+
+.file-btn-action.danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-light);
+}
+
+/* IDE Code Editor */
+.file-editor-gutter {
+  width: 48px;
+  padding: 14px 10px 14px 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  background: #090a0d;
+  border-right: 1px solid var(--border-subtle);
+  text-align: right;
+  user-select: none;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.file-editor-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #f1f5f9;
+  resize: none;
+  overflow-y: auto;
+  white-space: pre;
+  tab-size: 2;
+  box-sizing: border-box;
+}
+
+.file-editor-textarea::selection {
+  background: rgba(59, 130, 246, 0.35);
+}
+
+

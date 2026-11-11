@@ -1,0 +1,113 @@
+/**
+ * WebDep Dialog Overlays, Workflow Modals & Interactive Prompts
+ */
+/* ---------- Modals ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  padding: 20px;
+}
+.modal-overlay.active { opacity: 1; pointer-events: auto; }
+
+.modal-container {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  width: 100%;
+  max-width: 600px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  transform: translateY(8px);
+  transition: transform 0.18s ease;
+  overflow: hidden;
+}
+.modal-overlay.active .modal-container { transform: translateY(0); }
+
+.modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-title { font-size: 15px; font-weight: 600; color: var(--text-main); }
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+}
+.modal-close:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.07); }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+
+.modal-tabs { display: flex; gap: 2px; background: var(--bg-input); padding: 2px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-bottom: 18px; }
+.modal-tab-btn {
+  flex: 1;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.modal-tab-btn:hover:not(.active) { color: var(--text-main); }
+.modal-tab-btn.active { background: rgba(255, 255, 255, 0.09); color: var(--text-main); }
+
+/* Legacy env modal tabs (inline-styled in markup) */
+.env-mode-tabs { border-radius: var(--radius-md) !important; background: var(--bg-input) !important; padding: 2px !important; border: 1px solid var(--border-subtle) !important; }
+.env-mode-tab { border-radius: var(--radius-sm) !important; font-size: 12.5px !important; font-weight: 500 !important; padding: 6px 12px !important; }
+
+.preset-selector { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-chip {
+  padding: 4px 11px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.preset-chip:hover { background: rgba(255, 255, 255, 0.04); color: var(--text-main); }
+.preset-chip.active { background: rgba(255, 255, 255, 0.08); border-color: var(--border-medium); color: var(--text-main); }
+
+.minimal-details { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+.minimal-details summary {
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.minimal-details summary::-webkit-details-marker { display: none; }
+.minimal-details summary::after { content: '▾'; font-size: 12px; color: var(--text-dim); transition: transform 0.15s ease; }
+.minimal-details[open] summary::after { transform: rotate(180deg); }
+.minimal-details summary:hover { color: var(--text-main); }
+.minimal-details-body { padding: 12px 14px 14px; border-top: 1px solid var(--border-subtle); }
+
+
