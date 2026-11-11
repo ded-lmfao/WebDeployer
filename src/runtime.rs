@@ -94,6 +94,29 @@ pub fn detect_java_exe() -> Option<(PathBuf, PathBuf)> {
         }
     }
 
+    #[cfg(not(windows))]
+    {
+        // 2. Scan standard Linux JVM / JDK directories
+        let search_dirs = [
+            "/usr/lib/jvm",
+            "/usr/java",
+            "/opt/java",
+            "/opt/jdk",
+        ];
+        for root_str in &search_dirs {
+            let root = Path::new(root_str);
+            if let Ok(entries) = std::fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let java_exe = path.join("bin").join("java");
+                    if java_exe.exists() {
+                        return Some((java_exe, path));
+                    }
+                }
+            }
+        }
+    }
+
     // 3. Scan PATH
     #[cfg(windows)]
     let java_name = "java.exe";
