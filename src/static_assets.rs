@@ -14,6 +14,18 @@ pub struct Assets;
 
 static ETAG_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 
+struct DiskCacheEntry {
+    mtime: std::time::SystemTime,
+    etag: String,
+    data: Vec<u8>,
+}
+
+static DISK_ASSET_CACHE: OnceLock<std::sync::RwLock<HashMap<String, DiskCacheEntry>>> = OnceLock::new();
+
+fn get_disk_cache() -> &'static std::sync::RwLock<HashMap<String, DiskCacheEntry>> {
+    DISK_ASSET_CACHE.get_or_init(|| std::sync::RwLock::new(HashMap::new()))
+}
+
 fn get_etag_map() -> &'static HashMap<String, String> {
     ETAG_CACHE.get_or_init(|| {
         let mut map = HashMap::new();
@@ -81,20 +93,79 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
         path.trim_start_matches('/')
     };
 
-    // FAST-PATH: If the file exists directly on disk in ./public, serve it LIVE!
-    // This provides instant hot-reloading: you edit HTML/CSS/JS and just hit F5 in browser.
-    // No rebuild, no server restart, and no deleting `target/` needed!
+    let is_html = clean_path.ends_with(".html");
+    let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
+    let cache_control = if is_html {
+        "no-cache, must-revalidate"
+    } else if has_version_query {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=86400, stale-while-revalidate=604800"
+    };
+
+    // FAST-PATH: If the file exists directly on disk in ./public, serve with RAM-backed cache & 304 ETag verification!
+    // This provides 0ms responses, automatic live hot-reload on save, and 0 bytes 304 Not Modified!
     if let Some(disk_path) = find_disk_file(clean_path) {
-        if let Ok(data) = tokio::fs::read(&disk_path).await {
+        if let Ok(meta) = tokio::fs::metadata(&disk_path).await {
+            let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let cache_lock = get_disk_cache();
+
+            let cached = {
+                let r = cache_lock.read().ok();
+                r.and_then(|map| {
+                    if let Some(entry) = map.get(clean_path) {
+                        if entry.mtime == mtime {
+                            return Some((entry.etag.clone(), entry.data.clone()));
+                        }
+                    }
+                    None
+                })
+            };
+
+            let (etag, data, is_ram_hit) = if let Some((etag, data)) = cached {
+                (etag, data, true)
+            } else if let Ok(data) = tokio::fs::read(&disk_path).await {
+                let mtime_secs = mtime
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let etag = format!("W/\"{:x}-{:x}\"", mtime_secs, data.len());
+                if let Ok(mut w) = cache_lock.write() {
+                    w.insert(
+                        clean_path.to_string(),
+                        DiskCacheEntry {
+                            mtime,
+                            etag: etag.clone(),
+                            data: data.clone(),
+                        },
+                    );
+                }
+                (etag, data, false)
+            } else {
+                return (StatusCode::NOT_FOUND, "Not Found").into_response();
+            };
+
+            // Check client ETag for instant 304 Not Modified
+            if let Some(if_none_match) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
+                if if_none_match.trim() == etag || if_none_match.contains(&etag) {
+                    return Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .header(header::ETAG, HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static("")))
+                        .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
+                        .header("x-cache", HeaderValue::from_static("DISK-304"))
+                        .body(Body::empty())
+                        .unwrap_or_else(|_| StatusCode::NOT_MODIFIED.into_response());
+                }
+            }
+
             let mime = get_mime(clean_path);
+            let cache_status = if is_ram_hit { "DISK-RAM-HIT" } else { "DISK-LIVE" };
             return Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
-                .header(
-                    header::CACHE_CONTROL,
-                    HeaderValue::from_static("no-cache, no-store, must-revalidate"),
-                )
-                .header("x-cache", HeaderValue::from_static("DISK-LIVE"))
+                .header(header::ETAG, HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static("")))
+                .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
+                .header("x-cache", HeaderValue::from_static(cache_status))
                 .body(Body::from(data))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }

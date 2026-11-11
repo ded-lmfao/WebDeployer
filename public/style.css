@@ -334,6 +334,23 @@ a { color: var(--accent-light); }
 .btn-sm svg { width: 13px; height: 13px; }
 .btn-lg { height: 38px; padding: 0 18px; font-size: 14px; }
 
+/* Button loading spinner */
+.btn-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btnSpin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+@keyframes btnSpin {
+  to { transform: rotate(360deg); }
+}
+
 /* ---------- Stats ---------- */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 22px; }
 
@@ -502,7 +519,7 @@ a { color: var(--accent-light); }
   z-index: 2;
 }
 .water-vial-bg { position: absolute; inset: 0; z-index: 1; }
-.water-vial-liquid { position: absolute; bottom: 0; left: 0; right: 0; height: 0%; background: var(--accent); opacity: 0.35; z-index: 2; transition: height 0.08s cubic-bezier(0.2, 0.8, 0.4, 1); }
+.water-vial-liquid { position: absolute; bottom: 0; left: 0; right: 0; height: 0%; background: var(--accent); opacity: 0.35; z-index: 2; transition: height 0.06s linear; }
 .water-node-vial.completed .water-vial-liquid { background: var(--success); opacity: 0.25; }
 .water-node-vial.failed .water-vial-liquid { background: var(--danger); opacity: 0.25; }
 .water-wave-surface { display: none; }
@@ -519,6 +536,7 @@ a { color: var(--accent-light); }
 .water-node-vial.completed { border-color: var(--success); }
 .water-node-vial.failed { border-color: var(--danger); }
 .water-node-vial.queued { border-color: var(--border-medium); }
+.water-node-vial.draining { border-color: rgba(255, 255, 255, 0.16); }
 
 .water-node-info { display: flex; flex-direction: column; gap: 0; margin-left: 9px; flex-shrink: 0; }
 .water-node-name { font-size: 12.5px; font-weight: 500; color: var(--text-dim); white-space: nowrap; transition: color 0.2s ease; }
@@ -530,12 +548,14 @@ a { color: var(--accent-light); }
 .water-node-sub.completed { color: var(--success-light); }
 .water-node-sub.failed { color: var(--danger-light); }
 .water-node-sub.queued { color: var(--text-dim); }
+.water-node-sub.draining { color: var(--text-muted); }
 
 .water-pipe-segment { flex: 1; margin: 0 10px; position: relative; height: 4px; display: flex; align-items: center; }
 .water-pipe-glass { width: 100%; height: 2px; background: var(--border-medium); border-radius: 1px; position: relative; }
-.water-pipe-liquid { height: 100%; width: 0%; border-radius: 1px; position: relative; transition: width 0.08s cubic-bezier(0.2, 0.8, 0.4, 1); }
+.water-pipe-liquid { height: 100%; width: 0%; border-radius: 1px; position: relative; transition: width 0.06s linear; }
 .water-pipe-liquid.flowing { background: var(--accent); }
 .water-pipe-liquid.filled { background: var(--success); }
+.water-pipe-liquid.draining { background: var(--accent); opacity: 0.25; }
 .water-pipe-liquid.empty { background: transparent; }
 .water-pipe-meniscus { display: none; }
 

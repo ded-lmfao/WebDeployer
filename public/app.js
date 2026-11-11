@@ -1688,6 +1688,7 @@ function updateWaterDOM(pipeline) {
   const isSuccess = pipeline.status === 'success';
   const activeIdx = pipeline.activeStageIdx ?? -1;
   const failedIdx = isFailed ? pipeline.failedStageIdx : -1;
+  const isDraining = (pipeline.targetProgress < pipeline.currentProgress) || (pipeline.status === 'idle' && P > 0);
 
   stages.forEach((s, idx) => {
     const unit = container.querySelector(`.water-stage-unit[data-unit-idx="${idx}"]`);
@@ -1723,7 +1724,7 @@ function updateWaterDOM(pipeline) {
     // 2. Completed Stage:
     // Past stage already completed by backend AND water has poured through it,
     // OR entire pipeline is successful and water reached this stage!
-    else if ((idx < activeIdx && P >= idx + 0.6) || (isSuccess && P >= idx + 0.6)) {
+    else if (!isDraining && ((idx < activeIdx && P >= idx + 0.6) || (isSuccess && P >= idx + 0.6))) {
       if (vial) vial.className = 'water-node-vial completed';
       if (num) num.style.display = 'none';
       if (check) check.style.display = 'block';
@@ -1731,21 +1732,33 @@ function updateWaterDOM(pipeline) {
       if (sub) { sub.textContent = 'Done'; sub.className = 'water-node-sub completed'; }
       if (name) name.className = 'water-node-name completed';
     }
-    // 3. Active Stage: currently filling or holding water while running
+    // 3. Active / Draining Stage: currently filling/emptying or holding water
     else if (P > idx) {
-      if (vial) vial.className = 'water-node-vial active';
-      if (num) num.style.display = 'block';
-      if (check) check.style.display = 'none';
-      if (cross) cross.style.display = 'none';
-      if (sub) {
-        if (vialHeight >= 99) {
-          sub.textContent = `${s.label}...`;
-        } else {
-          sub.textContent = 'Filling...';
+      if (isDraining) {
+        if (vial) vial.className = 'water-node-vial draining';
+        if (num) num.style.display = 'block';
+        if (check) check.style.display = 'none';
+        if (cross) cross.style.display = 'none';
+        if (sub) {
+          sub.textContent = 'Emptying...';
+          sub.className = 'water-node-sub draining';
         }
-        sub.className = 'water-node-sub active';
+        if (name) name.className = 'water-node-name';
+      } else {
+        if (vial) vial.className = 'water-node-vial active';
+        if (num) num.style.display = 'block';
+        if (check) check.style.display = 'none';
+        if (cross) cross.style.display = 'none';
+        if (sub) {
+          if (vialHeight >= 99) {
+            sub.textContent = `${s.label}...`;
+          } else {
+            sub.textContent = 'Filling...';
+          }
+          sub.className = 'water-node-sub active';
+        }
+        if (name) name.className = 'water-node-name active';
       }
-      if (name) name.className = 'water-node-name active';
     }
     // 4. Queued / Idle Stage
     else {
@@ -1769,12 +1782,12 @@ function updateWaterDOM(pipeline) {
         let pipeWidth = 0;
         if (P >= idx + 1.0) {
           pipeWidth = 100;
-          pipeLiquid.className = 'water-pipe-liquid filled';
+          pipeLiquid.className = isDraining ? 'water-pipe-liquid draining' : 'water-pipe-liquid filled';
           if (meniscus) meniscus.style.opacity = '0';
         } else if (P > idx + 0.6) {
           pipeWidth = Math.min(100, Math.max(0, ((P - (idx + 0.6)) / 0.4) * 100));
-          pipeLiquid.className = 'water-pipe-liquid flowing';
-          if (meniscus) meniscus.style.opacity = '1';
+          pipeLiquid.className = isDraining ? 'water-pipe-liquid draining' : 'water-pipe-liquid flowing';
+          if (meniscus) meniscus.style.opacity = isDraining ? '0' : '1';
         } else {
           pipeWidth = 0;
           pipeLiquid.className = 'water-pipe-liquid empty';
@@ -1816,15 +1829,14 @@ function startWaterLoop(pipeline) {
 
     const diff = pipeline.targetProgress - pipeline.currentProgress;
 
-    // Organic, steady water pouring pace (~3.8s total for database cards, ~5.5s for deployments)
-    const isCard = pipeline.containerId.startsWith('db-pipeline-track') || container.classList.contains('card-pipeline-track');
-    const speed = isCard ? 0.018 : 0.014;
+    // Organic, steady water pouring pace (~2.3s per stage at 60fps) from commit 889b779
+    const speed = 0.007;
 
     if (Math.abs(diff) > 0.0005) {
       if (diff > 0) {
         pipeline.currentProgress = Math.min(pipeline.targetProgress, pipeline.currentProgress + speed);
       } else {
-        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed * 1.6);
+        pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed * 3);
       }
       updateWaterDOM(pipeline);
       requestAnimationFrame(step);
@@ -1977,6 +1989,12 @@ async function deployProject(projectId, sha = null) {
   const p = state.projects.find((x) => x.id === projectId) || getSelectedProject();
   if (!p) return;
 
+  const btns = document.querySelectorAll(`button[onclick*="deployProject(${p.id})"]`);
+  btns.forEach((b) => {
+    b.disabled = true;
+    b.innerHTML = '<span class="btn-spinner"></span> Deploying...';
+  });
+
   try {
     resetWaterPipeline('main-pipeline-track');
     resetWaterPipeline('overview-pipeline-track');
@@ -1985,6 +2003,10 @@ async function deployProject(projectId, sha = null) {
     navigateTo('deployments', p.id);
   } catch (err) {
     toast(`Deployment failed to start: ${err.message}`, 'error');
+    btns.forEach((b) => {
+      b.disabled = false;
+      b.innerHTML = 'Deploy';
+    });
   }
 }
 window.deployProject = deployProject;
@@ -4063,9 +4085,12 @@ document.getElementById('nginx-certbot-btn')?.addEventListener('click', async ()
 // ============================================================================
 async function refreshCurrentViewsAfterLifecycle() {
   await loadProjects();
-  if (state.currentView === 'projects') renderProjectsList();
+  renderProjectsList();
   if (state.currentView === 'overview') await loadOverview();
-  if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) renderWebsiteWorkspaceHeader();
+  if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
+    state.lastWsBannerSig = null;
+    renderWebsiteWorkspaceHeader();
+  }
 }
 
 function handleAutoDeployedRedirect(res, projectId) {
@@ -4078,24 +4103,50 @@ function handleAutoDeployedRedirect(res, projectId) {
 }
 
 async function startProject(projectId) {
+  const btns = document.querySelectorAll(`button[onclick*="startProject(${projectId})"], button[onclick*="stopProject(${projectId})"]`);
+  btns.forEach((b) => {
+    b.disabled = true;
+    b.innerHTML = '<span class="btn-spinner"></span> Starting...';
+  });
+
+  const proj = state.projects.find((x) => x.id === projectId);
+  if (proj) proj.app_status = 'starting';
+
   try {
     const res = await api(`/api/projects/${projectId}/start`, { method: 'POST' });
     if (handleAutoDeployedRedirect(res, projectId)) return;
-    toast('Process started.', 'success');
-    await refreshCurrentViewsAfterLifecycle();
+    if (proj) proj.app_status = 'running';
+    toast('Process started successfully.', 'success');
   } catch (err) {
+    if (proj) proj.app_status = 'stopped';
     toast(`Start failed: ${err.message}`, 'error');
+  } finally {
+    state.lastWsBannerSig = null;
+    await refreshCurrentViewsAfterLifecycle();
   }
 }
 window.startProject = startProject;
 
 async function stopProject(projectId) {
+  const btns = document.querySelectorAll(`button[onclick*="startProject(${projectId})"], button[onclick*="stopProject(${projectId})"]`);
+  btns.forEach((b) => {
+    b.disabled = true;
+    b.innerHTML = '<span class="btn-spinner"></span> Stopping...';
+  });
+
+  const proj = state.projects.find((x) => x.id === projectId);
+  if (proj) proj.app_status = 'stopping';
+
   try {
     await api(`/api/projects/${projectId}/stop`, { method: 'POST' });
-    toast('Process stopped.', 'info');
-    await refreshCurrentViewsAfterLifecycle();
+    if (proj) proj.app_status = 'stopped';
+    toast('Process stopped successfully.', 'info');
   } catch (err) {
+    if (proj) proj.app_status = 'running';
     toast(`Stop failed: ${err.message}`, 'error');
+  } finally {
+    state.lastWsBannerSig = null;
+    await refreshCurrentViewsAfterLifecycle();
   }
 }
 window.stopProject = stopProject;
@@ -4108,6 +4159,7 @@ async function toggleMaintenanceMode(projectId) {
     } else {
       toast('Maintenance Mode disabled — live website resumed!', 'success');
     }
+    state.lastWsBannerSig = null;
     await refreshCurrentViewsAfterLifecycle();
   } catch (err) {
     toast(`Maintenance toggle failed: ${err.message}`, 'error');
@@ -4116,13 +4168,25 @@ async function toggleMaintenanceMode(projectId) {
 window.toggleMaintenanceMode = toggleMaintenanceMode;
 
 async function restartProject(projectId) {
+  const btns = document.querySelectorAll(`button[onclick*="restartProject(${projectId})"]`);
+  btns.forEach((b) => {
+    b.disabled = true;
+    b.innerHTML = '<span class="btn-spinner"></span> Restarting...';
+  });
+
+  const proj = state.projects.find((x) => x.id === projectId);
+  if (proj) proj.app_status = 'starting';
+
   try {
     const res = await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
     if (handleAutoDeployedRedirect(res, projectId)) return;
-    toast('Application restarted.', 'success');
-    await refreshCurrentViewsAfterLifecycle();
+    if (proj) proj.app_status = 'running';
+    toast('Application restarted successfully.', 'success');
   } catch (err) {
     toast(`Restart failed: ${err.message}`, 'error');
+  } finally {
+    state.lastWsBannerSig = null;
+    await refreshCurrentViewsAfterLifecycle();
   }
 }
 window.restartProject = restartProject;
@@ -4612,11 +4676,11 @@ function syncDatabaseCardState(id, status) {
       toggleBtn.title = 'Stop Database';
       toggleBtn.className = 'btn btn-danger btn-sm';
     } else if (isStarting) {
-      span.textContent = 'Starting...';
+      span.innerHTML = '<span class="btn-spinner"></span> Starting...';
       toggleBtn.title = 'Starting Database...';
       toggleBtn.className = 'btn btn-secondary btn-sm';
     } else if (isStopping) {
-      span.textContent = 'Stopping...';
+      span.innerHTML = '<span class="btn-spinner"></span> Stopping...';
       toggleBtn.title = 'Stopping Database...';
       toggleBtn.className = 'btn btn-secondary btn-sm';
     } else {
@@ -4647,11 +4711,12 @@ async function toggleDatabaseState(id) {
     // Launch backend start in background
     const startPromise = api(`/api/databases/${id}/start`, { method: 'POST', timeoutMs: 25000 });
 
-    // Smooth, organic 5-stage fluid progression (~750ms per stage, ~3.8s total)
+    // Smooth, organic 5-stage fluid progression (~1400ms per stage, ~7s total)
     renderSingleDatabasePipeline(id, 'sandbox', 'running', 'CHECKING PORT');
-    const t1 = setTimeout(() => renderSingleDatabasePipeline(id, 'initdb', 'running', 'DATA CLUSTER'), 750);
-    const t2 = setTimeout(() => renderSingleDatabasePipeline(id, 'security', 'running', 'SECURITY RULES'), 1500);
-    const t3 = setTimeout(() => renderSingleDatabasePipeline(id, 'spawning', 'running', 'SPAWNING ENGINE'), 2250);
+    let t1, t2, t3, t4, t5;
+    t1 = setTimeout(() => renderSingleDatabasePipeline(id, 'initdb', 'running', 'DATA CLUSTER'), 1400);
+    t2 = setTimeout(() => renderSingleDatabasePipeline(id, 'security', 'running', 'SECURITY RULES'), 2800);
+    t3 = setTimeout(() => renderSingleDatabasePipeline(id, 'spawning', 'running', 'SPAWNING ENGINE'), 4200);
 
     try {
       const updatedDb = await startPromise;
@@ -4660,21 +4725,23 @@ async function toggleDatabaseState(id) {
       }
 
       // Smooth step through verifying health to complete online ready
-      setTimeout(() => {
+      t4 = setTimeout(() => {
         renderSingleDatabasePipeline(id, 'healthy', 'running', 'VERIFYING HEALTH');
-      }, 3000);
+      }, 5600);
 
-      setTimeout(() => {
+      t5 = setTimeout(() => {
         currentDb.status = 'running';
         syncDatabaseCardState(id, 'running');
         renderSingleDatabasePipeline(id, 'healthy', 'success', 'ONLINE (READY)');
         toast(`PostgreSQL database '${currentDb.name || '#' + id}' is online and ready!`, 'success');
-      }, 3800);
+      }, 7000);
 
     } catch (err) {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      clearTimeout(t4);
+      clearTimeout(t5);
       currentDb.status = 'error';
       syncDatabaseCardState(id, 'error');
       renderSingleDatabasePipeline(id, 'spawning', 'failed', 'START FAILED');
@@ -4697,7 +4764,7 @@ async function toggleDatabaseState(id) {
         syncDatabaseCardState(id, 'stopped');
         renderSingleDatabasePipeline(id, 'sandbox', 'idle', 'IDLE');
         toast(`Database '${currentDb.name || '#' + id}' stopped successfully!`, 'info');
-      }, 800);
+      }, 1400);
 
     } catch (err) {
       currentDb.status = 'error';

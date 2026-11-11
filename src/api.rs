@@ -31,6 +31,7 @@ use crate::monitor::Monitor;
 use crate::projects::{EnvVarInput, EnvVarView, Project, Projects};
 use crate::runtime::Runtime;
 use crate::static_assets::static_handler;
+use tower_http::compression::CompressionLayer;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -143,6 +144,7 @@ pub fn create_router(state: AppState) -> Router {
         // Static assets fallback
         .fallback(axum_static_fallback)
         .layer(middleware::from_fn_with_state(state.clone(), security_middleware))
+        .layer(CompressionLayer::new())
         .with_state(state)
 }
 
@@ -1166,12 +1168,30 @@ async fn passkey_login_finish_handler(
 async fn list_projects_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<Project>>, StatusCode> {
+) -> Result<Response, StatusCode> {
+    let user_opt = current_user(&state, &headers);
+    let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
+    let cache_key = format!("projects:u{}", uid);
+
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
+        return Ok(res);
+    }
+
     let mut list = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if let Some(u) = current_user(&state, &headers) {
+    if let Some(ref u) = user_opt {
         list.retain(|p| u.can_access_project(p.id));
     }
-    Ok(Json(list))
+
+    if let Ok(json_val) = serde_json::to_value(&list) {
+        state
+            .cache
+            .set(cache_key, json_val, std::time::Duration::from_secs(4));
+    }
+
+    let mut res = Json(list).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
 }
 
 async fn get_project_handler(
@@ -3958,11 +3978,27 @@ async fn caddy_status_handler(State(state): State<AppState>) -> Response {
 async fn list_databases_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<crate::databases::ManagedDatabase>>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let _user = current_user(&state, &headers)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+
+    let cache_key = "databases:all".to_string();
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
+        return Ok(res);
+    }
+
     let list = state.databases.list().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(Json(list))
+
+    if let Ok(json_val) = serde_json::to_value(&list) {
+        state
+            .cache
+            .set(cache_key, json_val, std::time::Duration::from_secs(4));
+    }
+
+    let mut res = Json(list).into_response();
+    res.headers_mut()
+        .insert("x-cache", HeaderValue::from_static("MISS"));
+    Ok(res)
 }
 
 async fn get_database_handler(
