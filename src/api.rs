@@ -2556,6 +2556,9 @@ pub struct ResourceItem {
     pub project_id: Option<i64>,
     #[serde(rename = "databaseId")]
     pub database_id: Option<i64>,
+    #[serde(rename = "commitSha")]
+    pub commit_sha: Option<String>,
+    pub domain: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -2709,6 +2712,8 @@ async fn overview_handler(
         memory_pct: panel_mem_pct,
         project_id: None,
         database_id: None,
+        commit_sha: None,
+        domain: None,
     });
 
     let mut items = Vec::new();
@@ -2782,6 +2787,8 @@ async fn overview_handler(
             memory_pct: mem_pct,
             project_id: Some(p.id),
             database_id: None,
+            commit_sha: p.deployed_sha.clone(),
+            domain: p.domains.first().cloned(),
         });
     }
 
@@ -2828,6 +2835,8 @@ async fn overview_handler(
             memory_pct: mem_pct,
             project_id: None,
             database_id: Some(db.id),
+            commit_sha: None,
+            domain: if db.domain.is_empty() { None } else { Some(db.domain.clone()) },
         });
     }
 

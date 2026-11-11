@@ -1144,22 +1144,42 @@ function renderResourceBreakdown(resources) {
   const filtered = filter === 'all' ? list : list.filter((r) => r.kind === filter);
 
   if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px; color: var(--text-dim);">No workloads found in this category.</td></tr>';
+    let emptyMsg = 'No active workloads found.';
+    let emptyAction = '';
+    if (filter === 'website') {
+      emptyMsg = 'No hosted websites created yet.';
+      emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="openAddWebsiteModal()">+ Add Website</button>';
+    } else if (filter === 'service') {
+      emptyMsg = 'No backend services or bots created yet.';
+      emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="openAddServiceModal()">+ Add Service</button>';
+    } else if (filter === 'database') {
+      emptyMsg = 'No managed databases created yet.';
+      emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="navigateTo(\'databases\')">Go to Databases &rarr;</button>';
+    }
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 32px 16px; color: var(--text-dim);"><div style="font-size: 13.5px;">${emptyMsg}</div>${emptyAction}</td></tr>`;
     return;
   }
 
   tbody.innerHTML = filtered.map((r) => {
     const isRunning = r.status === 'running';
+    const isMaintenance = r.status === 'maintenance';
     const kindUpper = r.kind.toUpperCase();
     const kindBadgeClass = `badge-res-${r.kind}`;
     const icon = r.kind === 'panel' ? '⚡' : r.kind === 'database' ? '🗄️' : r.kind === 'service' ? '🤖' : '🌐';
-    const subtitle = r.kind === 'panel'
-      ? 'Core Platform Daemon'
-      : r.kind === 'database'
-      ? 'Managed Database'
-      : r.kind === 'service'
-      ? 'Background Service / Bot'
-      : 'Web Application';
+    
+    let subtitle = '';
+    if (r.kind === 'panel') {
+      subtitle = '<span style="color:var(--text-dim)">Core Platform Daemon</span>';
+    } else if (r.kind === 'database') {
+      subtitle = '<span style="color:var(--text-dim)">PostgreSQL Instance</span>';
+    } else if (r.kind === 'service') {
+      const sha = r.commitSha ? `<span class="sha-pill" style="font-size:10px; margin-left:4px;">${r.commitSha.slice(0, 7)}</span>` : '';
+      subtitle = `<span style="color:var(--text-dim)">Backend Service</span>${sha}`;
+    } else {
+      const dom = r.domain ? `<a href="http://${escapeHtml(r.domain)}" target="_blank" class="domain-badge" style="font-size:11px;" onclick="event.stopPropagation()">${escapeHtml(r.domain)}</a>` : (r.port ? `<span style="color:var(--text-dim)">:${r.port}</span>` : '<span style="color:var(--text-dim)">Local only</span>');
+      const sha = r.commitSha ? `<span class="sha-pill" style="font-size:10px; margin-left:4px;">${r.commitSha.slice(0, 7)}</span>` : '';
+      subtitle = `${dom}${sha}`;
+    }
 
     const portPid = [
       r.port ? `:${r.port}` : null,
@@ -1174,15 +1194,17 @@ function renderResourceBreakdown(resources) {
 
     let actionBtn = '';
     if (r.kind === 'panel') {
-      actionBtn = `<button class="btn btn-secondary btn-sm" onclick="navigateTo('settings')">Settings &rarr;</button>`;
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'settings\')">Settings &rarr;</button>';
     } else if (r.kind === 'database') {
-      actionBtn = `<button class="btn btn-secondary btn-sm" onclick="navigateTo('databases')">Databases &rarr;</button>`;
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'databases\')">Databases &rarr;</button>';
     } else if (r.project_id) {
       actionBtn = `<button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${r.project_id}, 'deployments')">Manage &rarr;</button>`;
     }
 
+    const rowClick = r.project_id ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${r.project_id}, 'deployments')"` : '';
+
     return `
-      <tr>
+      <tr ${rowClick}>
         <td>
           <div class="res-workload-title">
             <div class="res-workload-icon">${icon}</div>
@@ -1195,8 +1217,8 @@ function renderResourceBreakdown(resources) {
         <td><span class="${kindBadgeClass}">${kindUpper}</span></td>
         <td>${portPid}</td>
         <td>
-          <span class="status-dot ${isRunning ? 'online' : 'offline'}"></span>
-          <span style="font-size: 12px; font-weight: 600; margin-left: 5px; color: ${isRunning ? 'var(--success)' : 'var(--text-muted)'};">${isRunning ? 'Running' : 'Stopped'}</span>
+          <span class="status-dot ${isRunning ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
+          <span style="font-size: 12px; font-weight: 600; margin-left: 5px; color: ${isRunning ? 'var(--success)' : isMaintenance ? 'var(--warning)' : 'var(--text-muted)'};">${isRunning ? 'Running' : isMaintenance ? 'Maintenance' : 'Stopped'}</span>
         </td>
         <td>
           <div class="res-metric-cell">
@@ -1220,7 +1242,7 @@ function renderResourceBreakdown(resources) {
             </div>
           </div>
         </td>
-        <td style="text-align: right;">
+        <td style="text-align: right;" onclick="event.stopPropagation()">
           ${actionBtn}
         </td>
       </tr>
@@ -1341,72 +1363,10 @@ async function loadOverview() {
       actBox.style.display = 'none';
     }
 
-    // Websites Table & Recent Deployments with change-detection cache
-    const sig = `${data.projects.map((x) => `${x.project.id}:${x.project.updated_at}:${x.project.app_status}:${x.app?.running}:${x.app?.cpuPct}:${x.app?.memoryBytes}:${x.behind}:${x.project.deployed_sha}`).join('|')}_${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}_${data.resources?.map((r) => `${r.id}:${r.status}:${r.cpuPct}:${r.memoryBytes}`).join('|')}`;
+    // Recent Deployments with change-detection cache
+    const sig = `${data.recent?.map((x) => `${x.id}:${x.status}:${x.stage}`).join('|')}`;
     if (state.lastOverviewSig !== sig) {
       state.lastOverviewSig = sig;
-
-      // Websites Table
-      const renderOverviewRows = (tbody, items, emptyMsg) => {
-        if (!tbody) return;
-        if (!items.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">' + emptyMsg + '</td></tr>';
-          return;
-        }
-        tbody.innerHTML = items.map((item) => {
-          const p = item.project;
-          const isOnline = p.app_status === 'running';
-          const isMaintenance = p.app_status === 'maintenance';
-          const isService = p.project_kind === 'service';
-          const domains = p.domains && p.domains.length ? p.domains : [];
-          const domainLinks = isService
-            ? `<span class="badge badge-neutral" style="font-size: 11px;">🤖 ${escapeHtml(p.project_type ? p.project_type.toUpperCase() : 'SERVICE')}</span>`
-            : (domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
-              (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>'));
-          const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">None</span>';
-          
-          let behindAhead = '--';
-          if (item.behind != null && item.ahead != null) {
-            behindAhead = item.behind > 0 ? `<span style="color:var(--warning); font-weight:600;">${item.behind} behind</span>` : '<span style="color:var(--success);">Up to date</span>';
-          }
-
-          const lastDep = item.lastSuccess ? `<span style="font-size:12px;">${formatRelativeTime(item.lastSuccess.finished_at || item.lastSuccess.started_at)}</span>` : '<span style="color:var(--text-dim)">Never</span>';
-
-          const cpuVal = item.app?.cpuPct != null ? `${item.app.cpuPct.toFixed(1)}%` : '--';
-          const memVal = item.app?.memoryFormatted || '--';
-          const resourceCell = isOnline
-            ? `<span style="font-family: var(--font-mono); font-size: 11.5px; color: var(--accent-light); font-weight: 600;">⚡ ${cpuVal} &bull; ${memVal}</span>`
-            : `<span style="color: var(--text-dim); font-size: 11.5px;">--</span>`;
-
-          return `
-            <tr style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
-              <td>
-                <strong style="color: var(--accent-light); font-size: 13.5px;">${escapeHtml(p.name)}</strong>
-              </td>
-              <td onclick="event.stopPropagation()">${domainLinks}</td>
-              <td>
-                <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
-                <span style="font-weight: 600; font-size: 12px; margin-left: 5px; color: ${isOnline ? 'var(--success)' : isMaintenance ? 'var(--warning)' : 'var(--text-muted)'};">${isOnline ? 'Online' : isMaintenance ? 'Maintenance' : 'Offline'}</span>
-              </td>
-              <td>${resourceCell}</td>
-              <td>${sha}</td>
-              <td onclick="event.stopPropagation()">
-                <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">Manage &rarr;</button>
-              </td>
-            </tr>
-          `;
-        }).join('');
-      };
-      renderOverviewRows(
-        document.getElementById('overview-projects-table'),
-        data.projects.filter((x) => x.project.project_kind !== 'service'),
-        'No websites created yet. Click "Add Website" to get started.'
-      );
-      renderOverviewRows(
-        document.getElementById('overview-services-table'),
-        data.projects.filter((x) => x.project.project_kind === 'service'),
-        'No backend services yet. Open the Services tab to add a bot or worker.'
-      );
 
       // Recent Deployments (paginated max 20 per page)
       const recBody = document.getElementById('overview-recent-table');
