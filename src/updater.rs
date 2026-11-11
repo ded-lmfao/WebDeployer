@@ -39,6 +39,7 @@ pub struct GitVersionInfo {
     pub remote_commit: Option<String>,
     pub has_update: bool,
     pub update_in_progress: bool,
+    pub ready_to_restart: bool,
 }
 
 #[derive(Deserialize)]
@@ -141,9 +142,9 @@ impl Updater {
     }
 
     pub fn get_version_info(&self) -> GitVersionInfo {
-        let is_updating = {
+        let (is_updating, ready_to_restart) = {
             let st = self.status.lock().unwrap();
-            st.status == "in_progress"
+            (st.status == "in_progress", st.status == "ready_to_restart")
         };
 
         let current_commit = Command::new("git")
@@ -205,6 +206,7 @@ impl Updater {
             remote_commit,
             has_update,
             update_in_progress: is_updating,
+            ready_to_restart,
         }
     }
 
@@ -471,19 +473,16 @@ impl Updater {
         }
 
         Self::append_log(&status_arc, &format!("[Success] New WebDep release binary compiled and verified! (Commit: {})", new_commit));
+        Self::append_log(&status_arc, "[Ready] WebDep is compiled and staged for restart. Awaiting user restart confirmation.");
 
-        // STEP 4: Trigger delayed restart
-        Self::set_step(&status_arc, "Update complete! Restarting WebDep service...", 95);
-        Self::append_log(&status_arc, "[Restart] Scheduling service restart in 1.5s...");
+        Self::set_step(&status_arc, "Update compiled successfully! Ready to restart WebDep.", 100);
 
         if let Ok(mut st) = status_arc.lock() {
-            st.status = "success".to_string();
+            st.status = "ready_to_restart".to_string();
             st.progress = 100;
-            st.step = "Update complete! WebDep service is restarting... Reconnecting...".to_string();
+            st.step = "Update compiled successfully! Restart panel to apply changes.".to_string();
             st.finished_at = Some(now_secs());
         }
-
-        restart_service_delayed(1500);
     }
 }
 

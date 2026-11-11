@@ -2732,25 +2732,7 @@ async fn restart_panel_handler(
     );
     state.logs.add(None, None, "system", "warn", &format!("Panel restart requested by {}", actor.username));
 
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-        if let Ok(exe) = std::env::current_exe() {
-            let mut cmd = std::process::Command::new(exe);
-            cmd.env("WEBDEP_RESTARTED", "1")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so the new panel outlives this one
-                cmd.creation_flags(0x00000008 | 0x00000200);
-            }
-            let _ = cmd.spawn();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        std::process::exit(0);
-    });
+    crate::updater::restart_service_delayed(600);
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "Panel is restarting" })))
 }

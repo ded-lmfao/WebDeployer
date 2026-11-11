@@ -182,7 +182,7 @@ const SESSION_CACHE_KEY = 'webdep_fast_cache_v3';
 try {
   sessionStorage.removeItem('webdep_fast_cache_v1');
   sessionStorage.removeItem('webdep_fast_cache_v2');
-} catch (_) {}
+} catch (_) { }
 
 // Hydrate warm cache from sessionStorage on startup (never cache /api/auth/*)
 try {
@@ -198,7 +198,7 @@ try {
       }
     }
   }
-} catch (_) {}
+} catch (_) { }
 
 function persistCacheToSession() {
   try {
@@ -206,7 +206,7 @@ function persistCacheToSession() {
       .filter(([k]) => !k.startsWith('/api/auth/'))
       .slice(-60);
     sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(entries));
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function getCacheTtlMs(path) {
@@ -246,7 +246,7 @@ function invalidateClientCache(prefix = '') {
   }
   try {
     sessionStorage.removeItem(SESSION_CACHE_KEY);
-  } catch (_) {}
+  } catch (_) { }
 }
 window.invalidateClientCache = invalidateClientCache;
 
@@ -354,7 +354,7 @@ async function api(path, options = {}) {
             persistCacheToSession();
             return fresh;
           })
-          .catch(() => {})
+          .catch(() => { })
           .finally(() => inflightGets.delete(path));
         inflightGets.set(path, bgPromise);
       }
@@ -398,7 +398,7 @@ function prefetchWebsiteWorkspace(projectId) {
   setTimeout(() => {
     for (const url of endpoints) {
       if (!clientCache.has(url)) {
-        api(url).catch(() => {});
+        api(url).catch(() => { });
       }
     }
   }, 10);
@@ -431,7 +431,7 @@ function resetCleanUrl() {
     if (window.location.hash || window.location.search) {
       window.history.replaceState(null, '', window.location.pathname || '/');
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function stopPolling() {
@@ -444,7 +444,7 @@ function stopPolling() {
     state.activeDepPollTimer = null;
   }
   if (state.logEventSource) {
-    try { state.logEventSource.close(); } catch (_) {}
+    try { state.logEventSource.close(); } catch (_) { }
     state.logEventSource = null;
   }
 }
@@ -485,7 +485,7 @@ function showLogin() {
   state.currentView = 'overview';
   state.lastOverviewSig = null;
   invalidateClientCache();
-  try { sessionStorage.clear(); } catch (_) {}
+  try { sessionStorage.clear(); } catch (_) { }
 
   // Reset URL to clean root (strip #/settings, #/projects, query params, etc.)
   resetCleanUrl();
@@ -884,19 +884,19 @@ function renderWebsiteWorkspaceHeader() {
           ` : ''}
           ${hasPower('process') ? `
             ${!isOnline
-              ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
+            ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                    <span>Start</span>
                  </button>`
-              : ''
-            }
+            : ''
+          }
             ${isOnline || isMaintenance
-              ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
+            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg>
                    <span>Stop</span>
                  </button>`
-              : ''
-            }
+            : ''
+          }
             <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
               <span>Restart</span>
@@ -1106,7 +1106,7 @@ async function loadProjects() {
     if (badgeServicesEl) badgeServicesEl.textContent = services.length;
 
     // Keep databases count badge continuously synchronized
-    loadDatabases().catch(() => {});
+    loadDatabases().catch(() => { });
 
     if (state.projects.length > 0 && !state.selectedProjectId) {
       state.selectedProjectId = state.projects[0].id;
@@ -1153,12 +1153,12 @@ async function loadOverview() {
     if (badgeWebEl) badgeWebEl.textContent = ovWeb.length;
     const badgeSvcEl = document.getElementById('badge-services-count');
     if (badgeSvcEl) badgeSvcEl.textContent = ovSvc.length;
-    loadDatabases().catch(() => {});
+    loadDatabases().catch(() => { });
 
     const svcOnline = ovSvc.filter((x) => x.app?.running).length;
     document.getElementById('stat-services-online').textContent = svcOnline;
     document.getElementById('stat-services-offline').textContent = ovSvc.length - svcOnline;
-    
+
     let online = 0;
     let offline = 0;
     ovWeb.forEach((item) => {
@@ -1226,7 +1226,7 @@ async function loadOverview() {
             : (domains.map((d) => `<a class="domain-badge" href="http://${escapeHtml(d)}" target="_blank">${escapeHtml(d)}</a>`).join(' ') ||
               (p.port ? `<a class="domain-badge" href="http://127.0.0.1:${p.port}" target="_blank">http://127.0.0.1:${p.port}</a>` : '<span style="color:var(--text-dim)">Local only</span>'));
           const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">None</span>';
-          
+
           let behindAhead = '--';
           if (item.behind != null && item.ahead != null) {
             behindAhead = item.behind > 0 ? `<span style="color:var(--warning); font-weight:600;">${item.behind} behind</span>` : '<span style="color:var(--success);">Up to date</span>';
@@ -1363,9 +1363,9 @@ function renderProjectsList() {
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
           <div style="display: flex; gap: 6px;">
             ${isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
-            }
+        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+      }
             <button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
           </div>
           <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
@@ -1475,20 +1475,20 @@ function renderServicesList() {
     const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
     const defaultTab = isLocal ? 'files' : 'deployments';
 
-        let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
-        if (p.access_mode === 'allowlist') {
-          const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
-          accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
-        } else if (p.access_mode === 'public') {
-          accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
-        }
+    let accessBadge = '<span class="badge badge-neutral" style="font-size: 10px;">🔒 Localhost Only</span>';
+    if (p.access_mode === 'allowlist') {
+      const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
+      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">🛡️ Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
+    } else if (p.access_mode === 'public') {
+      accessBadge = '<span class="badge badge-warning" style="font-size: 10px;">🌐 Public</span>';
+    }
 
-        const domainBadge = (p.domains && p.domains.length > 0)
-          ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">🌐 ${escapeHtml(p.domains[0])}</span>`
-          : '';
-        const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
+    const domainBadge = (p.domains && p.domains.length > 0)
+      ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">🌐 ${escapeHtml(p.domains[0])}</span>`
+      : '';
+    const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
 
-        return `
+    return `
       <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
         <div class="project-card-header">
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -1533,9 +1533,9 @@ function renderServicesList() {
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px;">
           <div style="display: flex; gap: 6px;">
             ${isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
-            }
+        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
+        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+      }
             ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>` : ''}
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" title="Upload and manage service files">Files</button>
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" title="View live logs">Logs</button>
@@ -2914,7 +2914,7 @@ function resetWaterPipeline(containerId) {
 }
 window.resetWaterPipeline = resetWaterPipeline;
 
-window.simulateWaterDeploy = function() {
+window.simulateWaterDeploy = function () {
   const stages = ['pending', 'fetching', 'pulling', 'installing', 'building', 'deploying', 'health_checking'];
   let sIdx = 0;
   const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
@@ -2941,7 +2941,7 @@ window.simulateWaterDeploy = function() {
   }, 2600);
 };
 
-window.simulateWaterDrain = function() {
+window.simulateWaterDrain = function () {
   const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
   const badge = document.getElementById('pipeline-status-badge');
   if (badge) {
@@ -3200,7 +3200,7 @@ async function loadLogsView() {
     if (Array.isArray(history)) {
       state.logLines = history;
     }
-  } catch (_) {}
+  } catch (_) { }
   renderTerminalLogs();
 }
 
@@ -3441,7 +3441,7 @@ async function loadEnvView() {
   if (!state.projects || state.projects.length === 0) {
     try {
       state.projects = await api('/api/projects');
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const p = getSelectedProject();
@@ -3466,7 +3466,7 @@ async function loadEnvView() {
         vars.forEach((v) => {
           if (map.has(v.key)) v.real_value = map.get(v.key);
         });
-      } catch (_) {}
+      } catch (_) { }
     }
 
     envUiState.vars = Array.isArray(vars) ? vars : [];
@@ -3505,7 +3505,7 @@ function parseDotenvClient(input) {
     const key = line.slice(0, eqIdx).trim();
     let val = line.slice(eqIdx + 1).trim();
     if ((val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
-        (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
+      (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
       val = val.slice(1, -1).replace(/\\"/g, '"');
     } else {
       const commentIdx = val.indexOf(' #');
@@ -3631,15 +3631,15 @@ function renderEnvTableFromState() {
           </td>
           <td>
             ${isRevealed
-              ? `<span class="env-val-box" title="${escapeHtml(realVal)}">${escapeHtml(realVal) || '<em style="color:var(--text-dim);">(empty)</em>'}</span>`
-              : `<span class="env-val-box masked" onclick="toggleRevealSingleEnv(${keyJs})" title="Click to show value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>`
-            }
+          ? `<span class="env-val-box" title="${escapeHtml(realVal)}">${escapeHtml(realVal) || '<em style="color:var(--text-dim);">(empty)</em>'}</span>`
+          : `<span class="env-val-box masked" onclick="toggleRevealSingleEnv(${keyJs})" title="Click to show value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>`
+        }
           </td>
           <td>
             ${isSecret
-              ? '<span class="badge badge-warning">Secret</span>'
-              : '<span class="badge badge-neutral">Public</span>'
-            }
+          ? '<span class="badge badge-warning">Secret</span>'
+          : '<span class="badge badge-neutral">Public</span>'
+        }
           </td>
           <td style="text-align: right;">
             <div style="display: inline-flex; gap: 6px; justify-content: flex-end;">
@@ -3776,7 +3776,7 @@ async function handleInlineQuickAddEnv(e) {
     const extractedKey = key.slice(0, eq).replace(/^export\s+/, '').trim();
     let extractedVal = key.slice(eq + 1).trim();
     if ((extractedVal.startsWith('"') && extractedVal.endsWith('"')) ||
-        (extractedVal.startsWith("'") && extractedVal.endsWith("'"))) {
+      (extractedVal.startsWith("'") && extractedVal.endsWith("'"))) {
       extractedVal = extractedVal.slice(1, -1);
     }
     key = extractedKey;
@@ -4270,7 +4270,7 @@ function openCreateReleaseModal() {
     if (projGroup) projGroup.style.display = 'block';
     if (targetLabel) targetLabel.style.display = 'none';
     if (projSelect) {
-      projSelect.innerHTML = state.projects.map((proj) => 
+      projSelect.innerHTML = state.projects.map((proj) =>
         `<option value="${proj.id}" ${p && p.id === proj.id ? 'selected' : ''}>${escapeHtml(proj.name)} (${escapeHtml(proj.slug)})</option>`
       ).join('');
       projSelect.onchange = (e) => {
@@ -4454,7 +4454,7 @@ function renderSecurityStatusSummary() {
 
 async function loadSettingsView() {
   renderSecurityStatusSummary();
-  loadPasskeysList().catch(() => {});
+  loadPasskeysList().catch(() => { });
 
   const canManagePlatform = hasPower('settings_manage');
   const isMain = Boolean(state.user && state.user.isMainAdmin);
@@ -4466,7 +4466,7 @@ async function loadSettingsView() {
   if (usersCard) usersCard.style.display = isMain ? '' : 'none';
   if (panelCard) panelCard.style.display = isMain ? '' : 'none';
   if (updateCard) updateCard.style.display = isMain ? '' : 'none';
-  if (isMain) loadSystemVersionInfo(true).catch(() => {});
+  if (isMain) loadSystemVersionInfo(true).catch(() => { });
   if (!canManagePlatform && !isMain) return;
 
   try {
@@ -4481,7 +4481,7 @@ async function loadSettingsView() {
     if (s.github_tokens) {
       try {
         parsedTokens = JSON.parse(s.github_tokens);
-      } catch (_) {}
+      } catch (_) { }
     }
     if ((!Array.isArray(parsedTokens) || !parsedTokens.length) && s.github_token) {
       parsedTokens = String(s.github_token)
@@ -4492,10 +4492,10 @@ async function loadSettingsView() {
     }
     state.githubTokensDraft = Array.isArray(parsedTokens) && parsedTokens.length
       ? parsedTokens.map((t, i) => ({
-          label: t.label || `Account #${i + 1}`,
-          token: t.token || '',
-          revealed: false,
-        }))
+        label: t.label || `Account #${i + 1}`,
+        token: t.token || '',
+        revealed: false,
+      }))
       : [{ label: 'Primary Account', token: '', revealed: false }];
 
     const activeCount = state.githubTokensDraft.filter((t) => (t.token || '').trim().length > 0).length;
@@ -4531,11 +4531,11 @@ async function loadSettingsView() {
           const projHtml = (isMain || u.allProjects)
             ? '<span class="badge badge-info">All Websites (*)</span>'
             : (u.allowedProjects && u.allowedProjects.length
-                ? u.allowedProjects.map((pid) => {
-                    const proj = state.projects.find((p) => p.id === pid);
-                    return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
-                  }).join(' ')
-                : '<span class="badge badge-warning">No Websites Assigned</span>');
+              ? u.allowedProjects.map((pid) => {
+                const proj = state.projects.find((p) => p.id === pid);
+                return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
+              }).join(' ')
+              : '<span class="badge badge-warning">No Websites Assigned</span>');
 
           const perms = isMain || (u.permissions && u.permissions.includes('*'))
             ? ['*']
@@ -5906,8 +5906,8 @@ function startPolling() {
     try {
       // Keep sidebar badges (databases & projects & services) constantly up-to-date across all tabs
       await Promise.all([
-        loadProjects().catch(() => {}),
-        loadDatabases().catch(() => {})
+        loadProjects().catch(() => { }),
+        loadDatabases().catch(() => { })
       ]);
 
       if (state.currentView === 'overview') {
@@ -6449,7 +6449,7 @@ async function registerNewPasskey() {
         const spkiBuf = cred.response.getPublicKey();
         if (spkiBuf) publicKeySpki = bufferToBase64Url(spkiBuf);
       }
-    } catch (_) {}
+    } catch (_) { }
 
     let authenticatorData = null;
     try {
@@ -6457,7 +6457,7 @@ async function registerNewPasskey() {
         const adBuf = cred.response.getAuthenticatorData();
         if (adBuf) authenticatorData = bufferToBase64Url(adBuf);
       }
-    } catch (_) {}
+    } catch (_) { }
 
     const finishRes = await api('/api/auth/passkeys/register/finish', {
       method: 'POST',
@@ -7132,18 +7132,42 @@ async function loadSystemVersionInfo(quiet = false) {
     const branchEl = document.getElementById('platform-branch-name');
     const hashEl = document.getElementById('platform-commit-hash');
     const msgEl = document.getElementById('platform-commit-msg');
+    const remoteBranchEl = document.getElementById('platform-remote-branch');
+    const remoteHashEl = document.getElementById('platform-remote-hash');
+    const remoteStatusEl = document.getElementById('platform-remote-status-text');
     const badgeEl = document.getElementById('platform-version-badge');
     const updateBtn = document.getElementById('trigger-platform-update-btn');
+    const restartBanner = document.getElementById('platform-restart-alert-banner');
 
     if (branchEl) branchEl.textContent = v.current_branch || 'main';
     if (hashEl) hashEl.textContent = v.current_commit || 'unknown';
     if (msgEl) msgEl.textContent = v.commit_message || 'Self-hosted WebDep deployment platform';
+    if (remoteBranchEl) remoteBranchEl.textContent = v.current_branch || 'main';
+    if (remoteHashEl) remoteHashEl.textContent = v.remote_commit ? v.remote_commit : 'Up to date';
+
+    if (remoteStatusEl) {
+      if (v.ready_to_restart) {
+        remoteStatusEl.innerHTML = '<span style="color:#fbbf24; font-weight:600;">Update compiled! Restart required to activate.</span>';
+      } else if (v.has_update) {
+        remoteStatusEl.innerHTML = `<span style="color:var(--success); font-weight:600;">New commit ${v.remote_commit} available on GitHub.</span>`;
+      } else {
+        remoteStatusEl.textContent = `Aligned with remote origin/${v.current_branch || 'main'}`;
+      }
+    }
+
+    if (restartBanner) {
+      restartBanner.style.display = v.ready_to_restart ? 'flex' : 'none';
+    }
 
     if (badgeEl) {
       if (v.update_in_progress) {
         badgeEl.textContent = '● Update in Progress';
         badgeEl.style.background = 'rgba(234, 179, 8, 0.15)';
         badgeEl.style.color = '#eab308';
+      } else if (v.ready_to_restart) {
+        badgeEl.textContent = '⚠️ Restart Required';
+        badgeEl.style.background = 'rgba(245, 158, 11, 0.15)';
+        badgeEl.style.color = '#fbbf24';
       } else if (v.has_update) {
         badgeEl.textContent = `🚀 Update Available (${v.remote_commit})`;
         badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
@@ -7175,7 +7199,9 @@ async function checkPlatformUpdates(manual = false) {
   if (btn) btn.disabled = false;
 
   if (manual && v) {
-    if (v.has_update) {
+    if (v.ready_to_restart) {
+      toast('A new release is already compiled and waiting! Click Restart Panel to activate it.', 'warning', 6000);
+    } else if (v.has_update) {
       toast(`New commit ${v.remote_commit} available on origin/${v.current_branch}! Click Update to apply.`, 'success', 5000);
     } else {
       toast(`WebDep is already up to date with origin/${v.current_branch} (${v.current_commit})`, 'success');
@@ -7183,6 +7209,40 @@ async function checkPlatformUpdates(manual = false) {
   }
 }
 window.checkPlatformUpdates = checkPlatformUpdates;
+
+function updatePipelineStepIndicators(progress, isError = false) {
+  const dot1 = document.getElementById('step-dot-1');
+  const dot2 = document.getElementById('step-dot-2');
+  const dot3 = document.getElementById('step-dot-3');
+  const dot4 = document.getElementById('step-dot-4');
+
+  const card1 = document.getElementById('step-card-1');
+  const card2 = document.getElementById('step-card-2');
+  const card3 = document.getElementById('step-card-3');
+  const card4 = document.getElementById('step-card-4');
+
+  if (progress >= 10 && dot1) {
+    dot1.textContent = '✅';
+    if (card1) card1.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+  }
+  if (progress >= 35 && dot2) {
+    dot2.textContent = '✅';
+    if (card2) card2.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+  }
+  if (progress >= 45 && dot3) {
+    if (progress >= 95) {
+      dot3.textContent = '✅';
+      if (card3) card3.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+    } else {
+      dot3.textContent = '🔄';
+      if (card3) card3.style.borderColor = 'var(--accent-light)';
+    }
+  }
+  if (progress >= 100 && dot4) {
+    dot4.textContent = isError ? '❌' : '🚀';
+    if (card4) card4.style.borderColor = isError ? 'var(--danger)' : 'rgba(16, 185, 129, 0.6)';
+  }
+}
 
 async function startPlatformUpdate() {
   const v = await loadSystemVersionInfo(true);
@@ -7193,8 +7253,8 @@ async function startPlatformUpdate() {
     message: `Fetch latest commits from <strong>origin/${escapeHtml(branchName)}</strong> and recompile WebDep?<br><br>
     &bull; <strong style="color:var(--success);">Safe & Non-Destructive:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file are completely untouched.<br>
     &bull; <strong style="color:var(--accent-light);">Resource-Safe:</strong> Compiled in low-RAM mode (<code>CARGO_BUILD_JOBS=1</code>) to prevent VPS out-of-memory errors.<br>
-    &bull; <strong style="color:var(--text-main);">Automatic Restart:</strong> WebDep will automatically hot-swap and reboot cleanly once compilation succeeds.`,
-    confirmText: '🚀 Fetch & Update WebDep',
+    &bull; <strong style="color:var(--text-main);">Zero Unplanned Downtime:</strong> Once compilation finishes, WebDep will pause and ask for your confirmation before restarting.`,
+    confirmText: '🚀 Fetch & Compile WebDep',
     danger: false,
   });
   if (!ok) return;
@@ -7205,8 +7265,18 @@ async function startPlatformUpdate() {
   const consoleLogs = document.getElementById('update-console-logs');
   const bannerMsg = document.getElementById('update-banner-msg');
   const spinner = document.getElementById('update-active-spinner');
+  const statusBanner = document.getElementById('update-status-banner');
+  const restartPrompt = document.getElementById('update-restart-prompt');
   const dismissBtn = document.getElementById('update-dismiss-btn');
   const closeBtn = document.getElementById('modal-platform-update-close');
+
+  // Reset steps
+  ['1', '2', '3', '4'].forEach((num) => {
+    const dot = document.getElementById(`step-dot-${num}`);
+    const card = document.getElementById(`step-card-${num}`);
+    if (dot) dot.textContent = num === '1' ? '🛡️' : num === '2' ? '🐙' : num === '3' ? '⚙️' : '🚀';
+    if (card) card.style.borderColor = 'var(--border)';
+  });
 
   if (stepText) stepText.textContent = 'Initializing update pipeline...';
   if (pctText) pctText.textContent = '5%';
@@ -7216,6 +7286,8 @@ async function startPlatformUpdate() {
   }
   if (consoleLogs) consoleLogs.textContent = 'Connecting to backend update service...\n';
   if (bannerMsg) bannerMsg.textContent = 'Preserving your databases and environment settings while building the latest release.';
+  if (statusBanner) statusBanner.style.display = 'flex';
+  if (restartPrompt) restartPrompt.style.display = 'none';
   if (spinner) spinner.style.display = 'block';
   if (dismissBtn) dismissBtn.disabled = true;
   if (closeBtn) closeBtn.style.display = 'none';
@@ -7243,6 +7315,8 @@ async function startPlatformUpdate() {
       if (pctText) pctText.textContent = `${st.progress || 0}%`;
       if (progressBar) progressBar.style.width = `${st.progress || 0}%`;
 
+      updatePipelineStepIndicators(st.progress || 0, st.status === 'error');
+
       if (consoleLogs && Array.isArray(st.logs)) {
         consoleLogs.textContent = st.logs.join('\n');
         consoleLogs.scrollTop = consoleLogs.scrollHeight;
@@ -7257,19 +7331,78 @@ async function startPlatformUpdate() {
         if (dismissBtn) dismissBtn.disabled = false;
         if (closeBtn) closeBtn.style.display = 'block';
         toast('Update failed! Previous version was restored with zero downtime.', 'error', 8000);
-      } else if (st.status === 'success') {
+      } else if (st.status === 'ready_to_restart' || st.status === 'success') {
         clearInterval(updatePollTimer);
         updatePollTimer = null;
-        if (stepText) stepText.textContent = 'Update succeeded! Service is rebooting... Reconnecting...';
-        if (bannerMsg) bannerMsg.textContent = 'Hot-swap complete! Waiting for WebDep to come back online...';
-        pollReconnectionAfterUpdate();
+        if (stepText) stepText.textContent = 'Update compiled successfully! Ready to restart.';
+        if (progressBar) {
+          progressBar.style.width = '100%';
+          progressBar.style.background = 'var(--success)';
+        }
+        if (spinner) spinner.style.display = 'none';
+        if (statusBanner) statusBanner.style.display = 'none';
+
+        // Display user prompt to restart!
+        if (restartPrompt) restartPrompt.style.display = 'block';
+        if (dismissBtn) dismissBtn.disabled = false;
+        if (closeBtn) closeBtn.style.display = 'block';
+
+        loadSystemVersionInfo(true).catch(() => { });
+        toast('WebDep compiled successfully! Click "Restart WebDep Panel Now" to apply.', 'success', 6000);
       }
     } catch (_) {
-      // Backend may be currently restarting
+      // transient network poll error
     }
   }, 900);
 }
 window.startPlatformUpdate = startPlatformUpdate;
+
+async function executePostUpdateRestart() {
+  const ok = await showConfirmDialog({
+    title: 'Restart WebDep Panel',
+    message: 'Restart the WebDep panel now to activate the new version? The dashboard will briefly reconnect in ~3 seconds.',
+    confirmText: '🚀 Restart Now',
+    danger: false,
+  });
+  if (!ok) return;
+
+  const stepText = document.getElementById('update-step-text');
+  const bannerMsg = document.getElementById('update-banner-msg');
+  const statusBanner = document.getElementById('update-status-banner');
+  const restartPrompt = document.getElementById('update-restart-prompt');
+  const spinner = document.getElementById('update-active-spinner');
+  const dismissBtn = document.getElementById('update-dismiss-btn');
+  const closeBtn = document.getElementById('modal-platform-update-close');
+
+  openModal('modal-platform-update');
+  if (restartPrompt) restartPrompt.style.display = 'none';
+  if (statusBanner) statusBanner.style.display = 'flex';
+  if (spinner) spinner.style.display = 'block';
+  if (stepText) stepText.textContent = 'Restarting WebDep service...';
+  if (bannerMsg) bannerMsg.textContent = 'Triggering service restart. Waiting for WebDep to come back online...';
+  if (dismissBtn) dismissBtn.disabled = true;
+  if (closeBtn) closeBtn.style.display = 'none';
+
+  try {
+    await api('/api/system/restart', { method: 'POST' });
+  } catch (err) {
+    toast(`Restart trigger returned: ${err.message}`, 'info');
+  }
+
+  pollReconnectionAfterUpdate();
+}
+window.executePostUpdateRestart = executePostUpdateRestart;
+
+function copyUpdateLogs() {
+  const el = document.getElementById('update-console-logs');
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent || '').then(() => {
+    toast('Build logs copied to clipboard', 'success');
+  }).catch(() => {
+    toast('Could not copy logs to clipboard', 'warning');
+  });
+}
+window.copyUpdateLogs = copyUpdateLogs;
 
 async function pollReconnectionAfterUpdate() {
   const stepText = document.getElementById('update-step-text');
@@ -7282,8 +7415,8 @@ async function pollReconnectionAfterUpdate() {
     progressBar.style.background = 'var(--success)';
   }
 
-  // Wait 2.5s for the old process to finish exiting
-  await new Promise((r) => setTimeout(r, 2500));
+  // Wait 2s for the process to exit
+  await new Promise((r) => setTimeout(r, 2000));
 
   for (let attempt = 1; attempt <= 90; attempt++) {
     if (bannerMsg) bannerMsg.textContent = `Probing WebDep service (Attempt ${attempt}/90)...`;
