@@ -1240,6 +1240,24 @@ impl Runtime {
             final_cmd = "node server.js".to_string();
         }
 
+        #[cfg(unix)]
+        {
+            // Auto-resolve 'python' to 'python3' on Linux distributions (Ubuntu/Debian) where 'python' symlink is absent
+            let has_python = std::path::Path::new("/usr/bin/python").exists()
+                || std::path::Path::new("/usr/local/bin/python").exists()
+                || work_dir.join(".venv/bin/python").exists()
+                || work_dir.join("venv/bin/python").exists();
+
+            if !has_python && final_cmd.contains("python") {
+                let parts: Vec<&str> = final_cmd.split(' ').collect();
+                final_cmd = parts
+                    .into_iter()
+                    .map(|token| if token == "python" { "python3" } else { token })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+        }
+
         let java_info = detect_java_exe();
 
         #[cfg(windows)]

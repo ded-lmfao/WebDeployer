@@ -149,9 +149,9 @@ const PRESETS = {
   python: {
     port: 8000,
     deploy_method: 'managed',
-    install_cmd: 'pip install -r requirements.txt',
+    install_cmd: 'pip install -r requirements.txt --break-system-packages --ignore-installed',
     build_cmd: '',
-    start_cmd: 'uvicorn main:app --host 127.0.0.1 --port {{PORT}}',
+    start_cmd: 'python3 -m uvicorn main:app --host 127.0.0.1 --port {{PORT}}',
     health_url: 'http://127.0.0.1:8000/health',
   },
   java: {
@@ -1750,8 +1750,8 @@ function applyServicePreset(preset) {
         nameInput.value = 'Discord Bot';
         nameInput.dispatchEvent(new Event('input'));
       }
-      if (installInput) installInput.value = 'pip install -r requirements.txt';
-      if (startInput) startInput.value = 'python -u bot.py';
+      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
+      if (startInput) startInput.value = 'python3 -u bot.py';
       if (portInput) portInput.value = '';
       break;
     case 'telegram-py':
@@ -1760,8 +1760,8 @@ function applyServicePreset(preset) {
         nameInput.value = 'Telegram Bot';
         nameInput.dispatchEvent(new Event('input'));
       }
-      if (installInput) installInput.value = 'pip install -r requirements.txt';
-      if (startInput) startInput.value = 'python -u main.py';
+      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
+      if (startInput) startInput.value = 'python3 -u main.py';
       if (portInput) portInput.value = '';
       break;
     case 'worker-py':
@@ -1770,8 +1770,8 @@ function applyServicePreset(preset) {
         nameInput.value = 'Queue Worker';
         nameInput.dispatchEvent(new Event('input'));
       }
-      if (installInput) installInput.value = 'pip install -r requirements.txt';
-      if (startInput) startInput.value = 'python -u worker.py';
+      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
+      if (startInput) startInput.value = 'python3 -u worker.py';
       if (portInput) portInput.value = '';
       break;
     case 'custom':

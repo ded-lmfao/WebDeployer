@@ -878,9 +878,28 @@ async fn run_shell_cmd(
     }
 
     #[cfg(unix)]
+    let mut resolved_shell_cmd = cmd_str.to_string();
+    #[cfg(unix)]
+    {
+        let has_python = std::path::Path::new("/usr/bin/python").exists()
+            || std::path::Path::new("/usr/local/bin/python").exists()
+            || cwd.join(".venv/bin/python").exists()
+            || cwd.join("venv/bin/python").exists();
+
+        if !has_python && resolved_shell_cmd.contains("python") {
+            let parts: Vec<&str> = resolved_shell_cmd.split(' ').collect();
+            resolved_shell_cmd = parts
+                .into_iter()
+                .map(|token| if token == "python" { "python3" } else { token })
+                .collect::<Vec<_>>()
+                .join(" ");
+        }
+    }
+
+    #[cfg(unix)]
     let mut cmd = tokio::process::Command::new("sh");
     #[cfg(unix)]
-    cmd.args(["-c", cmd_str]);
+    cmd.args(["-c", &resolved_shell_cmd]);
 
     cmd.current_dir(cwd)
         .env("CI", "true")
