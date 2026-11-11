@@ -218,8 +218,9 @@ function renderFilesTable() {
       ? `filesGo('${safeFull}')`
       : (meta.isEditable ? `filesOpen('${safeFull}')` : `filesDownload('${safeFull}')`);
 
+    const isEditing = state.filesOpenPath === full;
     rows.push(`
-      <tr class="file-tr">
+      <tr class="file-tr ${isEditing ? 'file-tr-active' : ''}">
         <td style="padding: 10px 16px;">
           <div class="file-cell-name" onclick="${clickAction}">
             <div class="file-icon-box" style="background: ${meta.iconBg}; color: ${meta.iconColor};">
@@ -330,7 +331,12 @@ async function filesOpen(path) {
     const metaEl = document.getElementById('files-editor-meta');
     const iconEl = document.getElementById('files-editor-icon');
 
-    if (nameEl) nameEl.textContent = path;
+    if (nameEl) {
+      const parts = path.split('/');
+      const fileName = parts.pop();
+      const dirPath = parts.length ? parts.join('/') + '/' : '';
+      nameEl.innerHTML = `<span style="color:var(--text-dim);font-weight:400;">${escapeHtml(dirPath)}</span>${escapeHtml(fileName)}`;
+    }
     if (textarea) textarea.value = res.content || '';
     if (dirtyBadge) dirtyBadge.style.display = 'none';
 
@@ -341,9 +347,16 @@ async function filesOpen(path) {
       metaEl.textContent = `• ${formatFileBytes(new Blob([res.content]).size)}`;
     }
 
+    const meta = getFileMeta({ name: path, is_dir: false });
     if (iconEl) {
-      const meta = getFileMeta({ name: path, is_dir: false });
       iconEl.innerHTML = meta.iconSvg;
+    }
+
+    const langBadge = document.getElementById('files-editor-lang-badge');
+    if (langBadge) {
+      langBadge.textContent = meta.extLabel;
+      langBadge.style.background = meta.iconBg;
+      langBadge.style.color = meta.iconColor;
     }
 
     if (editorCard) {
@@ -351,7 +364,9 @@ async function filesOpen(path) {
       editorCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
+    renderFilesTable();
     updateEditorGutter();
+    updateEditorPos();
     bindEditorEvents();
   } catch (err) {
     toast(err.message, 'error');
@@ -439,6 +454,19 @@ function bindEditorEvents() {
   });
 }
 
+function filesToggleFullscreen() {
+  const card = document.getElementById('files-editor-card');
+  const btn = document.getElementById('files-fullscreen-btn');
+  if (!card) return;
+  const isFull = card.classList.toggle('fullscreen');
+  if (btn) {
+    btn.innerHTML = isFull
+      ? `${icon('x', { size: 13 })} <span>Exit Fullscreen</span>`
+      : `${icon('external-link', { size: 13 })} <span>Fullscreen</span>`;
+  }
+}
+window.filesToggleFullscreen = filesToggleFullscreen;
+
 function filesCloseEditor(force = false) {
   if (!force && state.filesEditorDirty) {
     if (!confirm('You have unsaved changes. Discard and close editor?')) {
@@ -448,7 +476,11 @@ function filesCloseEditor(force = false) {
   state.filesOpenPath = null;
   state.filesEditorDirty = false;
   const card = document.getElementById('files-editor-card');
-  if (card) card.style.display = 'none';
+  if (card) {
+    card.classList.remove('fullscreen');
+    card.style.display = 'none';
+  }
+  renderFilesTable();
 }
 window.filesCloseEditor = filesCloseEditor;
 
@@ -713,6 +745,7 @@ export {
   filesCopyCurrentPath,
   filesOpen,
   filesCloseEditor,
+  filesToggleFullscreen,
   filesSaveCurrent,
   filesDownload,
   filesDownloadCurrent,

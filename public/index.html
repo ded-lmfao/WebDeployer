@@ -996,44 +996,52 @@
           </div>
 
           <!-- Professional IDE In-Browser Code / Config Editor -->
-          <div class="card file-editor-card" id="files-editor-card" style="display: none; margin-top: 16px; padding: 0; overflow: hidden; border: 1px solid var(--border-medium); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);">
-            <div class="file-editor-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-                <span id="files-editor-icon" style="display: inline-flex; align-items: center; color: var(--text-dim);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></span>
-                <span id="files-editor-name" style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;"></span>
-                <span id="files-editor-dirty-badge" class="badge badge-warning" style="display: none; font-size: 10px; padding: 1px 7px;">● Unsaved</span>
+          <div class="card file-editor-card" id="files-editor-card" style="display: none; margin-top: 16px; padding: 0; overflow: hidden;">
+            <div class="file-editor-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                <div class="file-editor-tab-pill">
+                  <span id="files-editor-icon" style="display: inline-flex; align-items: center;"></span>
+                  <span id="files-editor-name" style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px;"></span>
+                  <span id="files-editor-dirty-badge" class="file-editor-dirty-indicator" style="display: none;" title="Unsaved changes"></span>
+                </div>
                 <span id="files-editor-meta" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
               </div>
               <div style="display: flex; gap: 8px; align-items: center;">
-                <span style="font-size: 11px; color: var(--text-dim); margin-right: 4px;" class="hide-mobile">Ctrl + S to save</span>
+                <span class="file-editor-kbd hide-mobile" title="Press Ctrl+S to save">Ctrl+S</span>
                 <button class="btn btn-secondary btn-sm" id="files-download-current-btn" onclick="filesDownloadCurrent()" title="Download file to computer">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -1px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                  Download
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                  <span>Download</span>
+                </button>
+                <button class="btn btn-secondary btn-sm hide-mobile" id="files-fullscreen-btn" onclick="filesToggleFullscreen()" title="Toggle full-height workspace">
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                  <span>Fullscreen</span>
                 </button>
                 <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent()" title="Save changes (Ctrl+S)">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -1px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-                  Save
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  <span>Save</span>
                 </button>
                 <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()" title="Close editor (Esc)">
-                  &times; Close
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  <span>Close</span>
                 </button>
               </div>
             </div>
 
             <!-- Synchronized Editor Pane with line gutter -->
-            <div class="file-editor-body" style="position: relative; display: flex; background: #0c0d10; min-height: 420px; max-height: 650px;">
+            <div class="file-editor-body" id="files-editor-body">
               <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
               <textarea id="files-editor" class="file-editor-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
             </div>
 
             <!-- Editor Status Footer -->
-            <div class="file-editor-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 6px 16px; background: var(--bg-card); border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">
-              <div style="display: flex; gap: 16px;">
+            <div class="file-editor-footer">
+              <div style="display: flex; gap: 16px; align-items: center;">
                 <span id="files-editor-pos">Ln 1, Col 1</span>
                 <span id="files-editor-lines">1 lines</span>
                 <span id="files-editor-size">0 KB</span>
               </div>
-              <div style="display: flex; gap: 16px;">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <span id="files-editor-lang-badge" class="file-editor-lang-badge">CODE</span>
                 <span>UTF-8</span>
                 <span>Spaces: 2</span>
               </div>
