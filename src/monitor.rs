@@ -108,6 +108,7 @@ impl Monitor {
         let mut procs: Vec<ProcessMetrics> = sys
             .processes()
             .iter()
+            .filter(|(_, p)| p.thread_kind().is_none())
             .map(|(pid, p)| ProcessMetrics {
                 pid: pid.as_u32(),
                 name: p.name().to_string_lossy().to_string(),
@@ -189,11 +190,13 @@ impl Monitor {
     pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
         let sys = self.sys.lock().unwrap();
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
-        let mut metrics_map: HashMap<u32, (f32, u64)> = HashMap::new();
+        // Stores (cpu_usage, resident_memory_bytes, is_thread)
+        let mut metrics_map: HashMap<u32, (f32, u64, bool)> = HashMap::new();
 
         for (pid, p) in sys.processes() {
             let pid_u32 = pid.as_u32();
-            metrics_map.insert(pid_u32, (p.cpu_usage(), p.memory()));
+            let is_thread = p.thread_kind().is_some();
+            metrics_map.insert(pid_u32, (p.cpu_usage(), p.memory(), is_thread));
             if let Some(parent) = p.parent() {
                 children_map.entry(parent.as_u32()).or_default().push(pid_u32);
             }
@@ -212,9 +215,14 @@ impl Monitor {
             }
 
             while let Some(curr) = queue.pop_front() {
-                if let Some(&(cpu, mem)) = metrics_map.get(&curr) {
+                if let Some(&(cpu, mem, is_thread)) = metrics_map.get(&curr) {
                     total_cpu += cpu;
-                    total_mem = total_mem.saturating_add(mem);
+                    // In Linux, threads of a process share the same memory address space.
+                    // Counting memory for every thread entry multiplies the true process RSS by thread count!
+                    // Only count memory for real processes (or the root process itself).
+                    if !is_thread || curr == root {
+                        total_mem = total_mem.saturating_add(mem);
+                    }
                 }
                 if let Some(kids) = children_map.get(&curr) {
                     for &k in kids {
