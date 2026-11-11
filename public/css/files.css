@@ -263,8 +263,9 @@
 
 /* IDE Code Editor */
 .file-editor-gutter {
-  width: 48px;
-  padding: 14px 10px 14px 6px;
+  min-width: 48px;
+  width: auto;
+  padding: 14px 10px 14px 8px;
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.6;
@@ -275,6 +276,7 @@
   user-select: none;
   overflow: hidden;
   box-sizing: border-box;
+  white-space: pre;
 }
 
 .file-editor-textarea {
