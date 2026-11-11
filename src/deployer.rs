@@ -589,9 +589,9 @@ impl Deployer {
                         self.finish_deployment(dep_id, "failed", Some(&e2));
                         return;
                     }
-                } else if effective_install_cmd.contains("pip") && (e.contains("externally-managed-environment") || e.contains("break-system-packages")) {
-                    self.logs.add(Some(p.id), Some(dep_id), "build", "warn", "System Python is externally managed (PEP 668). Retrying with --break-system-packages...");
-                    let retry_cmd = format!("{} --break-system-packages", effective_install_cmd);
+                } else if effective_install_cmd.contains("pip") && (e.contains("externally-managed-environment") || e.contains("break-system-packages") || e.contains("uninstall-no-record-file") || e.contains("RECORD")) {
+                    self.logs.add(Some(p.id), Some(dep_id), "build", "warn", "Pip hit Debian system package conflict or PEP 668. Retrying with --break-system-packages --ignore-installed...");
+                    let retry_cmd = format!("{} --break-system-packages --ignore-installed", effective_install_cmd);
                     if let Err(e2) = run_shell_cmd(&retry_cmd, &release_dir, &self.logs, p.id, dep_id).await {
                         self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e2));
                         self.finish_deployment(dep_id, "failed", Some(&e2));
@@ -902,6 +902,32 @@ async fn run_shell_cmd(
 
         cmd.env("PATH", new_path);
         cmd.env("JAVA_HOME", java_home);
+    }
+
+    // Auto-detect virtualenv (.venv or venv) in workspace and route python/pip to it
+    let venv_dir = if cwd.join(".venv").is_dir() {
+        Some(cwd.join(".venv"))
+    } else if cwd.join("venv").is_dir() {
+        Some(cwd.join("venv"))
+    } else {
+        None
+    };
+    if let Some(ref venv) = venv_dir {
+        #[cfg(windows)]
+        let venv_bin = venv.join("Scripts");
+        #[cfg(not(windows))]
+        let venv_bin = venv.join("bin");
+
+        if venv_bin.exists() {
+            let cur_path = std::env::var("PATH").unwrap_or_default();
+            #[cfg(windows)]
+            let new_path = format!("{};{}", venv_bin.display(), cur_path);
+            #[cfg(not(windows))]
+            let new_path = format!("{}:{}", venv_bin.display(), cur_path);
+
+            cmd.env("PATH", new_path);
+            cmd.env("VIRTUAL_ENV", venv);
+        }
     }
     let out = cmd.output().await.map_err(|e| e.to_string())?;
 

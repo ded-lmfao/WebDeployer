@@ -1283,6 +1283,32 @@ impl Runtime {
             cmd.env("JAVA_HOME", java_home);
         }
 
+        // Auto-detect virtualenv (.venv or venv) in workspace and route python/node/bin tools to it
+        let venv_dir = if work_dir.join(".venv").is_dir() {
+            Some(work_dir.join(".venv"))
+        } else if work_dir.join("venv").is_dir() {
+            Some(work_dir.join("venv"))
+        } else {
+            None
+        };
+        if let Some(ref venv) = venv_dir {
+            #[cfg(windows)]
+            let venv_bin = venv.join("Scripts");
+            #[cfg(not(windows))]
+            let venv_bin = venv.join("bin");
+
+            if venv_bin.exists() {
+                let cur_path = std::env::var("PATH").unwrap_or_default();
+                #[cfg(windows)]
+                let new_path = format!("{};{}", venv_bin.display(), cur_path);
+                #[cfg(not(windows))]
+                let new_path = format!("{}:{}", venv_bin.display(), cur_path);
+
+                cmd.env("PATH", new_path);
+                cmd.env("VIRTUAL_ENV", venv);
+            }
+        }
+
         for (k, v) in &isolated_env {
             cmd.env(k, v);
         }
