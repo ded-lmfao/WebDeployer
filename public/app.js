@@ -1712,7 +1712,7 @@ function renderServicesList() {
       typeName = 'Telegram Bot';
     } else if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) {
       typeIcon = '☕';
-      typeName = 'Lavalink Audio Server';
+      typeName = 'Lavalink';
     } else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) {
       typeIcon = '🐍';
       typeName = 'Python Daemon';
@@ -1748,26 +1748,26 @@ function renderServicesList() {
         const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
 
         return `
-      <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
-        <div class="project-card-header">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <div style="width: 38px; height: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 20px;">
+      <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; display: flex; flex-direction: column; justify-content: space-between;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
+        <div class="project-card-header" style="min-height: 42px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 20px;">
               ${typeIcon}
             </div>
-            <div>
-              <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+            <div style="min-width: 0;">
+              <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                 <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
                 <span>${escapeHtml(p.name)}</span>
               </div>
-              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
-                ${escapeHtml(typeName)} &bull; ${isLocal ? '📁 Manual Files' : escapeHtml(p.branch || 'main')}
+              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${escapeHtml(typeName)}${!isLocal && p.branch ? ` • ${escapeHtml(p.branch)}` : ''}">
+                ${escapeHtml(typeName)}${!isLocal && p.branch ? ` &bull; ${escapeHtml(p.branch)}` : ''}
               </div>
             </div>
           </div>
-          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
+          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" style="flex-shrink: 0;">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
         </div>
 
-        <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden;">
+        <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 36px; box-sizing: border-box;">
           <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 75%;">
             $ ${escapeHtml(p.start_cmd || 'node index.js')}
           </span>
@@ -1787,15 +1787,15 @@ function renderServicesList() {
           </div>
         </div>
 
-        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; min-height: 22px; align-items: center;">
           ${accessBadge}
           ${domainBadge}
           ${portBadge}
         </div>
 
-        <div class="project-meta-row" style="margin-bottom: 12px;">
+        <div class="project-meta-row" style="margin-bottom: 12px; min-height: 20px; align-items: center;">
           <div class="project-meta-item">
-            <span>${isLocal ? 'Source: <strong style="color:var(--text-main);">📁 Manual Upload</strong>' : `Commit: <strong>${sha}</strong>`}</span>
+            <span>${isLocal ? '<strong>Manual Files</strong>' : `Commit: <strong>${sha}</strong>`}</span>
           </div>
           ${diskStr ? `<div class="project-meta-item"><span>Disk <strong style="color:var(--text-main);">${diskStr}</strong></span></div>` : ''}
           <div class="project-meta-item">
