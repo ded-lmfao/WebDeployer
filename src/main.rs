@@ -131,6 +131,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 for p in list {
                     let _ = resume_runtime.ensure_container(&p);
                     if p.app_status == "running" {
+                        // Check if the workload is ALREADY running from before the panel restart
+                        let is_already_running = if let Some(pid) = p.app_pid {
+                            pid > 0 && crate::runtime::is_pid_alive(pid)
+                        } else if let Some(port) = p.port {
+                            !crate::runtime::Runtime::find_pids_on_port(port).is_empty()
+                        } else {
+                            false
+                        };
+
+                        if is_already_running {
+                            resume_logs.add(
+                                Some(p.id),
+                                None,
+                                "system",
+                                "info",
+                                &format!(
+                                    "Preserved running workload '{}' (PID: {}) across panel update with zero downtime",
+                                    p.name,
+                                    p.app_pid.unwrap_or(0)
+                                ),
+                            );
+                            continue;
+                        }
+
                         let env = resume_projects.get_env_map(p.id);
                         match resume_runtime.start_project(&p, env, None).await {
                             Ok(pid) => {

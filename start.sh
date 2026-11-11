@@ -47,6 +47,10 @@ if [[ "$MODE" == "--update" || "$MODE" == "update" ]]; then
     chmod +x target/release/webdep
 
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet webdep 2>/dev/null; then
+        if [[ -f "/etc/systemd/system/webdep.service" ]] && ! grep -q "KillMode=process" /etc/systemd/system/webdep.service 2>/dev/null; then
+            sudo sed -i '/RestartSec=/a KillMode=process' /etc/systemd/system/webdep.service 2>/dev/null || true
+            sudo systemctl daemon-reload 2>/dev/null || true
+        fi
         echo "[*] Restarting systemd service 'webdep'..."
         sudo systemctl restart webdep || systemctl restart webdep
         echo "[+] WebDep successfully updated and restarted!"
@@ -135,6 +139,7 @@ WorkingDirectory=${APP_DIR}
 ExecStart=${APP_DIR}/target/release/webdep
 Restart=always
 RestartSec=3
+KillMode=process
 Environment=RUST_LOG=webdep=info
 Environment="PATH=${USER_HOME}/.cargo/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="MALLOC_ARENA_MAX=2"

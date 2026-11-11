@@ -505,7 +505,7 @@ pub fn restart_service_delayed(delay_ms: u64) {
             if is_systemd {
                 info!("Restarting WebDep via systemd service 'webdep'...");
                 let _ = Command::new("sh")
-                    .args(["-c", "(sleep 0.5 && (sudo systemctl restart webdep || systemctl restart webdep)) >/dev/null 2>&1 &"])
+                    .args(["-c", "if [ -f /etc/systemd/system/webdep.service ] && ! grep -q KillMode=process /etc/systemd/system/webdep.service; then (sudo sed -i '/RestartSec=/a KillMode=process' /etc/systemd/system/webdep.service && sudo systemctl daemon-reload) >/dev/null 2>&1; fi; (sleep 0.5 && (sudo systemctl restart webdep || systemctl restart webdep)) >/dev/null 2>&1 &"])
                     .spawn();
                 return;
             }

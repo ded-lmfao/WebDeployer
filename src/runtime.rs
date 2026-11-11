@@ -40,6 +40,22 @@ fn copy_dir_files_if_missing(src_dir: &Path, dst_dir: &Path) {
     }
 }
 
+pub fn is_pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, 0) == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(pid as usize)]), true);
+        sys.process(sysinfo::Pid::from(pid as usize)).is_some()
+    }
+}
+
 /// Locate Java executable and JDK/JRE home across environment variables, common installation directories, and system PATH.
 pub fn detect_java_exe() -> Option<(PathBuf, PathBuf)> {
     // 1. Check JAVA_HOME environment variable
@@ -1277,7 +1293,17 @@ impl Runtime {
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
-        cmd.kill_on_drop(true);
+        // Do NOT kill the child process if WebDep drops its handle or restarts for an update!
+        cmd.kill_on_drop(false);
+
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(|| {
+                // Detach into independent session so panel restarts never signal or terminate the workload
+                libc::setsid();
+                Ok(())
+            });
+        }
 
         // Force UTF-8 output so Python/Node apps printing emoji or arrows never crash on the
         // Windows 'charmap' codec when stdout is piped. User env vars below can still override these.
@@ -1565,6 +1591,19 @@ impl Runtime {
                 }
             }
         } else {
+            // If process was started by a previous panel instance before update/restart,
+            // check if the recorded SQLite app_pid is still alive on the system
+            if let Ok(conn) = self.db.lock() {
+                if let Ok(Some(pid)) = conn.query_row(
+                    "SELECT app_pid FROM projects WHERE id = ? AND app_status = 'running'",
+                    rusqlite::params![project_id],
+                    |r| r.get::<_, Option<u32>>(0),
+                ) {
+                    if pid > 0 && is_pid_alive(pid) {
+                        return true;
+                    }
+                }
+            }
             false
         }
     }
@@ -1574,8 +1613,10 @@ impl Runtime {
     pub fn start_background_monitor(self: &Arc<Self>) {
         let rt = self.clone();
         tokio::spawn(async move {
+            let mut tick = 0u64;
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                tick = tick.wrapping_add(1);
                 let mut exited = Vec::new();
                 {
                     if let Ok(mut map) = rt.processes.lock() {
@@ -1602,6 +1643,39 @@ impl Runtime {
                         None => "Process terminated unexpectedly".to_string(),
                     };
                     rt.logs.add(Some(proj_id), None, "app", "warn", &msg);
+                }
+
+                // Every 6s (every 3rd tick), also check preserved workloads from previous panel instances
+                if tick % 3 == 0 {
+                    let external_running: Vec<(i64, u32)> = {
+                        if let Ok(conn) = rt.db.lock() {
+                            if let Ok(mut stmt) = conn.prepare("SELECT id, app_pid FROM projects WHERE app_status = 'running'") {
+                                let rows = stmt.query_map([], |r| {
+                                    Ok((r.get::<_, i64>(0)?, r.get::<_, Option<u32>>(1)?))
+                                });
+                                if let Ok(mapped) = rows {
+                                    mapped
+                                        .flatten()
+                                        .filter_map(|(id, opt_pid)| opt_pid.map(|p| (id, p)))
+                                        .collect()
+                                } else {
+                                    Vec::new()
+                                }
+                            } else {
+                                Vec::new()
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    };
+
+                    for (proj_id, pid) in external_running {
+                        let is_in_memory = rt.processes.lock().map(|m| m.contains_key(&proj_id)).unwrap_or(false);
+                        if !is_in_memory && !is_pid_alive(pid) {
+                            rt.mark_project_stopped(proj_id);
+                            rt.logs.add(Some(proj_id), None, "app", "warn", "Process terminated");
+                        }
+                    }
                 }
             }
         });
