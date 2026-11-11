@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.12.1">
+  <link rel="stylesheet" href="/style.css?v=3.12.2">
 </head>
 
 <body>
@@ -1027,10 +1027,13 @@
               </div>
             </div>
 
-            <!-- Synchronized Editor Pane with line gutter -->
+            <!-- Synchronized Editor Pane with line gutter and syntax overlay -->
             <div class="file-editor-body" id="files-editor-body">
               <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
-              <textarea id="files-editor" class="file-editor-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+              <div class="file-editor-stage" id="files-editor-stage">
+                <pre id="files-editor-pre" class="file-editor-pre" aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
+                <textarea id="files-editor" class="file-editor-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+              </div>
             </div>
 
             <!-- Editor Status Footer -->
@@ -2780,7 +2783,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.12.1"></script>
+  <script type="module" src="/app.js?v=3.12.2"></script>
 </body>
 
 </html>

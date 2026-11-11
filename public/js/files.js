@@ -6,6 +6,7 @@
 import { icon, FILE_KINDS } from './icons.js';
 import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard } from './state.js';
 import { api, toast } from './api.js';
+import { highlightCode, detectLanguage } from './syntax.js';
 
 // ============================================================================
 // Backend Service File Browser
@@ -352,9 +353,10 @@ async function filesOpen(path) {
       iconEl.innerHTML = meta.iconSvg;
     }
 
+    const detectedLang = detectLanguage(path);
     const langBadge = document.getElementById('files-editor-lang-badge');
     if (langBadge) {
-      langBadge.textContent = meta.extLabel;
+      langBadge.textContent = detectedLang.toUpperCase();
       langBadge.style.background = meta.iconBg;
       langBadge.style.color = meta.iconColor;
     }
@@ -365,14 +367,47 @@ async function filesOpen(path) {
     }
 
     renderFilesTable();
+    updateEditorHighlight();
     updateEditorGutter();
     updateEditorPos();
     bindEditorEvents();
+
+    if (textarea) {
+      textarea.scrollTop = 0;
+      textarea.scrollLeft = 0;
+    }
+    const pre = document.getElementById('files-editor-pre');
+    if (pre) {
+      pre.scrollTop = 0;
+      pre.scrollLeft = 0;
+    }
+    if (gutter) {
+      gutter.scrollTop = 0;
+    }
   } catch (err) {
     toast(err.message, 'error');
   }
 }
 window.filesOpen = filesOpen;
+
+function updateEditorHighlight() {
+  const textarea = document.getElementById('files-editor');
+  const codeEl = document.getElementById('files-editor-code');
+  const card = document.getElementById('files-editor-card');
+  if (!textarea || !codeEl) return;
+
+  const content = textarea.value;
+  // If file is excessively large, fallback to plain text textarea rendering
+  if (content.length > 500000 || content.split('\n').length > 15000) {
+    if (card) card.classList.add('no-highlight');
+    codeEl.textContent = content;
+    return;
+  }
+
+  if (card) card.classList.remove('no-highlight');
+  const lang = detectLanguage(state.filesOpenPath || '');
+  codeEl.innerHTML = highlightCode(content, lang);
+}
 
 function updateEditorGutter() {
   const textarea = document.getElementById('files-editor');
@@ -408,20 +443,26 @@ function updateEditorPos() {
 function bindEditorEvents() {
   const textarea = document.getElementById('files-editor');
   const gutter = document.getElementById('files-editor-gutter');
+  const pre = document.getElementById('files-editor-pre');
   if (!textarea || textarea.dataset.bound) return;
   textarea.dataset.bound = 'true';
 
   // Sync scroll
   textarea.addEventListener('scroll', () => {
     if (gutter) gutter.scrollTop = textarea.scrollTop;
+    if (pre) {
+      pre.scrollTop = textarea.scrollTop;
+      pre.scrollLeft = textarea.scrollLeft;
+    }
   });
 
   // Track cursor position
   textarea.addEventListener('keyup', updateEditorPos);
   textarea.addEventListener('click', updateEditorPos);
 
-  // Track dirty state and gutter updates
+  // Track dirty state, syntax highlight, and gutter updates
   textarea.addEventListener('input', () => {
+    updateEditorHighlight();
     updateEditorGutter();
     updateEditorPos();
     const isDirty = textarea.value !== state.filesEditorInitialContent;
@@ -480,6 +521,10 @@ function filesCloseEditor(force = false) {
     card.classList.remove('fullscreen');
     card.style.display = 'none';
   }
+  const codeEl = document.getElementById('files-editor-code');
+  if (codeEl) codeEl.innerHTML = '';
+  const textarea = document.getElementById('files-editor');
+  if (textarea) textarea.value = '';
   renderFilesTable();
 }
 window.filesCloseEditor = filesCloseEditor;
