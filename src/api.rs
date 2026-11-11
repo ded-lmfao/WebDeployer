@@ -370,17 +370,34 @@ fn create_authenticated_response(
 }
 
 fn check_api_cache(cache: &crate::cache::AppCache, cache_key: &str) -> Option<Response> {
-    if let Some(cached_json) = cache.get_json(cache_key) {
+    if let Some(cached_bytes) = cache.get_bytes(cache_key) {
         let res = Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/json")
             .header("x-cache", HeaderValue::from_static("HIT"))
-            .body(axum::body::Body::from(cached_json.to_string()))
+            .body(axum::body::Body::from(cached_bytes))
             .unwrap_or_else(|_| Json(serde_json::json!({})).into_response());
         Some(res)
     } else {
         None
     }
+}
+
+fn cached_json_response<T: Serialize>(
+    cache: &crate::cache::AppCache,
+    cache_key: String,
+    val: &T,
+    ttl: std::time::Duration,
+) -> Result<Response, StatusCode> {
+    let json_str = serde_json::to_string(val).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes = axum::body::Bytes::from(json_str);
+    cache.set_bytes(cache_key, bytes.clone(), ttl);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-cache", HeaderValue::from_static("MISS"))
+        .body(axum::body::Body::from(bytes))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 fn fetch_project(
@@ -1198,16 +1215,7 @@ async fn list_projects_handler(
         list.retain(|p| u.can_access_project(p.id));
     }
 
-    if let Ok(json_val) = serde_json::to_value(&list) {
-        state
-            .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(4));
-    }
-
-    let mut res = Json(list).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
 }
 
 async fn get_project_handler(
@@ -2713,7 +2721,7 @@ async fn overview_handler(
         projs.retain(|p| u.can_access_project(p.id));
     }
 
-    let monitor = state.monitor.sample();
+    let mut monitor = state.monitor.sample();
     let total_vps_mem = monitor.memory.total.max(1);
     let total_vps_disk = monitor.disk.as_ref().map(|d| d.total).unwrap_or(1).max(1);
     let num_cores = monitor.cpu.cores.max(1) as f32;
@@ -2948,14 +2956,14 @@ async fn overview_handler(
 
     // Sum of CPU across all workloads (including panel)
     let sum_all_cpu: f32 = resources.iter().map(|r| r.cpu_pct).sum();
+    let sum_all_cpu = (sum_all_cpu * 10.0).round() / 10.0;
 
-    // Ensure workloads never exceed total VPS CPU due to sampling interval jitter
-    if total_vps_cpu > 0.0 && sum_all_cpu > total_vps_cpu {
-        let scale = total_vps_cpu / sum_all_cpu;
-        for r in &mut resources {
-            r.cpu_pct = ((r.cpu_pct * scale) * 10.0).round() / 10.0;
-        }
-    }
+    // Harmonize VPS total CPU:
+    // A system's total CPU usage is at least the sum of CPU used by its running processes.
+    // If the top card's instantaneous snapshot was lower than the active workloads, raise it so
+    // the top card and the workload breakdown table never contradict each other.
+    let effective_vps_cpu = (total_vps_cpu).max(sum_all_cpu).min(100.0);
+    monitor.cpu.pct = effective_vps_cpu.round() as u8;
 
     let final_panel_cpu = resources.iter().find(|r| r.id == "panel").map(|r| r.cpu_pct).unwrap_or(panel_cpu);
 
@@ -2965,8 +2973,20 @@ async fn overview_handler(
     let total_managed_cpu = (total_managed_cpu * 10.0).round() / 10.0;
 
     let total_all_mem = panel_mem.saturating_add(total_managed_mem);
-    let system_overhead = monitor.memory.used.saturating_sub(total_all_mem);
-    let system_overhead_cpu = (((total_vps_cpu - (final_panel_cpu + total_managed_cpu)).max(0.0)) * 10.0).round() / 10.0;
+
+    // Baseline operating system kernel & system daemon overhead (minimum 64MB or 1.5% of RAM)
+    // Avoids misleading '0 B' system overhead when process RSS sums overcount shared physical pages.
+    let min_os_overhead = (total_vps_mem as f64 * 0.015).max(64.0 * 1024.0 * 1024.0) as u64;
+    let system_overhead = if monitor.memory.used > total_all_mem.saturating_add(min_os_overhead) {
+        monitor.memory.used.saturating_sub(total_all_mem)
+    } else {
+        min_os_overhead
+    };
+    let effective_used_mem = total_all_mem.saturating_add(system_overhead).min(total_vps_mem);
+    monitor.memory.used = effective_used_mem;
+    monitor.memory.pct = ((effective_used_mem as f64 / total_vps_mem as f64 * 100.0).round() as u8).min(100);
+
+    let system_overhead_cpu = (((effective_vps_cpu - (final_panel_cpu + total_managed_cpu)).max(0.0)) * 10.0).round() / 10.0;
     let running_count = resources.iter().filter(|r| r.status == "running").count();
     let total_count = resources.len();
 
@@ -2997,16 +3017,8 @@ async fn overview_handler(
         recent,
         monitor,
     };
-    if let Ok(json_val) = serde_json::to_value(&payload) {
-        state
-            .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(2));
-    }
 
-    let mut res = Json(payload).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &payload, std::time::Duration::from_secs(2))
 }
 
 async fn monitor_handler(
@@ -3082,14 +3094,7 @@ async fn monitor_handler(
         "projects": proj_metrics
     });
 
-    state
-        .cache
-        .set(cache_key, val.clone(), std::time::Duration::from_secs(2));
-
-    let mut res = Json(val).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &val, std::time::Duration::from_secs(2))
 }
 
 async fn restart_panel_handler(
@@ -3406,16 +3411,7 @@ async fn audit_handler(
     }
     drop(conn);
 
-    if let Ok(json_val) = serde_json::to_value(&list) {
-        state
-            .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(5));
-    }
-
-    let mut res = Json(list).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(5))
 }
 
 async fn get_settings_handler(
@@ -3822,16 +3818,8 @@ async fn project_commits_handler(
         })
         .collect();
 
-    if let Ok(json_val) = serde_json::to_value(&views) {
-        state
-            .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(30));
-    }
-
-    let mut res = Json(views).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &views, std::time::Duration::from_secs(30))
+        .map_err(|c| (c, "Serialization error".to_string()))
 }
 
 #[derive(Serialize)]
@@ -4286,16 +4274,7 @@ async fn list_backups_handler(
             .collect();
     }
 
-    if let Ok(json_val) = serde_json::to_value(&backups) {
-        state
-            .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(15));
-    }
-
-    let mut res = Json(backups).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &backups, std::time::Duration::from_secs(15))
 }
 
 #[derive(Deserialize)]
@@ -4648,17 +4627,8 @@ async fn caddy_status_handler(State(state): State<AppState>) -> Response {
         running: true,
         version,
     };
-    if let Ok(json_val) = serde_json::to_value(&payload) {
-        state.cache.set(
-            cache_key.to_string(),
-            json_val,
-            std::time::Duration::from_secs(60),
-        );
-    }
-    let mut res = Json(payload).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    res
+    cached_json_response(&state.cache, cache_key.to_string(), &payload, std::time::Duration::from_secs(60))
+        .unwrap_or_else(|_| Json(payload).into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -4678,16 +4648,8 @@ async fn list_databases_handler(
 
     let list = state.databases.list().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    if let Ok(json_val) = serde_json::to_value(&list) {
-        state
-            .cache
-            .set(cache_key, json_val, std::time::Duration::from_secs(4));
-    }
-
-    let mut res = Json(list).into_response();
-    res.headers_mut()
-        .insert("x-cache", HeaderValue::from_static("MISS"));
-    Ok(res)
+    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
+        .map_err(|code| (code, "Serialization error".to_string()))
 }
 
 async fn get_database_handler(
@@ -4713,6 +4675,8 @@ async fn create_database_handler(
     let db = state.databases.create(payload)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
     log_audit(&state, &user.username, "database.create", Some(&db.name), Some(&format!("Created PostgreSQL database '{}' on port {}", db.db_name, db.port)));
     Ok(Json(db))
 }
@@ -4730,6 +4694,8 @@ where
 {
     let user = require_current_user(state, headers)?;
     f.await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
     log_audit(state, &user.username, action_name, Some(&format!("DB #{}", id)), Some(audit_desc));
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -4741,6 +4707,8 @@ async fn start_database_handler(
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
     let user = require_current_user(&state, &headers)?;
     state.databases.start(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
     log_audit(&state, &user.username, "database.start", Some(&format!("DB #{}", id)), Some("Started database container"));
     let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
@@ -4754,6 +4722,8 @@ async fn stop_database_handler(
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
     let user = require_current_user(&state, &headers)?;
     state.databases.stop(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
     log_audit(&state, &user.username, "database.stop", Some(&format!("DB #{}", id)), Some("Stopped database container"));
     let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
@@ -4767,6 +4737,8 @@ async fn restart_database_handler(
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
     let user = require_current_user(&state, &headers)?;
     state.databases.restart(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
     log_audit(&state, &user.username, "database.restart", Some(&format!("DB #{}", id)), Some("Restarted database container"));
     let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
@@ -4781,6 +4753,8 @@ async fn update_database_access_handler(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let user = require_current_user(&state, &headers)?;
     state.databases.update_access(id, payload).await.map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
     log_audit(&state, &user.username, "database.access", Some(&format!("DB #{}", id)), Some("Updated database network access rules"));
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -4824,6 +4798,8 @@ async fn link_database_handler(
 
     state.databases.set_linked_project(id, Some(p.id)).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     state.cache.invalidate_project(p.id);
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
 
     let is_service = p.project_kind == "service";
     let target_noun = if is_service { "service" } else { "website" };

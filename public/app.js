@@ -212,7 +212,7 @@ function persistCacheToSession() {
 function getCacheTtlMs(path) {
   if (path.startsWith('/api/auth/')) return 0; // Always verify live authentication state with server
   if (path.startsWith('/api/logs')) return 0; // Live logs use SSE stream
-  if (path.startsWith('/api/databases')) return 0; // Live database status
+  if (path.startsWith('/api/databases')) return 2500; // Live database status
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 2500;
   if (path.startsWith('/api/deployments')) return 4000;
   if (path.startsWith('/api/audit')) return 8000;
@@ -1127,9 +1127,6 @@ async function loadProjects() {
     const badgeServicesEl = document.getElementById('badge-services-count');
     if (badgeServicesEl) badgeServicesEl.textContent = services.length;
 
-    // Keep databases count badge continuously synchronized
-    loadDatabases().catch(() => {});
-
     if (state.projects.length > 0 && !state.selectedProjectId) {
       state.selectedProjectId = state.projects[0].id;
     }
@@ -1378,8 +1375,10 @@ async function loadOverview() {
     }
     const freeMemEl = document.getElementById('res-free-memory');
     if (freeMemEl) {
-      const freeMb = ((m.memory?.free || 0) / 1048576).toFixed(0);
-      freeMemEl.textContent = `${freeMb} MB free`;
+      const totalMb = Math.round((m.memory?.total || 0) / 1048576);
+      const usedMb = Math.round((m.memory?.used || 0) / 1048576);
+      const availMb = Math.max(0, totalMb - usedMb);
+      freeMemEl.textContent = `${availMb} MB available`;
     }
     const countBadgeEl = document.getElementById('res-workloads-count-badge');
     if (countBadgeEl) {
@@ -3278,50 +3277,6 @@ function resetWaterPipeline(containerId) {
   }
 }
 window.resetWaterPipeline = resetWaterPipeline;
-
-window.simulateWaterDeploy = function() {
-  const stages = ['pending', 'fetching', 'pulling', 'installing', 'building', 'deploying', 'health_checking'];
-  let sIdx = 0;
-  const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
-  const badge = document.getElementById('pipeline-status-badge');
-  if (badge) {
-    badge.textContent = `DEPLOY (${stages[0].toUpperCase()})`;
-    badge.className = 'badge badge-warning';
-  }
-  if (waterPipelines[track]) {
-    waterPipelines[track].currentProgress = 0;
-  }
-  renderPipelineStages(track, stages[0], 'running', Date.now());
-
-  const interval = setInterval(() => {
-    sIdx++;
-    if (sIdx < stages.length) {
-      if (badge) badge.textContent = `DEPLOY (${stages[sIdx].toUpperCase()})`;
-      renderPipelineStages(track, stages[sIdx], 'running', Date.now());
-    } else {
-      clearInterval(interval);
-      if (badge) badge.textContent = 'FINALIZING DEPLOYMENT...';
-      renderPipelineStages(track, 'health_checking', 'success', Date.now());
-    }
-  }, 2600);
-};
-
-window.simulateWaterDrain = function() {
-  const track = document.getElementById('main-pipeline-track') ? 'main-pipeline-track' : 'overview-pipeline-track';
-  const badge = document.getElementById('pipeline-status-badge');
-  if (badge) {
-    badge.textContent = 'STOPPING...';
-    badge.className = 'badge badge-warning';
-  }
-  const p = waterPipelines[track];
-  if (p) {
-    p.targetProgress = 0.0;
-    p.status = 'idle';
-    p.activeStageIdx = -1;
-    p.failedStageIdx = -1;
-    startWaterLoop(p);
-  }
-};
 
 function renderDeploymentRow(d, isOverview = false) {
   let badgeClass = 'badge-neutral';
@@ -5658,7 +5613,7 @@ window.restartProject = restartProject;
 // ============================================================================
 async function loadDatabases() {
   try {
-    state.databases = await api(`/api/databases?_t=${Date.now()}`, { noCache: true });
+    state.databases = await api('/api/databases');
     const badge = document.getElementById('badge-databases-count');
     if (badge) badge.textContent = state.databases.length;
   } catch (err) {
@@ -6326,33 +6281,23 @@ function startPolling() {
       } else if (state.currentView === 'projects') {
         renderProjectsList();
       } else if (state.currentView === 'deployments') {
-        await loadProjects();
         renderWebsiteWorkspaceHeader();
         await loadDeploymentsView();
       } else if (state.currentView === 'monitor') {
-        await loadProjects();
         renderWebsiteWorkspaceHeader();
         await loadMonitorView();
       } else if (state.currentView === 'releases') {
-        await loadProjects();
         renderWebsiteWorkspaceHeader();
         await loadReleasesView();
       } else if (state.currentView === 'rollbacks') {
-        await loadProjects();
         renderWebsiteWorkspaceHeader();
         await loadRollbacksView();
       } else if (state.currentView === 'databases') {
         const anyLooping = Object.values(waterPipelines).some((p) => p && p.isLooping);
         if (!anyLooping) {
-          const oldSig = (state.databases || []).map((d) => `${d.id}:${d.status}:${d.updated_at}`).join('|');
-          await loadDatabases();
-          const newSig = (state.databases || []).map((d) => `${d.id}:${d.status}:${d.updated_at}`).join('|');
-          if (oldSig !== newSig) {
-            renderDatabasesList();
-          }
+          renderDatabasesList();
         }
       } else if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
-        await loadProjects();
         renderWebsiteWorkspaceHeader();
       }
     } finally {

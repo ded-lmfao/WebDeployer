@@ -93,15 +93,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ));
     let updater = Arc::new(Updater::new(config.data_dir.clone()));
 
-    // Periodic memory maintenance: prunes expired cache, shrinks SQLite pager, and trims Linux heap
+    // Periodic memory maintenance: prunes expired cache, purges expired sessions, shrinks SQLite pager, and trims Linux heap
     {
         let mem_cache = cache.clone();
         let mem_db = db.clone();
+        let mem_auth = auth.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
                 mem_cache.prune_expired();
+                mem_auth.purge_expired_sessions();
                 if let Ok(conn) = mem_db.lock() {
                     crate::db::shrink_memory(&conn);
                 }

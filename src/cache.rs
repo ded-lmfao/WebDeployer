@@ -1,11 +1,12 @@
+use axum::body::Bytes;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 struct CacheEntry {
-    json: Arc<str>,
+    bytes: Bytes,
     expires_at: Instant,
 }
 
@@ -36,15 +37,15 @@ impl AppCache {
         }
     }
 
-    /// Returns the pre-serialized compact JSON string directly as an Arc<str>
-    /// with zero allocations and zero deserialization/re-serialization overhead.
-    pub fn get_json(&self, key: &str) -> Option<Arc<str>> {
+    /// Returns pre-serialized JSON bytes directly as an `axum::body::Bytes`.
+    /// Zero allocations, zero deserialization, zero copy when converting to Axum response body.
+    pub fn get_bytes(&self, key: &str) -> Option<Bytes> {
         let now = Instant::now();
         if let Ok(map) = self.store.read() {
             if let Some(entry) = map.get(key) {
                 if entry.expires_at > now {
                     self.hits.fetch_add(1, Ordering::Relaxed);
-                    return Some(entry.json.clone());
+                    return Some(entry.bytes.clone());
                 }
             }
         }
@@ -52,8 +53,13 @@ impl AppCache {
         None
     }
 
-    /// Stores a pre-serialized compact JSON string directly.
+    /// Stores pre-serialized compact JSON string directly as Bytes.
     pub fn set_json(&self, key: String, json: String, ttl: Duration) {
+        self.set_bytes(key, Bytes::from(json), ttl);
+    }
+
+    /// Stores pre-serialized Bytes directly.
+    pub fn set_bytes(&self, key: String, bytes: Bytes, ttl: Duration) {
         let now = Instant::now();
         if let Ok(mut map) = self.store.write() {
             if map.len() >= 64 {
@@ -62,23 +68,11 @@ impl AppCache {
             map.insert(
                 key,
                 CacheEntry {
-                    json: Arc::from(json),
+                    bytes,
                     expires_at: now + ttl,
                 },
             );
         }
-    }
-
-    /// Serializes and stores a JSON value as compact UTF-8, avoiding heavy in-memory node trees.
-    pub fn set(&self, key: String, value: serde_json::Value, ttl: Duration) {
-        if let Ok(s) = serde_json::to_string(&value) {
-            self.set_json(key, s, ttl);
-        }
-    }
-
-    /// Fallback deserialization if a caller specifically requires a serde_json::Value
-    pub fn get(&self, key: &str) -> Option<serde_json::Value> {
-        self.get_json(key).and_then(|s| serde_json::from_str(&s).ok())
     }
 
     pub fn prune_expired(&self) {
@@ -106,6 +100,7 @@ impl AppCache {
                     && !k.starts_with("projects:")
                     && !k.starts_with("deployments:")
                     && !k.starts_with("audit:")
+                    && !k.starts_with("databases:")
             });
         }
     }
@@ -143,4 +138,3 @@ impl AppCache {
         }
     }
 }
-
