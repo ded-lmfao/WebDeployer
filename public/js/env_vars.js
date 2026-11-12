@@ -10,8 +10,9 @@ import {
   escapeHtml,
   showConfirmDialog,
   copyTextToClipboard,
-  syncProjectSelectors,
+  setBtnLoading,
 } from './state.js';
+import { syncProjectSelectors } from './workspace.js';
 import { api, toast } from './api.js';
 
 const envUiState = {
@@ -566,12 +567,6 @@ async function finishEnvSave(p, countMsg, andRestart) {
   }
 }
 
-function setBtnLoading(btn, loading, defaultText, loadingText = 'Saving...') {
-  if (!btn) return;
-  btn.disabled = loading;
-  btn.textContent = loading ? loadingText : defaultText;
-}
-
 async function saveMultiEditEnv(andRestart = false) {
   const p = getSelectedProject();
   if (!p) return;
@@ -816,7 +811,6 @@ window.exportEnvFile = exportEnvFile;
 window.handleSaveEnv = handleSaveEnv;
 window.deleteEnvVar = deleteEnvVar;
 window.promptRevealEnv = promptRevealEnv;
-window.setBtnLoading = setBtnLoading;
 
 export {
   loadEnvView,
@@ -851,6 +845,5 @@ export {
   handleSaveEnv,
   deleteEnvVar,
   promptRevealEnv,
-  setBtnLoading,
 };
 

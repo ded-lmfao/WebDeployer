@@ -6,6 +6,7 @@
 import { icon } from './icons.js';
 import {
   state,
+  getSelectedProject,
   PAGE_SIZE,
   paginateAndRender,
   setHtmlIfChanged,
@@ -57,9 +58,7 @@ async function loadServicesView() {
 }
 window.loadServicesView = loadServicesView;
 
-function getSelectedProject() {
-  return state.projects.find((p) => p.id === state.selectedProjectId) || state.projects[0] || null;
-}
+
 
 
 // ============================================================================

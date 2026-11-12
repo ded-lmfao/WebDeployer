@@ -3,8 +3,8 @@
  * Creation wizard, connection details viewer, logs modal, and network allowlist access dialogs.
  */
 
-import { state, showConfirmDialog, copyTextToClipboard } from './state.js';
-import { api, toast, setBtnLoading } from './api.js';
+import { state, showConfirmDialog, copyTextToClipboard, setBtnLoading } from './state.js';
+import { api, toast } from './api.js';
 
 let currentViewedDbId = null;
 

@@ -12,7 +12,6 @@ import {
   formatDate,
   formatRelativeTime,
   formatDuration,
-  hasPower,
   setHtmlIfChanged,
   openModal,
   closeModal,
@@ -23,6 +22,7 @@ import {
   invalidateClientCache,
 } from './state.js';
 import { api, toast } from './api.js';
+import { hasPower } from './auth.js';
 
 // Re-export submodules so consumers importing from './settings.js' have full API parity
 export * from './settings_users.js';

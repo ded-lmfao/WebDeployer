@@ -498,6 +498,22 @@ function formatDuration(sec) {
 
 
 
+function setBtnLoading(btn, loading, defaultText, loadingText = 'Saving...') {
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) {
+    btn.dataset.originalText = defaultText || btn.textContent;
+    btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="width: 12px; height: 12px; border-width: 2px; margin-right: 6px; display: inline-block; vertical-align: middle; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.75s linear infinite;"></span> ${loadingText}`;
+  } else {
+    btn.innerHTML = btn.dataset.originalText || defaultText;
+  }
+}
+
+function getSelectedProject() {
+  const list = state.projects || [];
+  return list.find((p) => p.id === state.selectedProjectId) || list[0] || null;
+}
+
 window.state = state;
 window.PAGE_SIZE = PAGE_SIZE;
 window.goToTablePage = goToTablePage;
@@ -514,6 +530,8 @@ window.formatDate = formatDate;
 window.formatRelativeTime = formatRelativeTime;
 window.formatDuration = formatDuration;
 window.setHtmlIfChanged = setHtmlIfChanged;
+window.setBtnLoading = setBtnLoading;
+window.getSelectedProject = getSelectedProject;
 
 export {
   PAGE_SIZE,
@@ -544,4 +562,6 @@ export {
   formatDate,
   formatRelativeTime,
   formatDuration,
+  setBtnLoading,
+  getSelectedProject,
 };

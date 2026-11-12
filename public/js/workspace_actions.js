@@ -54,7 +54,7 @@ export async function startProject(projectId) {
     if (proj) {
       proj.app_status = 'running';
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
-        window.renderSingleServicePipeline(projectId, 'online', 'success', 'READY');
+        window.renderSingleServicePipeline(projectId, 'online', 'success', '');
       }
     }
     toast('Process started successfully.', 'success');
@@ -100,7 +100,7 @@ export async function stopProject(projectId) {
     if (proj) {
       proj.app_status = 'running';
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
-        window.renderSingleServicePipeline(projectId, 'online', 'success', 'READY');
+        window.renderSingleServicePipeline(projectId, 'online', 'success', '');
       }
     }
     toast(`Stop failed: ${err.message}`, 'error');

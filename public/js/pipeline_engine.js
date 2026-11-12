@@ -319,9 +319,9 @@ function updateWaterDOM(pipeline) {
     const svcMatch = pipeline.containerId.match(/^service-pipeline-track-(\d+)$/);
     if (svcMatch) {
       const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
-      if (sBadge && !sBadge.textContent.includes('READY')) {
-        sBadge.textContent = 'READY';
-        sBadge.className = 'badge badge-success';
+      if (sBadge) {
+        // Redundant status removed when online; main card header already shows ONLINE
+        sBadge.style.display = 'none';
       }
     }
   } else if (isDraining && P > 0.1) {
