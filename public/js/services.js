@@ -237,7 +237,6 @@ export function renderServicesList() {
                  <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Restart</button>`
               : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Start</button>`
             }
-            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Deploy</button>` : ''}
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 4px 10px; font-size: 11.5px;" title="Manage files">Files</button>
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 4px 10px; font-size: 11.5px;" title="Live console logs">Logs</button>
             <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Settings">
