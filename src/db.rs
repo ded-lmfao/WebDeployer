@@ -580,6 +580,17 @@ pub fn purge_orphaned_project_data(conn: &Connection) {
         "
         PRAGMA foreign_keys = OFF;
         DELETE FROM logs WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
+        UPDATE logs SET channel = 'system' WHERE channel = 'app' AND (
+            message LIKE 'Started service %' OR
+            message LIKE 'Started container %' OR
+            message LIKE 'Stopped service %' OR
+            message LIKE 'Stopped website container %' OR
+            message LIKE 'Enabled Maintenance Mode for %' OR
+            message LIKE 'Could not auto-resume %' OR
+            message LIKE 'Process exited (%' OR
+            message LIKE 'Process exited immediately with code %' OR
+            message IN ('Process terminated', 'Process terminated unexpectedly')
+        );
         DELETE FROM backups WHERE project_id NOT IN (SELECT id FROM projects);
         DELETE FROM deployments WHERE project_id NOT IN (SELECT id FROM projects);
         DELETE FROM releases WHERE project_id NOT IN (SELECT id FROM projects);

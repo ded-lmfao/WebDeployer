@@ -289,7 +289,7 @@ impl Runtime {
         if let Ok(Some(status)) = child.try_wait() {
             self.mark_project_stopped(p.id);
             let err_msg = format!("Process exited immediately with code {}", status);
-            self.logs.add(Some(p.id), None, "app", "warn", &err_msg);
+            self.logs.add(Some(p.id), None, "system", "warn", &err_msg);
             return Err(err_msg);
         }
 
@@ -320,7 +320,7 @@ impl Runtime {
         self.logs.add(
             Some(p.id),
             None,
-            "app",
+            "system",
             "info",
             &if p.project_kind == "service" {
                 format!(
@@ -395,7 +395,7 @@ impl Runtime {
             self.logs.add(
                 Some(p.id),
                 None,
-                "app",
+                "system",
                 "info",
                 &if p.project_kind == "service" {
                     format!("Stopped service '{}' (all processes terminated)", p.name)

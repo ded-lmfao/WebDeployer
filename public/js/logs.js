@@ -15,18 +15,26 @@ async function loadLogsView() {
   // Clear any previous logs so project terminals never show cross-project or stale logs
   state.logLines = [];
   const terminal = document.getElementById('log-terminal-output');
+  if (!p) {
+    if (state.logEventSource) {
+      state.logEventSource.close();
+      state.logEventSource = null;
+    }
+    if (terminal) {
+      terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">--:--:--</span><span class="log-lvl-info">Select a website or service to view its app logs.</span></div>`;
+    }
+    return;
+  }
+
   if (terminal) {
-    const kind = p?.project_kind === 'service' ? 'Service' : 'Website';
-    terminal.innerHTML = `<div class="log-line"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-chan">[app]</span><span class="log-lvl-info">Connecting to live console stream for ${escapeHtml(p?.name || kind)}...</span></div>`;
+    terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">Connecting to app logs for ${escapeHtml(p.name)}...</span></div>`;
   }
 
   startLogStream();
   try {
-    let url = '/api/logs?limit=300';
-    if (p) url += `&project=${p.id}`;
-    const history = await api(url);
+    const history = await api(`/api/logs?limit=300&project=${p.id}&channel=app`);
     if (Array.isArray(history)) {
-      state.logLines = history;
+      state.logLines = history.filter((x) => x.project_id === p.id && x.channel === 'app');
     }
   } catch (_) {}
   renderTerminalLogs();
@@ -35,24 +43,24 @@ async function loadLogsView() {
 function startLogStream() {
   if (state.logEventSource) {
     state.logEventSource.close();
+    state.logEventSource = null;
   }
 
   const p = getSelectedProject();
-  let url = '/api/logs/stream?backlog=200';
-  if (p) url += `&project=${p.id}`;
+  if (!p) return;
 
+  const url = `/api/logs/stream?backlog=200&project=${p.id}&channel=app`;
   const es = new EventSource(url);
   es.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
       if (Array.isArray(data)) {
         const curP = getSelectedProject();
+        if (!curP) return;
         const existingIds = new Set(state.logLines.map((x) => x.id));
-        // Strict isolation: only allow logs matching this specific project
+        // Strict isolation: only allow `app` channel logs matching this specific project
         const fresh = data.filter((x) => {
-          if (curP) {
-            if (x.project_id !== curP.id) return false;
-          }
+          if (x.project_id !== curP.id || x.channel !== 'app') return false;
           return !x.id || !existingIds.has(x.id);
         });
         if (fresh.length) {
@@ -74,26 +82,26 @@ function renderTerminalLogs() {
   if (!terminal) return;
 
   const p = getSelectedProject();
-  const chanFilter = document.getElementById('log-channel-filter')?.value || '';
   const lvlFilter = document.getElementById('log-level-filter')?.value || '';
   const q = (document.getElementById('log-search-input')?.value || '').toLowerCase();
 
   const filtered = state.logLines.filter((l) => {
-    if (chanFilter && l.channel !== chanFilter) return false;
+    if (p && l.project_id !== p.id) return false;
+    if (l.channel !== 'app') return false;
     if (lvlFilter && l.level !== lvlFilter) return false;
     if (q && !(l.message || '').toLowerCase().includes(q)) return false;
     return true;
   });
 
   if (!filtered.length) {
-    const filterNote = (chanFilter || lvlFilter || q)
-      ? `No log entries match filter (${[chanFilter, lvlFilter, q].filter(Boolean).join(', ')}). Switch filters to "All Channels" / "All Levels" to view all ${state.logLines.length} logs.`
-      : `Live log stream connected. Waiting for console output from ${p?.name || 'workload'}...`;
-    terminal.innerHTML = `<div class="log-line"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-chan">[app]</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
+    const filterNote = (lvlFilter || q)
+      ? `No app log entries match filter (${[lvlFilter, q].filter(Boolean).join(', ')}).`
+      : `Waiting for app logs from ${p?.name || 'application'}...`;
+    terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
     return;
   }
 
-  terminal.innerHTML = filtered.map((l) => formatLogLine(l)).join('');
+  terminal.innerHTML = filtered.map((l) => formatLogLine(l, false)).join('');
   if (document.getElementById('log-autoscroll')?.checked) {
     terminal.scrollTop = terminal.scrollHeight;
   }
@@ -103,19 +111,21 @@ function appendTerminalLogs(newLines) {
   const terminal = document.getElementById('log-terminal-output');
   if (!terminal) return;
 
-  const chanFilter = document.getElementById('log-channel-filter')?.value || '';
+  const p = getSelectedProject();
   const lvlFilter = document.getElementById('log-level-filter')?.value || '';
   const q = (document.getElementById('log-search-input')?.value || '').toLowerCase();
 
   let batchHtml = '';
   for (const l of newLines) {
-    if (chanFilter && l.channel !== chanFilter) continue;
+    if (p && l.project_id !== p.id) continue;
+    if (l.channel !== 'app') continue;
     if (lvlFilter && l.level !== lvlFilter) continue;
-    if (q && !l.message.toLowerCase().includes(q)) continue;
-    batchHtml += formatLogLine(l);
+    if (q && !(l.message || '').toLowerCase().includes(q)) continue;
+    batchHtml += formatLogLine(l, false);
   }
 
   if (batchHtml) {
+    terminal.querySelectorAll('.log-empty-placeholder').forEach((el) => el.remove());
     terminal.insertAdjacentHTML('beforeend', batchHtml);
 
     // Memory optimization: cap terminal DOM nodes to 1,000 max
@@ -181,14 +191,15 @@ function ansiToHtml(str) {
   return openSpan ? converted + '</span>' : converted;
 }
 
-function formatLogLine(l) {
+function formatLogLine(l, showChannel = true) {
   const time = l.ts ? new Date(l.ts).toLocaleTimeString() : '--:--:--';
   const lvlClass = `log-lvl-${l.level || 'info'}`;
-  return `<div class="log-line"><span class="log-ts">${time}</span><span class="log-chan">[${l.channel}]</span><span class="${lvlClass}">${ansiToHtml(l.message)}</span></div>`;
+  const chanHtml = showChannel && l.channel ? `<span class="log-chan">[${escapeHtml(l.channel)}]</span>` : '';
+  return `<div class="log-line"><span class="log-ts">${time}</span>${chanHtml}<span class="${lvlClass}">${ansiToHtml(l.message)}</span></div>`;
 }
 
 // Log filters bindings
-['log-channel-filter', 'log-level-filter', 'log-search-input'].forEach((id) => {
+['log-level-filter', 'log-search-input'].forEach((id) => {
   const el = document.getElementById(id);
   el?.addEventListener('input', renderTerminalLogs);
   el?.addEventListener('change', renderTerminalLogs);
@@ -204,16 +215,18 @@ document.getElementById('logs-copy-btn')?.addEventListener('click', async () => 
     toast('No log lines to copy.', 'info');
     return;
   }
-  const text = state.logLines.map((l) => `[${l.ts ? new Date(l.ts).toLocaleTimeString() : '--:--:--'}] [${(l.channel || 'SYSTEM').toUpperCase()}] [${(l.level || 'INFO').toUpperCase()}] ${l.message}`).join('\n');
+  const text = state.logLines.map((l) => `[${l.ts ? new Date(l.ts).toLocaleTimeString() : '--:--:--'}] ${l.message}`).join('\n');
   await copyTextToClipboard(text, 'Logs copied to clipboard');
 });
 
 // Download logs
 document.getElementById('logs-download-btn')?.addEventListener('click', () => {
   const p = getSelectedProject();
-  let url = '/api/logs/download';
-  if (p) url += `?project=${p.id}`;
-  window.open(url, '_blank');
+  if (!p) {
+    toast('Select an app first to download its logs.', 'info');
+    return;
+  }
+  window.open(`/api/logs/download?project=${p.id}`, '_blank');
 });
 
 // Tail application supervisor logs
@@ -223,7 +236,7 @@ document.getElementById('logs-app-tail-btn')?.addEventListener('click', async ()
   try {
     const res = await api(`/api/projects/${p.id}/app-logs?lines=300`);
     const terminal = document.getElementById('log-terminal-output');
-    terminal.innerHTML = `\n===== Application Runtime Logs for ${escapeHtml(p.name)} (${res.lines.length} lines) =====\n` +
+    terminal.innerHTML = `\n===== Application Logs for ${escapeHtml(p.name)} (${res.lines.length} lines) =====\n` +
       res.lines.map((l) => `<div class="log-line"><span class="log-lvl-info">${escapeHtml(l)}</span></div>`).join('');
     terminal.scrollTop = terminal.scrollHeight;
   } catch (err) {
@@ -232,9 +245,7 @@ document.getElementById('logs-app-tail-btn')?.addEventListener('click', async ()
 });
 
 function openLogsForProject(projectId) {
-  const chanSel = document.getElementById('log-channel-filter');
   const lvlSel = document.getElementById('log-level-filter');
-  if (chanSel) chanSel.value = '';
   if (lvlSel) lvlSel.value = '';
   navigateTo('logs', projectId);
 }

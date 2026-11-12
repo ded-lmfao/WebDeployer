@@ -25,13 +25,10 @@ pub(crate) async fn get_app_logs_handler(
     State(state): State<AppState>,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<AppLogsResponse>, StatusCode> {
-    let mut entries = state.logs.list(Some(id), None, Some("app"), None, 200);
-    if entries.is_empty() {
-        entries = state.logs.list(Some(id), None, None, None, 200);
-    }
+    let entries = state.logs.list(Some(id), None, Some("app"), None, 200);
     let logs = entries
         .into_iter()
-        .map(|l| format!("[{}] [{}] {}", l.channel.to_uppercase(), l.level.to_uppercase(), l.message))
+        .map(|l| l.message)
         .collect();
 
     Ok(Json(AppLogsResponse { lines: logs }))
@@ -44,6 +41,7 @@ pub(crate) async fn get_app_logs_handler(
 #[derive(Deserialize)]
 pub(crate) struct LogsQuery {
     project: Option<i64>,
+    #[allow(dead_code)]
     channel: Option<String>,
     level: Option<String>,
     backlog: Option<usize>,
@@ -54,11 +52,14 @@ pub(crate) async fn list_logs_handler(
     State(state): State<AppState>,
     Query(q): Query<LogsQuery>,
 ) -> Result<Json<Vec<crate::logs::LogEntry>>, StatusCode> {
+    let Some(pid) = q.project else {
+        return Ok(Json(Vec::new()));
+    };
     let limit = q.limit.or(q.backlog).unwrap_or(300);
     let logs = state.logs.list(
-        q.project,
+        Some(pid),
         None,
-        q.channel.as_deref(),
+        Some("app"),
         q.level.as_deref(),
         limit,
     );
@@ -70,15 +71,17 @@ pub(crate) async fn logs_sse_handler(
     Query(q): Query<LogsQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let backlog_limit = q.backlog.unwrap_or(200);
-    let initial_logs = state.logs.list(
-        q.project,
-        None,
-        q.channel.as_deref(),
-        q.level.as_deref(),
-        backlog_limit,
-    );
+    let initial_logs = match q.project {
+        Some(pid) => state.logs.list(
+            Some(pid),
+            None,
+            Some("app"),
+            q.level.as_deref(),
+            backlog_limit,
+        ),
+        None => Vec::new(),
+    };
     let project_filter = q.project;
-    let channel_filter = q.channel;
     let level_filter = q.level;
 
     let initial_event = if !initial_logs.is_empty() {
@@ -92,17 +95,12 @@ pub(crate) async fn logs_sse_handler(
     let rx = state.logs.subscribe();
     let live_stream = BroadcastStream::new(rx).filter_map(move |msg| {
         if let Ok(entry) = msg {
-            // Strict project isolation: If this SSE stream is subscribed to a specific project,
-            // strictly drop all logs that do not belong to this project (including unassigned system logs).
-            if let Some(pid) = project_filter {
-                if entry.project_id != Some(pid) {
-                    return None;
-                }
-            }
-            if let Some(ref ch) = channel_filter {
-                if !ch.is_empty() && &entry.channel != ch {
-                    return None;
-                }
+            // Strict per-app console isolation: only emit `app` channel logs for this exact project.
+            let Some(pid) = project_filter else {
+                return None;
+            };
+            if entry.project_id != Some(pid) || entry.channel != "app" {
+                return None;
             }
             if let Some(ref lvl) = level_filter {
                 if !lvl.is_empty() && &entry.level != lvl {
@@ -129,16 +127,13 @@ pub(crate) async fn logs_download_handler(
     State(state): State<AppState>,
     Query(q): Query<DownloadLogsQuery>,
 ) -> Result<Response, StatusCode> {
-    let logs = state.logs.list(q.project, None, None, None, 5000);
+    let logs = match q.project {
+        Some(pid) => state.logs.list(Some(pid), None, Some("app"), None, 5000),
+        None => Vec::new(),
+    };
     let mut out = String::new();
     for l in logs {
-        out.push_str(&format!(
-            "[{}] [{}] [{}] {}\n",
-            l.ts,
-            l.channel.to_uppercase(),
-            l.level.to_uppercase(),
-            l.message
-        ));
+        out.push_str(&format!("[{}] {}\n", l.ts, l.message));
     }
 
     let res = Response::builder()

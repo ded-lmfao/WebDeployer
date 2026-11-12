@@ -150,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             resume_logs.add(
                                 Some(p.id),
                                 None,
-                                "app",
+                                "system",
                                 "warn",
                                 &format!("Could not auto-resume '{}': {}", p.name, e),
                             );

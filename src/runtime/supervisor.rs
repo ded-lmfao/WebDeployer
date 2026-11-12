@@ -40,7 +40,7 @@ impl Runtime {
                         Some(s) => format!("Process exited ({})", s),
                         None => "Process terminated unexpectedly".to_string(),
                     };
-                    rt.logs.add(Some(proj_id), None, "app", "warn", &msg);
+                    rt.logs.add(Some(proj_id), None, "system", "warn", &msg);
                 }
 
                 // Every 6s (every 3rd tick), also check preserved workloads from previous panel instances
@@ -83,7 +83,7 @@ impl Runtime {
                             };
                             if !still_listening {
                                 rt.mark_project_stopped(proj_id);
-                                rt.logs.add(Some(proj_id), None, "app", "warn", "Process terminated");
+                                rt.logs.add(Some(proj_id), None, "system", "warn", "Process terminated");
                             }
                         }
                     }

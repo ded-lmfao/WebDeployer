@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.13.10">
+  <link rel="stylesheet" href="/style.css?v=3.13.12">
 </head>
 
 <body>
@@ -801,8 +801,8 @@
         <section id="view-logs" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
-              <h1>Real-Time Log Streamer</h1>
-              <p>Live SSE log streaming, search, error highlighting, and application logs</p>
+              <h1>App Logs</h1>
+              <p>Live application console output (stdout &amp; stderr)</p>
             </div>
             <div class="view-actions">
               <button class="btn btn-secondary btn-sm" id="logs-copy-btn" title="Copy all logs to clipboard">
@@ -834,16 +834,6 @@
                   <span
                     style="width: 10px; height: 10px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
                 </div>
-                <select id="log-channel-filter" class="form-control"
-                  style="width: 130px; padding: 4px 8px; font-size: 12px;" aria-label="Filter logs by channel">
-                  <option value="">All Channels</option>
-                  <option value="deployment">Deployment</option>
-                  <option value="build">Build</option>
-                  <option value="app">App</option>
-                  <option value="system">System</option>
-                  <option value="rollback">Rollback</option>
-                  <option value="github">GitHub</option>
-                </select>
                 <select id="log-level-filter" class="form-control"
                   style="width: 110px; padding: 4px 8px; font-size: 12px;" aria-label="Filter logs by level">
                   <option value="">All Levels</option>
@@ -865,8 +855,8 @@
               </div>
             </div>
             <div class="log-terminal" id="log-terminal-output">
-              <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-chan">SYSTEM</span><span
-                  class="log-lvl-info">WebDep real-time log stream connected.</span></div>
+              <div class="log-line log-empty-placeholder"><span class="log-ts">--:--:--</span><span
+                  class="log-lvl-info">Connecting to app log stream...</span></div>
             </div>
           </div>
         </section>
@@ -2797,7 +2787,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.13.10"></script>
+  <script type="module" src="/app.js?v=3.13.12"></script>
 </body>
 
 </html>

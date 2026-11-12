@@ -351,7 +351,7 @@ impl Runtime {
             self.logs.add(
                 Some(p.id),
                 None,
-                "app",
+                "system",
                 "info",
                 &format!(
                     "Enabled Maintenance Mode for '{}' (Port {} serving Maintenance Page)",

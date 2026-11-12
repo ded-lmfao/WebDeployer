@@ -120,17 +120,6 @@ function renderProjectsList() {
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
     const isMaintenance = p.app_status === 'maintenance' || resItem?.status === 'maintenance';
-    const domains = p.domains && p.domains.length ? p.domains : [];
-    
-    let primaryDomainUrl = '';
-    let primaryDomainLabel = '';
-    if (domains.length) {
-      primaryDomainUrl = `https://${domains[0]}`;
-      primaryDomainLabel = domains[0];
-    } else if (p.port) {
-      primaryDomainUrl = `http://127.0.0.1:${p.port}`;
-      primaryDomainLabel = `127.0.0.1:${p.port}`;
-    }
 
     const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7).toUpperCase() : (p.deployedSha ? p.deployedSha.slice(0, 7).toUpperCase() : '');
     const branchText = (p.branch || 'main').toUpperCase();
@@ -235,12 +224,7 @@ function renderProjectsList() {
           <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">
             ${icon('git-branch', { size: 10 })} ${escapeHtml(branchText)}${shaText ? ' &bull; ' + escapeHtml(shaText) : ''}
           </span>
-          ${primaryDomainUrl
-            ? `<a href="${primaryDomainUrl}" target="_blank" onclick="event.stopPropagation()" class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono); color: var(--accent-light); text-decoration: none;" title="${escapeHtml(primaryDomainUrl)}">
-                 ${icon('globe', { size: 10 })} ${escapeHtml(primaryDomainLabel)} &nearr;
-               </a>`
-            : (p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">PORT ${p.port}</span>` : '')
-          }
+          ${p.port ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">PORT ${p.port}</span>` : ''}
           ${accessBadge}
           ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
           ${p.app_started_at && isOnline ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${icon('clock', { size: 10 })} Started ${formatRelativeTime(p.app_started_at)}</span>` : ''}

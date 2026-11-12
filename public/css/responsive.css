@@ -173,7 +173,6 @@
   #audit-category-filter,
   #env-search-input,
   #log-search-input,
-  #log-channel-filter,
   #log-level-filter {
     width: auto !important;
     flex: 1 1 140px;
