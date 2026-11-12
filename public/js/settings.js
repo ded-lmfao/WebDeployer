@@ -1,6 +1,6 @@
 /**
- * WebDep Platform Settings, Reverse Proxy & Self-Updater Subsystem
- * Server monitoring, RBAC user administration, Caddy proxy domains, audit logs, and self-updater
+ * WebDep Platform Settings, Monitoring & Self-Updater Subsystem
+ * Server monitoring, security overview, SQLite system settings, audit logs, and self-updater pipeline.
  */
 
 import { icon } from './icons.js';
@@ -11,6 +11,8 @@ import {
   escapeHtml,
   formatDate,
   formatRelativeTime,
+  formatDuration,
+  hasPower,
   setHtmlIfChanged,
   openModal,
   closeModal,
@@ -22,61 +24,82 @@ import {
 } from './state.js';
 import { api, toast } from './api.js';
 
+// Re-export submodules so consumers importing from './settings.js' have full API parity
+export * from './settings_users.js';
+export * from './settings_caddy.js';
+
+import {
+  syncGithubTokensDomToDraft,
+  renderGithubTokensRows,
+  renderUsersTable,
+} from './settings_users.js';
+
 // ============================================================================
 // View 10: Server Monitoring
 // ============================================================================
-async function loadMonitorView() {
+export async function loadMonitorView() {
   try {
     const data = await api('/api/monitor');
     const sys = data.system || {};
 
-    document.getElementById('mon-hostname').textContent = sys.hostname || 'Local Host';
-    document.getElementById('mon-platform').textContent = sys.platform || '--';
-    document.getElementById('mon-uptime').textContent = formatDuration(sys.uptime);
-    document.getElementById('mon-cpu-cores').textContent = `${sys.cpu?.cores || 1} Cores (${sys.cpu?.pct || 0}% used)`;
-    document.getElementById('mon-cpu-load').textContent = `Load avg: ${(sys.cpu?.load || []).map((x) => x.toFixed(2)).join(', ')}`;
+    const monHost = document.getElementById('mon-hostname');
+    if (monHost) monHost.textContent = sys.hostname || 'Local Host';
+    const monPlat = document.getElementById('mon-platform');
+    if (monPlat) monPlat.textContent = sys.platform || '--';
+    const monUp = document.getElementById('mon-uptime');
+    if (monUp) monUp.textContent = formatDuration(sys.uptime);
+    const monCores = document.getElementById('mon-cpu-cores');
+    if (monCores) monCores.textContent = `${sys.cpu?.cores || 1} Cores (${sys.cpu?.pct || 0}% used)`;
+    const monLoad = document.getElementById('mon-cpu-load');
+    if (monLoad) monLoad.textContent = `Load avg: ${(sys.cpu?.load || []).map((x) => x.toFixed(2)).join(', ')}`;
 
-    // Nginx
+    // Nginx status
     try {
       const ng = await api('/api/nginx/status');
-      document.getElementById('mon-nginx-status').textContent = ng.running ? 'Active (Running)' : (ng.installed ? 'Stopped' : 'Not Installed');
-      document.getElementById('mon-nginx-status').style.color = ng.running ? 'var(--success)' : 'var(--danger)';
-      document.getElementById('mon-nginx-version').textContent = `nginx/${ng.version}`;
+      const ngStatus = document.getElementById('mon-nginx-status');
+      if (ngStatus) {
+        ngStatus.textContent = ng.running ? 'Active (Running)' : (ng.installed ? 'Stopped' : 'Not Installed');
+        ngStatus.style.color = ng.running ? 'var(--success)' : 'var(--danger)';
+      }
+      const ngVer = document.getElementById('mon-nginx-version');
+      if (ngVer) ngVer.textContent = `nginx/${ng.version}`;
     } catch { /* ignore */ }
 
     // Projects table (scoped to the active website card when inside a website workspace)
-    const activeProject = getSelectedProject();
+    const activeProject = window.getSelectedProject?.();
     const monProjects = activeProject
       ? (data.projects || []).filter((p) => p.id === activeProject.id)
       : (data.projects || []);
     const tbody = document.getElementById('monitor-projects-table');
-    setHtmlIfChanged(tbody, monProjects.map((p) => {
-      const appSt = p.status?.appStatus || (p.status?.running ? 'running' : 'stopped');
-      const isOnline = appSt === 'running';
-      const isMaint = appSt === 'maintenance';
-      return `
-      <tr>
-        <td><strong>${escapeHtml(p.name)}</strong></td>
-        <td>
-          <span class="status-dot ${isOnline ? 'online' : isMaint ? 'maintenance' : 'offline'}"></span>
-          <span style="font-size:12px; font-weight:600; margin-left:6px; color:${isOnline ? 'var(--success)' : isMaint ? 'var(--warning)' : 'var(--text-muted)'};">${isOnline ? 'Online' : isMaint ? 'Maintenance' : 'Offline'}</span>
-        </td>
-        <td>${p.status?.uptimeMs ? formatDuration(p.status.uptimeMs / 1000) : '--'}</td>
-        <td>${p.deployedSha ? `<span class="sha-pill">${p.deployedSha.slice(0, 7)}</span>` : '--'}</td>
-        <td>${p.disk ? `${(p.disk.used / 1048576).toFixed(1)} MB` : '--'}</td>
-        <td><span class="badge ${p.deployStatus?.status === 'success' ? 'badge-success' : 'badge-neutral'}">${p.deployStatus?.status || 'idle'}</span></td>
-      </tr>
-    `;
-    }).join(''));
+    if (tbody) {
+      setHtmlIfChanged(tbody, monProjects.map((p) => {
+        const appSt = p.status?.appStatus || (p.status?.running ? 'running' : 'stopped');
+        const isOnline = appSt === 'running';
+        const isMaint = appSt === 'maintenance';
+        return `
+        <tr>
+          <td><strong>${escapeHtml(p.name)}</strong></td>
+          <td>
+            <span class="status-dot ${isOnline ? 'online' : isMaint ? 'maintenance' : 'offline'}"></span>
+            <span style="font-size:12px; font-weight:600; margin-left:6px; color:${isOnline ? 'var(--success)' : isMaint ? 'var(--warning)' : 'var(--text-muted)'};">${isOnline ? 'Online' : isMaint ? 'Maintenance' : 'Offline'}</span>
+          </td>
+          <td>${p.status?.uptimeMs ? formatDuration(p.status.uptimeMs / 1000) : '--'}</td>
+          <td>${p.deployedSha ? `<span class="sha-pill">${p.deployedSha.slice(0, 7)}</span>` : '--'}</td>
+          <td>${p.disk ? `${(p.disk.used / 1048576).toFixed(1)} MB` : '--'}</td>
+          <td><span class="badge ${p.deployStatus?.status === 'success' ? 'badge-success' : 'badge-neutral'}">${p.deployStatus?.status || 'idle'}</span></td>
+        </tr>
+      `;
+      }).join(''));
+    }
   } catch (err) {
     console.error('Monitor view error:', err);
   }
 }
 
 // ============================================================================
-// View 11: Settings & Security
+// View 11: Settings & Security Overview
 // ============================================================================
-function renderSecurityStatusSummary() {
+export function renderSecurityStatusSummary() {
   if (!state.user) return;
   const is2fa = Boolean(state.user.totpEnabled);
   const pkCount = Number(state.passkeyCount || (state.passkeysList && state.passkeysList.length) || 0);
@@ -124,9 +147,9 @@ function renderSecurityStatusSummary() {
   if (open2faBtn) open2faBtn.textContent = is2fa ? 'Manage 2FA' : 'Enable 2FA';
 }
 
-async function loadSettingsView() {
+export async function loadSettingsView() {
   renderSecurityStatusSummary();
-  loadPasskeysList().catch(() => {});
+  if (window.loadPasskeysList) window.loadPasskeysList().catch(() => {});
 
   const canManagePlatform = hasPower('settings_manage');
   const isMain = Boolean(state.user && state.user.isMainAdmin);
@@ -143,10 +166,14 @@ async function loadSettingsView() {
 
   try {
     const s = await api('/api/settings');
-    document.getElementById('setting-min-free-mb').value = s.min_free_mb || 500;
-    document.getElementById('setting-default-retention').value = s.default_retention || 10;
-    document.getElementById('setting-step-timeout').value = s.step_timeout_s || 900;
-    document.getElementById('setting-deploy-timeout').value = s.deploy_timeout_s || 1800;
+    const freeMb = document.getElementById('setting-min-free-mb');
+    if (freeMb) freeMb.value = s.min_free_mb || 500;
+    const defRet = document.getElementById('setting-default-retention');
+    if (defRet) defRet.value = s.default_retention || 10;
+    const stepTo = document.getElementById('setting-step-timeout');
+    if (stepTo) stepTo.value = s.step_timeout_s || 900;
+    const depTo = document.getElementById('setting-deploy-timeout');
+    if (depTo) depTo.value = s.deploy_timeout_s || 1800;
 
     const tokBadge = document.getElementById('github-token-status-badge');
     let parsedTokens = [];
@@ -184,140 +211,14 @@ async function loadSettingsView() {
     if (isMain) {
       const users = await api('/api/users');
       state.usersList = users;
-      const tbody = document.getElementById('users-table-body');
-      const powerLabels = {
-        '*': 'All Powers (*)',
-        deploy: 'Deploy',
-        process: 'Start/Stop',
-        logs: 'Logs',
-        env: 'Env (.env)',
-        domains: 'Domains/SSL',
-        backups: 'Backups',
-        projects_manage: 'Manage Sites',
-        settings_manage: 'Settings/Users',
-      };
-
-      paginateAndRender(users, 'users', 'users-pagination', (slice) => {
-        tbody.innerHTML = slice.map((u) => {
-          const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
-          const projHtml = (isMain || u.allProjects)
-            ? '<span class="badge badge-info">All Websites (*)</span>'
-            : (u.allowedProjects && u.allowedProjects.length
-                ? u.allowedProjects.map((pid) => {
-                    const proj = state.projects.find((p) => p.id === pid);
-                    return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
-                  }).join(' ')
-                : '<span class="badge badge-warning">No Websites Assigned</span>');
-
-          const perms = isMain || (u.permissions && u.permissions.includes('*'))
-            ? ['*']
-            : (u.permissions || []);
-          const permsHtml = perms.length
-            ? perms.map((p) => `<span class="badge badge-neutral" style="margin:2px; font-size:10px;">${escapeHtml(powerLabels[p] || p)}</span>`).join(' ')
-            : '<span style="color:var(--text-dim); font-size:12px;">Read-Only</span>';
-
-          const tfaBadge = u.totpEnabled
-            ? '<span class="badge badge-success">2FA ON</span>'
-            : '<span class="badge badge-neutral">OFF</span>';
-
-          return `
-            <tr>
-              <td>
-                <strong>${escapeHtml(u.username)}</strong>
-                ${isMain ? '<span class="badge badge-info" style="margin-left:6px; font-size:10px;">MAIN ADMIN</span>' : ''}
-                ${u.id === state.user.id ? '<span style="color:var(--text-dim); font-size:11px; margin-left:4px;">(You)</span>' : ''}
-              </td>
-              <td><span class="badge badge-neutral">${escapeHtml((u.role || 'operator').toUpperCase())}</span></td>
-              <td>${tfaBadge}</td>
-              <td>${projHtml}</td>
-              <td style="max-width: 260px;">${permsHtml}</td>
-              <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
-              <td>
-                <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                  ${!isMain ? `
-                    <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${u.id})">Edit Access</button>
-                    <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
-                      ${u.disabled ? 'Enable' : 'Disable'}
-                    </button>
-                    ${u.totpEnabled && state.user.isMainAdmin ? `
-                      <button class="btn btn-secondary btn-sm" onclick="adminResetUser2fa(${u.id}, '${escapeHtml(u.username)}')">Reset 2FA</button>
-                    ` : ''}
-                    ${u.id !== state.user.id ? `
-                      <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
-                    ` : ''}
-                  ` : '<span style="color:var(--text-dim); font-size:12px;">Full Root Access</span>'}
-                </div>
-              </td>
-            </tr>
-          `;
-        }).join('');
-      });
+      renderUsersTable(users);
     }
   } catch (err) {
     toast(`Failed to load settings: ${err.message}`, 'error');
   }
 }
 
-function syncGithubTokensDomToDraft() {
-  if (!Array.isArray(state.githubTokensDraft)) state.githubTokensDraft = [];
-  document.querySelectorAll('#github-tokens-list .gh-token-row').forEach((row) => {
-    const idx = Number(row.getAttribute('data-gh-idx'));
-    if (!state.githubTokensDraft[idx]) return;
-    const lblEl = row.querySelector('.gh-token-label-input');
-    const tokEl = row.querySelector('.gh-token-value-input');
-    if (lblEl) state.githubTokensDraft[idx].label = lblEl.value;
-    if (tokEl) state.githubTokensDraft[idx].token = tokEl.value;
-  });
-}
-
-function renderGithubTokensRows() {
-  const container = document.getElementById('github-tokens-list');
-  if (!container) return;
-  const list = state.githubTokensDraft || [{ label: 'Primary Account', token: '', revealed: false }];
-  container.innerHTML = list.map((item, idx) => `
-    <div class="gh-token-row" data-gh-idx="${idx}" style="display: grid; grid-template-columns: 200px 1fr auto auto; gap: 8px; align-items: center;">
-      <input type="text" class="form-control gh-token-label-input" value="${escapeHtml(item.label || '')}" placeholder="Account label (e.g. Personal, Org)">
-      <input type="${item.revealed ? 'text' : 'password'}" class="form-control env-mono-input gh-token-value-input" value="${escapeHtml(item.token || '')}" placeholder="ghp_... or github_pat_...">
-      <button type="button" class="btn btn-secondary btn-sm" onclick="toggleGithubTokenRowReveal(${idx})" style="min-width: 62px;">
-        ${item.revealed ? 'Hide' : 'Show'}
-      </button>
-      <button type="button" class="btn btn-danger btn-sm" onclick="removeGithubTokenRow(${idx})" title="Remove token">&times;</button>
-    </div>
-  `).join('');
-}
-
-function addGithubTokenRow() {
-  syncGithubTokensDomToDraft();
-  if (!Array.isArray(state.githubTokensDraft)) state.githubTokensDraft = [];
-  state.githubTokensDraft.push({
-    label: `Account #${state.githubTokensDraft.length + 1}`,
-    token: '',
-    revealed: false,
-  });
-  renderGithubTokensRows();
-}
-window.addGithubTokenRow = addGithubTokenRow;
-
-function removeGithubTokenRow(idx) {
-  syncGithubTokensDomToDraft();
-  if (!Array.isArray(state.githubTokensDraft)) return;
-  state.githubTokensDraft.splice(idx, 1);
-  if (state.githubTokensDraft.length === 0) {
-    state.githubTokensDraft.push({ label: 'Primary Account', token: '', revealed: false });
-  }
-  renderGithubTokensRows();
-}
-window.removeGithubTokenRow = removeGithubTokenRow;
-
-function toggleGithubTokenRowReveal(idx) {
-  syncGithubTokensDomToDraft();
-  if (state.githubTokensDraft && state.githubTokensDraft[idx]) {
-    state.githubTokensDraft[idx].revealed = !state.githubTokensDraft[idx].revealed;
-    renderGithubTokensRows();
-  }
-}
-window.toggleGithubTokenRowReveal = toggleGithubTokenRowReveal;
-
+// Global settings form submit
 document.getElementById('settings-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   syncGithubTokensDomToDraft();
@@ -329,10 +230,10 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
     .filter((t) => t.token.length > 0);
 
   const payload = {
-    min_free_mb: Number(document.getElementById('setting-min-free-mb').value) || 500,
-    default_retention: Number(document.getElementById('setting-default-retention').value) || 10,
-    step_timeout_s: Number(document.getElementById('setting-step-timeout').value) || 900,
-    deploy_timeout_s: Number(document.getElementById('setting-deploy-timeout').value) || 1800,
+    min_free_mb: Number(document.getElementById('setting-min-free-mb')?.value) || 500,
+    default_retention: Number(document.getElementById('setting-default-retention')?.value) || 10,
+    step_timeout_s: Number(document.getElementById('setting-step-timeout')?.value) || 900,
+    deploy_timeout_s: Number(document.getElementById('setting-deploy-timeout')?.value) || 1800,
     github_tokens: cleanTokens,
   };
 
@@ -345,174 +246,14 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
   }
 });
 
-const ROLE_PRESET_POWERS = {
-  admin: ['deploy', 'process', 'logs', 'env', 'domains', 'backups', 'projects_manage', 'settings_manage'],
-  operator: ['deploy', 'process', 'logs', 'backups'],
-  developer: ['deploy', 'process', 'logs', 'env'],
-  viewer: ['logs'],
-};
-
-function applyRolePresetToCheckboxes(role) {
-  const powers = ROLE_PRESET_POWERS[role];
-  if (!powers) return;
-  document.querySelectorAll('.user-power-check').forEach((cb) => {
-    cb.checked = powers.includes(cb.value);
-  });
-}
-
-function renderUserProjectsChecklist(selectedIds = [], allProjects = true) {
-  const allCheck = document.getElementById('user-all-projects-check');
-  const container = document.getElementById('user-projects-checklist');
-  if (allCheck) allCheck.checked = allProjects;
-  if (!container) return;
-
-  if (!state.projects.length) {
-    container.innerHTML = '<div style="color:var(--text-dim); font-size:12px; grid-column: 1 / -1;">No websites created yet.</div>';
-    return;
-  }
-
-  container.innerHTML = state.projects.map((p) => {
-    const checked = allProjects || selectedIds.includes(p.id);
-    return `
-      <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; opacity:${allProjects ? '0.6' : '1'};">
-        <input type="checkbox" class="user-project-check" value="${p.id}" ${checked ? 'checked' : ''} ${allProjects ? 'disabled' : ''}>
-        <span>${escapeHtml(p.name)} <code style="font-size:11px;">(:${p.port || 3000})</code></span>
-      </label>
-    `;
-  }).join('');
-}
-
-document.getElementById('user-new-role')?.addEventListener('change', (e) => {
-  applyRolePresetToCheckboxes(e.target.value);
-});
-
-document.getElementById('user-all-projects-check')?.addEventListener('change', (e) => {
-  const isAll = e.target.checked;
-  const currentSelected = Array.from(document.querySelectorAll('.user-project-check:checked')).map((cb) => Number(cb.value));
-  renderUserProjectsChecklist(currentSelected, isAll);
-});
-
-document.getElementById('create-user-modal-btn')?.addEventListener('click', () => {
-  document.getElementById('create-user-form').reset();
-  document.getElementById('user-edit-id').value = '';
-  document.getElementById('user-modal-title').textContent = 'Create Platform User';
-  document.getElementById('save-new-user-btn').textContent = 'Create User';
-  const unameInput = document.getElementById('user-new-username');
-  unameInput.disabled = false;
-  document.getElementById('user-password-label').textContent = 'Password (min 6 chars) *';
-  document.getElementById('user-new-password').placeholder = '••••••••';
-  document.getElementById('user-new-role').value = 'operator';
-  applyRolePresetToCheckboxes('operator');
-  renderUserProjectsChecklist([], true);
-  openModal('modal-create-user');
-});
-
-function openEditUserModal(userId) {
-  const u = (state.usersList || []).find((x) => x.id === userId);
-  if (!u) return;
-
-  document.getElementById('create-user-form').reset();
-  document.getElementById('user-edit-id').value = String(u.id);
-  document.getElementById('user-modal-title').textContent = `Edit Access & Powers: ${u.username}`;
-  document.getElementById('save-new-user-btn').textContent = 'Save Access & Powers';
-
-  const unameInput = document.getElementById('user-new-username');
-  unameInput.value = u.username;
-  unameInput.disabled = true;
-
-  document.getElementById('user-password-label').textContent = 'Reset Password (Optional)';
-  document.getElementById('user-new-password').value = '';
-  document.getElementById('user-new-password').placeholder = 'Leave blank to keep current password';
-
-  document.getElementById('user-new-role').value = u.role || 'custom';
-
-  const hasWildcard = (u.permissions || []).includes('*');
-  document.querySelectorAll('.user-power-check').forEach((cb) => {
-    cb.checked = hasWildcard || (u.permissions || []).includes(cb.value);
-  });
-
-  renderUserProjectsChecklist(u.allowedProjects || [], Boolean(u.allProjects));
-  openModal('modal-create-user');
-}
-window.openEditUserModal = openEditUserModal;
-
-document.getElementById('save-new-user-btn')?.addEventListener('click', async (e) => {
-  e.preventDefault();
-  const editId = document.getElementById('user-edit-id').value.trim();
-  const username = document.getElementById('user-new-username').value.trim();
-  const password = document.getElementById('user-new-password').value;
-  const role = document.getElementById('user-new-role').value;
-  const permissions = Array.from(document.querySelectorAll('.user-power-check:checked')).map((cb) => cb.value);
-  const allProjects = document.getElementById('user-all-projects-check').checked;
-  const allowedProjects = allProjects
-    ? []
-    : Array.from(document.querySelectorAll('.user-project-check:checked')).map((cb) => Number(cb.value));
-
-  if (!editId && (!username || password.length < 6)) {
-    toast('Username required and password must be at least 6 characters.', 'warning');
-    return;
-  }
-  if (editId && password && password.length < 6) {
-    toast('New password must be at least 6 characters.', 'warning');
-    return;
-  }
-
-  try {
-    if (editId) {
-      const body = { role, permissions, allProjects, allowedProjects };
-      if (password) body.password = password;
-      await api(`/api/users/${editId}`, { method: 'PUT', body });
-      toast(`Updated permissions & website access for "${username}".`, 'success');
-    } else {
-      await api('/api/users', {
-        method: 'POST',
-        body: { username, password, role, permissions, allProjects, allowedProjects },
-      });
-      toast(`User "${username}" created in SQLite.`, 'success');
-    }
-    closeModal('modal-create-user');
-    await loadSettingsView();
-  } catch (err) {
-    toast(`Failed to save user: ${err.message}`, 'error');
-  }
-});
-
-async function toggleUserDisabled(userId, disabled) {
-  try {
-    await api(`/api/users/${userId}`, { method: 'PUT', body: { disabled: Boolean(disabled) } });
-    toast(disabled ? 'User account disabled.' : 'User account enabled.', 'success');
-    await loadSettingsView();
-  } catch (err) {
-    toast(`Update failed: ${err.message}`, 'error');
-  }
-}
-window.toggleUserDisabled = toggleUserDisabled;
-
-async function deleteUser(userId, username) {
-  const ok = await showConfirmDialog({
-    title: 'Remove Platform User',
-    message: `Are you sure you want to permanently remove user "${username}" and revoke all of their sessions?`,
-    confirmText: 'Remove User',
-    danger: true,
-  });
-  if (!ok) return;
-  try {
-    await api(`/api/users/${userId}`, { method: 'DELETE' });
-    toast(`User "${username}" removed from SQLite.`, 'success');
-    await loadSettingsView();
-  } catch (err) {
-    toast(`Delete failed: ${err.message}`, 'error');
-  }
-}
-window.deleteUser = deleteUser;
-
-
-
-async function loadAuditView() {
+// ============================================================================
+// Activity & Audit Logs
+// ============================================================================
+export async function loadAuditView() {
   const tbody = document.getElementById('audit-table-body');
   const titleEl = document.getElementById('audit-view-title');
   const subEl = document.getElementById('audit-view-subtitle');
-  const activeProject = getSelectedProject();
+  const activeProject = window.getSelectedProject?.();
 
   if (titleEl && subEl) {
     if (activeProject) {
@@ -534,12 +275,11 @@ async function loadAuditView() {
     state.auditLogs = Array.isArray(logs) ? logs : [];
     renderFilteredAuditLogs();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--danger); padding: 24px;">${escapeHtml(err.message)}</td></tr>`;
   }
 }
-window.loadAuditView = loadAuditView;
 
-function renderFilteredAuditLogs() {
+export function renderFilteredAuditLogs() {
   const tbody = document.getElementById('audit-table-body');
   if (!tbody) return;
   const logs = state.auditLogs || [];
@@ -610,158 +350,6 @@ document.getElementById('audit-category-filter')?.addEventListener('change', () 
 });
 
 // ============================================================================
-// Caddy & Reverse Proxy Modal
-// ============================================================================
-let activeNginxProjectId = null;
-
-function renderCaddyModalBanner(p) {
-  const banner = document.getElementById('nginx-modal-status-banner');
-  if (!banner || !p) return;
-  const activeDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
-  const domainsHtml = activeDomains.length
-    ? activeDomains.map((d) => `
-        <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(37,99,235,0.16); border:1px solid rgba(59,130,246,0.4); border-radius:5px; padding:2px 8px; margin-right:4px;">
-          <a href="https://${escapeHtml(d)}" target="_blank" style="color:#60a5fa; font-family:monospace; font-weight:600; text-decoration:none;">${escapeHtml(d)} &nearr;</a>
-          <button type="button" onclick="removeSingleCaddyDomain('${escapeHtml(d)}')" title="Remove domain" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:13px; line-height:1; padding:0 2px;">&times;</button>
-        </span>
-      `).join('')
-    : '<code style="color:var(--text-muted); font-weight:600;">Local only (127.0.0.1:' + (p.port || 3000) + ')</code>';
-
-  banner.innerHTML = `
-    <div style="background: var(--bg-card); padding: 12px; border-radius: var(--radius-md); font-size: 13px; border: 1px solid var(--border-subtle);">
-      <div><strong>Reverse Proxy:</strong> <span class="badge badge-success">Caddy</span> &bull; <code>Port ${p.port || 3000}</code></div>
-      <div style="margin-top: 6px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;"><strong>Domains:</strong> ${domainsHtml}</div>
-      <div style="margin-top: 6px;"><strong>Automatic HTTPS:</strong> <span class="badge badge-success">Let's Encrypt / ZeroSSL (Active)</span></div>
-    </div>
-  `;
-}
-
-async function openNginxModal(projectId) {
-  activeNginxProjectId = projectId;
-  const p = state.projects.find((x) => x.id === projectId);
-  if (!p) return;
-
-  const domainInput = document.getElementById('caddy-domains-input');
-  if (domainInput) {
-    domainInput.value = (p.domains || []).join(', ');
-    domainInput.onkeydown = (ev) => {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        void saveCaddyDomains();
-      }
-    };
-  }
-
-  const preview = document.getElementById('nginx-config-preview');
-  renderCaddyModalBanner(p);
-  if (preview) preview.value = 'Generating Caddyfile configuration...';
-  openModal('modal-nginx');
-
-  try {
-    const data = await api(`/api/projects/${projectId}/caddy`, { noCache: true });
-    if (preview && data.config) preview.value = data.config;
-    if (Array.isArray(data.domains)) {
-      p.domains = data.domains;
-      if (domainInput) domainInput.value = data.domains.join(', ');
-    }
-    renderCaddyModalBanner(p);
-  } catch (err) {
-    if (preview) preview.value = `Failed to generate configuration: ${err.message}`;
-  }
-}
-window.openNginxModal = openNginxModal;
-
-function cleanDomainList(rawStr) {
-  if (!rawStr) return [];
-  return rawStr
-    .split(/[\n,;]+/)
-    .map((s) => s.trim().replace(/^https?:\/\//i, '').split('/')[0].trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function removeSingleCaddyDomain(domainToRemove) {
-  const p = state.projects.find((x) => x.id === activeNginxProjectId);
-  if (!p) return;
-  const remaining = (p.domains || []).filter((d) => d !== domainToRemove);
-  const input = document.getElementById('caddy-domains-input');
-  if (input) input.value = remaining.join(', ');
-  await saveCaddyDomains();
-}
-window.removeSingleCaddyDomain = removeSingleCaddyDomain;
-
-async function saveCaddyDomains() {
-  if (!activeNginxProjectId) return;
-  const input = document.getElementById('caddy-domains-input');
-  const domains = cleanDomainList(input?.value || '');
-  if (input) input.value = domains.join(', ');
-
-  const btn = document.getElementById('caddy-save-domains-btn');
-  const applyBtn = document.getElementById('nginx-apply-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-  }
-  if (applyBtn) {
-    applyBtn.disabled = true;
-    applyBtn.textContent = 'Applying Caddy...';
-  }
-
-  try {
-    const res = await api(`/api/projects/${activeNginxProjectId}/caddy/apply`, {
-      method: 'POST',
-      body: { domains },
-    });
-    const savedDomains = (res && Array.isArray(res.domains)) ? res.domains : domains;
-    const p = state.projects.find((x) => x.id === activeNginxProjectId);
-    if (p) {
-      p.domains = savedDomains;
-      renderCaddyModalBanner(p);
-    }
-    const preview = document.getElementById('nginx-config-preview');
-    if (preview && res && res.config) {
-      preview.value = res.config;
-    }
-
-    toast(
-      savedDomains.length
-        ? `Custom domain(s) saved & applied: ${savedDomains.join(', ')}`
-        : 'Cleared custom domains (Local-only mode).',
-      'success'
-    );
-
-    await loadProjects();
-    renderWebsiteWorkspaceHeader();
-    if (state.currentView === 'projects') renderProjectsList();
-    if (state.currentView === 'overview') await loadOverview();
-  } catch (err) {
-    toast(`Failed to update domains: ${err.message}`, 'error');
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Save & Apply';
-    }
-    if (applyBtn) {
-      applyBtn.disabled = false;
-      applyBtn.textContent = 'Apply & Reload Caddy';
-    }
-  }
-}
-window.saveCaddyDomains = saveCaddyDomains;
-
-document.getElementById('nginx-certbot-btn')?.addEventListener('click', async () => {
-  if (!activeNginxProjectId) return;
-  toast('Running Let\'s Encrypt Certbot... This may take up to 30 seconds.', 'info');
-  try {
-    await api(`/api/projects/${activeNginxProjectId}/nginx/certbot`, { method: 'POST' });
-    toast('SSL certificate provisioned successfully with Let\'s Encrypt!', 'success');
-    await openNginxModal(activeNginxProjectId);
-  } catch (err) {
-    toast(`Certbot failed: ${err.message}`, 'error');
-  }
-});
-
-
-// ============================================================================
 // Panel Control (Restart Panel / Clear Server Cache)
 // ============================================================================
 document.getElementById('restart-panel-btn')?.addEventListener('click', async () => {
@@ -781,7 +369,6 @@ document.getElementById('restart-panel-btn')?.addEventListener('click', async ()
   }
 
   toast('Panel is restarting... reconnecting', 'info', 8000);
-  // Wait for the old instance to go down, then poll until the new one answers
   await new Promise((r) => setTimeout(r, 1500));
   for (let i = 0; i < 60; i++) {
     try {
@@ -811,7 +398,7 @@ document.getElementById('clear-cache-btn')?.addEventListener('click', async () =
 // ============================================================================
 let updatePollTimer = null;
 
-async function loadSystemVersionInfo(quiet = false) {
+export async function loadSystemVersionInfo(quiet = false) {
   try {
     const v = await api('/api/system/version');
     const branchEl = document.getElementById('platform-branch-name');
@@ -822,7 +409,6 @@ async function loadSystemVersionInfo(quiet = false) {
     const remoteStatusEl = document.getElementById('platform-remote-status-text');
     const badgeEl = document.getElementById('platform-version-badge');
     const updateBtn = document.getElementById('trigger-platform-update-btn');
-    const restartBanner = document.getElementById('platform-restart-alert-banner');
 
     if (branchEl) branchEl.textContent = v.current_branch || 'main';
     if (hashEl) hashEl.textContent = v.current_commit || 'unknown';
@@ -867,9 +453,8 @@ async function loadSystemVersionInfo(quiet = false) {
     return null;
   }
 }
-window.loadSystemVersionInfo = loadSystemVersionInfo;
 
-async function checkPlatformUpdates(manual = false) {
+export async function checkPlatformUpdates(manual = false) {
   const btn = document.getElementById('check-platform-update-btn');
   if (btn) btn.disabled = true;
   if (manual) toast('Checking remote repository for latest commits...', 'info', 2500);
@@ -887,7 +472,6 @@ async function checkPlatformUpdates(manual = false) {
     }
   }
 }
-window.checkPlatformUpdates = checkPlatformUpdates;
 
 function updatePipelineStepIndicators(progress, isError = false) {
   const dot1 = document.getElementById('step-dot-1');
@@ -923,7 +507,7 @@ function updatePipelineStepIndicators(progress, isError = false) {
   }
 }
 
-async function startPlatformUpdate() {
+export async function startPlatformUpdate() {
   const v = await loadSystemVersionInfo(true);
   const branchName = v?.current_branch || 'main';
 
@@ -931,7 +515,7 @@ async function startPlatformUpdate() {
     title: 'Update WebDep to Latest Commit',
     message: `Fetch latest commits from <strong>origin/${escapeHtml(branchName)}</strong> and recompile WebDep?<br><br>
     &bull; <strong style="color:var(--success);">Safe & Non-Destructive:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file are completely untouched.<br>
-    &bull; <strong style="color:var(--accent-light);">Resource-Safe:</strong> Compiled in low-RAM mode (<code>CARGO_BUILD_JOBS=1</code>) to prevent VPS out-of-memory errors.<br>
+    &bull; <strong style="color:var(--accent-light);">Resource-Safe:</strong> Compiled in low-RAM mode (<code>CARGO_BUILD_JOJOBS=1</code>) to prevent VPS out-of-memory errors.<br>
     &bull; <strong style="color:var(--text-main);">Zero Unplanned Downtime:</strong> Once compilation finishes, WebDep will pause and ask for your confirmation before restarting.`,
     confirmText: 'Fetch & Compile WebDep',
     danger: false,
@@ -949,7 +533,6 @@ async function startPlatformUpdate() {
   const dismissBtn = document.getElementById('update-dismiss-btn');
   const closeBtn = document.getElementById('modal-platform-update-close');
 
-  // Reset steps
   ['1', '2', '3', '4'].forEach((num) => {
     const dot = document.getElementById(`step-dot-${num}`);
     const card = document.getElementById(`step-card-${num}`);
@@ -985,7 +568,6 @@ async function startPlatformUpdate() {
     return;
   }
 
-  // Poll update progress
   if (updatePollTimer) clearInterval(updatePollTimer);
   updatePollTimer = setInterval(async () => {
     try {
@@ -1028,9 +610,8 @@ async function startPlatformUpdate() {
     }
   }, 900);
 }
-window.startPlatformUpdate = startPlatformUpdate;
 
-async function executePostUpdateRestart() {
+export async function executePostUpdateRestart() {
   const ok = await showConfirmDialog({
     title: 'Restart WebDep Panel',
     message: 'Restart the WebDep panel now to activate the new version? The dashboard will briefly reconnect in ~3 seconds.',
@@ -1064,9 +645,8 @@ async function executePostUpdateRestart() {
 
   pollReconnectionAfterUpdate();
 }
-window.executePostUpdateRestart = executePostUpdateRestart;
 
-function copyUpdateLogs() {
+export function copyUpdateLogs() {
   const el = document.getElementById('update-console-logs');
   if (!el) return;
   navigator.clipboard.writeText(el.textContent || '').then(() => {
@@ -1075,9 +655,8 @@ function copyUpdateLogs() {
     toast('Could not copy logs to clipboard', 'warning');
   });
 }
-window.copyUpdateLogs = copyUpdateLogs;
 
-async function pollReconnectionAfterUpdate() {
+export async function pollReconnectionAfterUpdate() {
   const stepText = document.getElementById('update-step-text');
   const bannerMsg = document.getElementById('update-banner-msg');
   const progressBar = document.getElementById('update-progress-bar');
@@ -1088,7 +667,6 @@ async function pollReconnectionAfterUpdate() {
     progressBar.style.background = 'var(--success)';
   }
 
-  // Wait 2s for the process to exit
   await new Promise((r) => setTimeout(r, 2000));
 
   for (let attempt = 1; attempt <= 90; attempt++) {
@@ -1116,26 +694,14 @@ async function pollReconnectionAfterUpdate() {
   if (closeBtn) closeBtn.style.display = 'block';
 }
 
-
-
+// Bind globals for onclick inline HTML handlers
 window.loadMonitorView = loadMonitorView;
 window.loadSettingsView = loadSettingsView;
 window.renderSecurityStatusSummary = renderSecurityStatusSummary;
-window.cleanDomainList = cleanDomainList;
-
-export {
-  loadMonitorView,
-  loadSettingsView,
-  renderSecurityStatusSummary,
-  cleanDomainList,
-  loadAuditView,
-  openNginxModal,
-  removeSingleCaddyDomain,
-  saveCaddyDomains,
-  loadSystemVersionInfo,
-  checkPlatformUpdates,
-  startPlatformUpdate,
-  executePostUpdateRestart,
-  copyUpdateLogs,
-  pollReconnectionAfterUpdate,
-};
+window.loadAuditView = loadAuditView;
+window.loadSystemVersionInfo = loadSystemVersionInfo;
+window.checkPlatformUpdates = checkPlatformUpdates;
+window.startPlatformUpdate = startPlatformUpdate;
+window.executePostUpdateRestart = executePostUpdateRestart;
+window.copyUpdateLogs = copyUpdateLogs;
+window.pollReconnectionAfterUpdate = pollReconnectionAfterUpdate;

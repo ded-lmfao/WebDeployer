@@ -1,15 +1,15 @@
+pub mod builder;
+pub mod worker;
+
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
-use tokio::time::{sleep, Duration};
 
 use crate::cache::AppCache;
 use crate::db::{now, DbPool};
-use crate::git::{CommitInfo, Git};
 use crate::logs::Logs;
 use crate::projects::{Project, Projects};
 use crate::runtime::Runtime;
@@ -101,239 +101,192 @@ impl Deployer {
         cache: Arc<AppCache>,
         data_dir: PathBuf,
     ) -> Self {
-        // Clean up any stale deployments left in 'pending' or 'running' from a previous server restart/crash
-        if let Ok(conn) = db.lock() {
-            let _ = conn.execute(
-                "UPDATE deployments SET status='failed', stage='failed', error='Interrupted by server restart', finished_at=? WHERE status IN ('pending', 'running')",
-                params![now()],
-            );
-        }
-
         Self {
+            data_dir,
             db,
+            cache,
             logs,
             projects,
             runtime,
-            cache,
-            data_dir,
             queue_semaphore: Arc::new(Semaphore::new(1)),
             active_projects: Arc::new(Mutex::new(HashMap::new())),
             spawned_deployments: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
+    /// Check if a project currently has an in-flight or queued deployment/rollback
     pub fn has_active_deployment(&self, project_id: i64) -> bool {
-        if let Ok(map) = self.active_projects.lock() {
-            if map.contains_key(&project_id) {
-                return true;
+        if let Ok(active) = self.active_projects.lock() {
+            if let Some(&dep_id) = active.get(&project_id) {
+                let conn = self.db.lock().unwrap();
+                let status: Option<String> = conn
+                    .query_row(
+                        "SELECT status FROM deployments WHERE id = ?",
+                        params![dep_id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                if let Some(s) = status {
+                    if s == "in_progress" || s == "queued" {
+                        return true;
+                    }
+                }
             }
-        }
-        if let Ok(conn) = self.db.lock() {
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM deployments WHERE project_id = ? AND status IN ('pending', 'running')",
-                    params![project_id],
-                    |r| r.get(0),
-                )
-                .unwrap_or(0);
-            return count > 0;
         }
         false
     }
 
     pub fn last_attempted_sha(&self, project_id: i64) -> Option<String> {
-        let conn = self.db.lock().ok()?;
+        let conn = self.db.lock().unwrap();
         conn.query_row(
-            "SELECT sha FROM deployments WHERE project_id = ? AND sha IS NOT NULL AND sha != '' ORDER BY id DESC LIMIT 1",
+            "SELECT sha FROM deployments WHERE project_id = ? AND sha IS NOT NULL AND trim(sha) != '' ORDER BY id DESC LIMIT 1",
             params![project_id],
-            |r| r.get::<_, String>(0),
+            |r| r.get(0),
         )
         .ok()
     }
 
     pub fn list_deployments(&self, project_id: Option<i64>, limit: usize) -> Vec<Deployment> {
         let conn = self.db.lock().unwrap();
-        let mut sql = format!("SELECT {} FROM deployments d LEFT JOIN projects p ON p.id = d.project_id", SELECT_DEPLOYMENT_FIELDS);
-        let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
-
-        if let Some(pid) = project_id {
-            sql.push_str(" WHERE d.project_id = ?");
-            params_vec.push(pid.into());
-        }
-        sql.push_str(&format!(" ORDER BY d.id DESC LIMIT {}", limit));
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match project_id {
+            Some(pid) => (
+                format!(
+                    "SELECT {} FROM deployments d LEFT JOIN projects p ON d.project_id = p.id \
+                     WHERE d.project_id = ? ORDER BY d.id DESC LIMIT ?",
+                    SELECT_DEPLOYMENT_FIELDS
+                ),
+                vec![Box::new(pid), Box::new(limit as i64)],
+            ),
+            None => (
+                format!(
+                    "SELECT {} FROM deployments d LEFT JOIN projects p ON d.project_id = p.id \
+                     ORDER BY d.id DESC LIMIT ?",
+                    SELECT_DEPLOYMENT_FIELDS
+                ),
+                vec![Box::new(limit as i64)],
+            ),
+        };
 
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-
-        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
-        let rows = stmt.query_map(params_slice.as_slice(), row_to_deployment);
-
-        match rows {
-            Ok(r) => r.flatten().collect(),
-            Err(_) => Vec::new(),
-        }
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+        stmt.query_map(param_refs.as_slice(), row_to_deployment)
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default()
     }
 
     pub fn get_deployment(&self, id: i64) -> Option<Deployment> {
         let conn = self.db.lock().unwrap();
-        let sql = format!("SELECT {} FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?", SELECT_DEPLOYMENT_FIELDS);
-        conn.query_row(&sql, rusqlite::params![id], row_to_deployment).ok()
+        let sql = format!("SELECT {} FROM deployments d LEFT JOIN projects p ON d.project_id = p.id WHERE d.id = ?", SELECT_DEPLOYMENT_FIELDS);
+        conn.query_row(&sql, params![id], row_to_deployment).ok()
     }
 
     pub fn list_releases(&self, project_id: i64) -> Vec<Release> {
-        let p = match self.projects.get(project_id) {
-            Ok(Some(p)) => p,
-            _ => return Vec::new(),
-        };
-
         let conn = self.db.lock().unwrap();
+        let current_rel_id: Option<i64> = conn
+            .query_row(
+                "SELECT current_release_id FROM projects WHERE id = ?",
+                params![project_id],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+
         let mut stmt = match conn.prepare(
-            "SELECT r.id, r.project_id, r.sha, r.short_sha, r.message, r.author, r.committed_at, r.dir, r.status,
-                    r.created_at, r.deployed_at,
-                    COALESCE(r.deployment_id, (SELECT id FROM deployments WHERE release_id = r.id ORDER BY id DESC LIMIT 1)) as dep_id,
-                    r.build_status, r.health_status
-             FROM releases r WHERE r.project_id = ? ORDER BY r.id DESC",
+            "SELECT id, project_id, sha, short_sha, message, author, committed_at, dir, \
+                    status, build_status, health_status, deployment_id, error, created_at, deployed_at \
+             FROM releases WHERE project_id = ? ORDER BY id DESC LIMIT 50",
         ) {
             Ok(s) => s,
-            Err(e) => {
-                tracing::error!("Failed to prepare releases query: {}", e);
-                return Vec::new();
-            }
+            Err(_) => return Vec::new(),
         };
 
-        let rows = stmt.query_map(params![project_id], |r| {
-            let id: i64 = r.get(0)?;
-            let dir: String = r.get(7)?;
-            let status: String = r.get(8)?;
-            let is_live = p.current_release_id == Some(id);
-            let available = Path::new(&dir).exists();
-            let db_build_status: Option<String> = r.get::<_, Option<String>>(12).ok().flatten();
-            let db_health_status: Option<String> = r.get::<_, Option<String>>(13).ok().flatten();
+        let rows = stmt
+            .query_map(params![project_id], |r| {
+                let id: i64 = r.get(0)?;
+                let dir_str: String = r.get(7)?;
+                let status: String = r.get(8)?;
+                let dir_path = Path::new(&dir_str);
+                let available = dir_path.exists() && status == "succeeded";
+                let live = current_rel_id == Some(id);
 
-            let build_status = if let Some(bs) = db_build_status {
-                if bs == "pending" && (status == "succeeded" || status == "pulled") {
-                    "success".to_string()
-                } else {
-                    bs
-                }
-            } else if status == "succeeded" || status == "pulled" {
-                "success".to_string()
-            } else {
-                status.clone()
-            };
-
-            let health_status = if let Some(hs) = db_health_status {
-                if hs == "unknown" && status == "succeeded" {
-                    "ok".to_string()
-                } else {
-                    hs
-                }
-            } else if status == "succeeded" {
-                "ok".to_string()
-            } else {
-                "pending".to_string()
-            };
-
-            let committed_at: Option<i64> = r.get::<_, Option<i64>>(6).ok().flatten()
-                .or_else(|| {
-                    r.get::<_, Option<String>>(6).ok().flatten()
-                        .and_then(|s| s.parse::<i64>().ok())
-                });
-
-            Ok(Release {
-                id,
-                project_id: r.get(1)?,
-                sha: r.get(2)?,
-                short_sha: r.get(3)?,
-                message: r.get::<_, Option<String>>(4).ok().flatten(),
-                author: r.get::<_, Option<String>>(5).ok().flatten(),
-                committed_at,
-                dir,
-                status,
-                build_status,
-                health_status,
-                deployment_id: r.get::<_, Option<i64>>(11).ok().flatten(),
-                error: None,
-                created_at: r.get(9)?,
-                deployed_at: r.get::<_, Option<i64>>(10).ok().flatten(),
-                live: is_live,
-                available,
+                Ok(Release {
+                    id,
+                    project_id: r.get(1)?,
+                    sha: r.get(2)?,
+                    short_sha: r.get(3)?,
+                    message: r.get(4)?,
+                    author: r.get(5)?,
+                    committed_at: r.get(6)?,
+                    dir: dir_str,
+                    status,
+                    build_status: r.get(9)?,
+                    health_status: r.get(10)?,
+                    deployment_id: r.get(11)?,
+                    error: r.get(12)?,
+                    created_at: r.get(13)?,
+                    deployed_at: r.get(14)?,
+                    live,
+                    available,
+                })
             })
-        });
+            .map(|iter| iter.filter_map(Result::ok).collect())
+            .unwrap_or_default();
 
-        match rows {
-            Ok(r) => r.flatten().collect(),
-            Err(e) => {
-                tracing::error!("Failed to query releases: {}", e);
-                Vec::new()
-            }
-        }
+        rows
     }
 
     pub fn create_deployment(&self, p: &Project, kind: &str, actor: &str, trigger: &str) -> i64 {
-        let mut active_map = self.active_projects.lock().unwrap();
-        if let Some(&existing_id) = active_map.get(&p.id) {
-            let still_active = {
-                let conn = self.db.lock().unwrap();
-                conn.query_row(
-                    "SELECT COUNT(*) FROM deployments WHERE id = ? AND status IN ('pending', 'running')",
-                    params![existing_id],
-                    |r| r.get::<_, i64>(0),
-                )
-                .unwrap_or(0)
-                    > 0
-            };
-            if still_active {
-                self.logs.add(
-                    Some(p.id),
-                    Some(existing_id),
-                    "deployment",
-                    "info",
-                    &format!(
-                        "Skipping duplicate {} request (trigger: {}) — deployment #{} is already active or queued for {}",
-                        kind, trigger, existing_id, p.name
-                    ),
-                );
-                return existing_id;
-            }
-            active_map.remove(&p.id);
+        let conn = self.db.lock().unwrap();
+        let ts = now();
+        conn.execute(
+            "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) \
+             VALUES(?, ?, 'in_progress', 'queued', ?, ?, ?)",
+            params![p.id, kind, trigger, actor, ts],
+        )
+        .ok();
+        let id = conn.last_insert_rowid();
+
+        if let Ok(mut active) = self.active_projects.lock() {
+            active.insert(p.id, id);
         }
 
-        let ts = now();
-        let id = {
-            let conn = self.db.lock().unwrap();
-            if let Ok(existing_db_id) = conn.query_row(
-                "SELECT id FROM deployments WHERE project_id = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1",
-                params![p.id],
-                |r| r.get::<_, i64>(0),
-            ) {
-                active_map.insert(p.id, existing_db_id);
-                return existing_db_id;
-            }
-
-            conn.execute(
-                "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) VALUES(?, ?, 'pending', 'pending', ?, ?, ?)",
-                params![p.id, kind, trigger, actor, ts],
-            ).ok();
-            conn.last_insert_rowid()
-        };
-        active_map.insert(p.id, id);
-        drop(active_map);
         self.cache.invalidate_project(p.id);
+
+        let action_name = if kind == "rollback" { "rollback.start" } else { "deploy.start" };
+        let action_title = if kind == "rollback" { "Rollback" } else { "Deployment" };
+        conn.execute(
+            "INSERT INTO audit_logs(project_id, action, actor, target, detail, ts) VALUES(?, ?, ?, ?, ?, ?)",
+            params![
+                p.id,
+                action_name,
+                actor,
+                p.name,
+                format!("Triggered {} #{} (Trigger: {})", action_title, id, trigger),
+                ts,
+            ],
+        )
+        .ok();
+
+        self.logs.add(
+            Some(p.id),
+            Some(id),
+            if kind == "rollback" { "rollback" } else { "deployment" },
+            "info",
+            &format!("{} #{} queued by {} ({})", action_title, id, actor, trigger),
+        );
+
         id
     }
 
     pub fn update_stage(&self, dep_id: i64, stage: &str) {
         let conn = self.db.lock().unwrap();
-        conn.execute(
-            "UPDATE deployments SET stage=?, status='running' WHERE id=?",
+        let _ = conn.execute(
+            "UPDATE deployments SET stage = ? WHERE id = ?",
             params![stage, dep_id],
-        ).ok();
-        drop(conn);
-        self.cache.invalidate_prefix("overview:");
-        self.cache.invalidate_prefix("deployments:");
+        );
     }
 
     pub fn fail_deployment_step(&self, dep_id: i64, project_id: i64, channel: &str, error: &str) {
@@ -342,41 +295,55 @@ impl Deployer {
     }
 
     pub fn finish_deployment(&self, dep_id: i64, status: &str, error: Option<&str>) {
-        let ts = now();
-        let conn = self.db.lock().unwrap();
-        conn.execute(
-            "UPDATE deployments SET status=?, stage=?, error=?, finished_at=? WHERE id=?",
-            params![status, status, error, ts, dep_id],
-        ).ok();
-
-        if status == "failed" {
-            conn.execute(
-                "UPDATE releases SET status='failed', build_status='failed' WHERE id=(SELECT release_id FROM deployments WHERE id=?)",
+        let (project_id, prev_stage, kind, actor, target_name) = {
+            let conn = self.db.lock().unwrap();
+            let _ = conn.execute(
+                "UPDATE deployments SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+                params![status, error, now(), dep_id],
+            );
+            conn.query_row(
+                "SELECT d.project_id, d.stage, d.kind, d.actor, p.name FROM deployments d LEFT JOIN projects p ON d.project_id = p.id WHERE d.id = ?",
                 params![dep_id],
+                |r| Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "project".to_string())
+                )),
+            ).unwrap_or((0, "queued".to_string(), "deploy".to_string(), "system".to_string(), "project".to_string()))
+        };
+
+        if status == "success" {
+            self.update_stage(dep_id, "ready");
+        } else if prev_stage == "queued" {
+            self.update_stage(dep_id, "failed_queue");
+        }
+
+        let is_rollback = kind == "rollback";
+        let action_name = if status == "success" {
+            if is_rollback { "rollback.success" } else { "deploy.success" }
+        } else {
+            if is_rollback { "rollback.fail" } else { "deploy.fail" }
+        };
+
+        let action_title = if is_rollback { "Rollback" } else { "Deployment" };
+        let detail_msg = if status == "success" {
+            format!("{} #{} finished successfully", action_title, dep_id)
+        } else {
+            format!("{} #{} failed: {}", action_title, dep_id, error.unwrap_or("unknown error"))
+        };
+
+        {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "INSERT INTO audit_logs(project_id, action, actor, target, detail, ts) VALUES(?, ?, ?, ?, ?, ?)",
+                params![project_id, action_name, actor, target_name, detail_msg, now()],
             ).ok();
         }
 
-        let mut pid_opt = None;
-        if let Ok((proj_id, kind, actor, sha, proj_name)) = conn.query_row(
-            "SELECT d.project_id, d.kind, d.actor, COALESCE(d.sha, ''), COALESCE(p.name, '')
-             FROM deployments d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = ?",
-            params![dep_id],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?)),
-        ) {
-            pid_opt = Some(proj_id);
-            let short = if sha.len() >= 7 { &sha[..7] } else { &sha };
-            let action = format!("{}.{}", kind, status);
-            let detail = match error {
-                Some(err) => format!("Deployment #{} failed: {}", dep_id, err),
-                None => format!("Deployment #{} completed ({})", dep_id, if short.is_empty() { "live" } else { short }),
-            };
-            conn.execute(
-                "INSERT INTO audit(project_id, ts, actor, action, target, detail, ip) VALUES(?, ?, ?, ?, ?, ?, '127.0.0.1')",
-                params![proj_id, ts, actor, action, proj_name, detail],
-            ).ok();
-        }
-        drop(conn);
-        if let Some(pid) = pid_opt {
+        if project_id > 0 {
+            let pid = project_id;
             if let Ok(mut active_map) = self.active_projects.lock() {
                 if active_map.get(&pid) == Some(&dep_id) {
                     active_map.remove(&pid);
@@ -421,556 +388,4 @@ impl Deployer {
             }
         }
     }
-
-    pub async fn run_deploy(self: Arc<Self>, project_id: i64, dep_id: i64) {
-        {
-            let mut spawned = self.spawned_deployments.lock().unwrap();
-            if !spawned.insert(dep_id) {
-                // Worker already running or queued for this deployment ID
-                return;
-            }
-        }
-
-        let permit = match self.acquire_queue_permit(project_id, dep_id, "deployment").await {
-            Some(p) => p,
-            None => return,
-        };
-
-        self.execute_deploy_inner(project_id, dep_id).await;
-        drop(permit);
-    }
-
-    async fn execute_deploy_inner(&self, project_id: i64, dep_id: i64) {
-        let p = match self.projects.get(project_id) {
-            Ok(Some(p)) => p,
-            _ => {
-                self.finish_deployment(dep_id, "failed", Some("Project not found"));
-                return;
-            }
-        };
-
-        let start_stop_seq = self.runtime.get_stop_seq(p.id);
-        let container = self.runtime.ensure_container(&p);
-        self.logs.add(
-            Some(p.id),
-            Some(dep_id),
-            "deployment",
-            "info",
-            &format!(
-                "Starting deployment #{} for {} in isolated container '{}' (Port: {}, DB: {})",
-                dep_id,
-                p.name,
-                container.container_id,
-                container.port,
-                container.db_dir.display()
-            ),
-        );
-
-        // Stage 1: Fetching
-        self.update_stage(dep_id, "fetching");
-        let repo_dir = Path::new(&p.deploy_dir).join("repo");
-        if let Err(e) = Git::clone_or_fetch(&p.repo_url, &repo_dir, &p.branch) {
-            self.logs.add(Some(p.id), Some(dep_id), "github", "error", &format!("Git fetch failed: {}", e));
-            self.finish_deployment(dep_id, "failed", Some(&e));
-            return;
-        }
-
-        {
-            let conn = self.db.lock().unwrap();
-            let _ = conn.execute(
-                "UPDATE projects SET last_poll_at = ? WHERE id = ?",
-                params![now(), p.id],
-            );
-        }
-
-        let requested_sha: Option<String> = {
-            let conn = self.db.lock().unwrap();
-            conn.query_row(
-                "SELECT sha FROM deployments WHERE id = ?",
-                params![dep_id],
-                |r| r.get::<_, Option<String>>(0),
-            )
-            .ok()
-            .flatten()
-            .filter(|s| !s.trim().is_empty())
-        };
-
-        let head = match requested_sha {
-            Some(sha) => sha,
-            None => match Git::resolve_head(&repo_dir) {
-                Ok(h) => h,
-                Err(e) => {
-                    self.finish_deployment(dep_id, "failed", Some(&e));
-                    return;
-                }
-            },
-        };
-
-        // Stage 2: Pulling
-        self.update_stage(dep_id, "pulling");
-        let is_service = p.project_kind == "service";
-        let mut release_dir = Path::new(&p.deploy_dir).join("releases").join(format!("rel-{}", dep_id));
-        if let Err(e) = Git::checkout(&repo_dir, &head, &release_dir) {
-            self.logs.add(Some(p.id), Some(dep_id), "deployment", "error", &format!("Checkout error: {}", e));
-            self.finish_deployment(dep_id, "failed", Some(&e));
-            return;
-        }
-
-        // Backend services: merge only the changed/tracked files into the persistent `app/` folder.
-        // Untracked files (.env, local configs, databases, uploads) are never deleted or overwritten.
-        if is_service {
-            let app_dir = Path::new(&p.deploy_dir).join("app");
-            if let Err(e) = merge_copy_dir(&release_dir, &app_dir) {
-                self.logs.add(Some(p.id), Some(dep_id), "deployment", "error", &format!("Merge error: {}", e));
-                self.finish_deployment(dep_id, "failed", Some(&e));
-                return;
-            }
-            let _ = std::fs::remove_dir_all(&release_dir);
-            self.logs.add(
-                Some(p.id),
-                Some(dep_id),
-                "deployment",
-                "info",
-                "Merged repository files into live service folder (existing .env and untracked files preserved)",
-            );
-            release_dir = app_dir;
-        }
-
-        let commit_info = Git::get_commit_info(&repo_dir, &head).unwrap_or(CommitInfo {
-            sha: head.clone(),
-            short_sha: head[..7.min(head.len())].to_string(),
-            author: "System".to_string(),
-            date: now(),
-            message: "Deploy".to_string(),
-        });
-
-        // Insert release record
-        let release_id = {
-            let conn = self.db.lock().unwrap();
-            conn.execute(
-                "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, created_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, 'pulled', ?)",
-                params![p.id, head, commit_info.short_sha, commit_info.message, commit_info.author, commit_info.date, release_dir.to_str().unwrap_or(""), now()],
-            ).ok();
-            conn.last_insert_rowid()
-        };
-
-        {
-            let conn = self.db.lock().unwrap();
-            conn.execute("UPDATE deployments SET release_id=?, sha=? WHERE id=?", params![release_id, head, dep_id]).ok();
-        }
-
-        // Link release `data/` folder to isolated container DB and write container-isolated .env
-        if !is_service {
-            self.runtime.link_work_dir_to_container(&release_dir, &container);
-            let env_map = self.projects.get_env_map(p.id);
-            let (_isolated_env, dotenv_body) = self.runtime.build_container_env(&p, &env_map, &container);
-            let _ = tokio::fs::write(release_dir.join(".env"), dotenv_body).await;
-        }
-
-        // Stage 3: Installing dependencies
-        let has_pkg_json = release_dir.join("package.json").exists();
-        let effective_install_cmd = if !p.install_cmd.trim().is_empty() {
-            p.install_cmd.clone()
-        } else if has_pkg_json {
-            "npm install".to_string()
-        } else {
-            String::new()
-        };
-
-        if !effective_install_cmd.trim().is_empty() {
-            self.update_stage(dep_id, "installing");
-            self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running install: {}", effective_install_cmd));
-            if let Err(e) = run_shell_cmd(&effective_install_cmd, &release_dir, &self.logs, p.id, dep_id).await {
-                if effective_install_cmd.contains("npm ci") && has_pkg_json {
-                    self.logs.add(Some(p.id), Some(dep_id), "build", "warn", "npm ci failed, falling back to npm install...");
-                    if let Err(e2) = run_shell_cmd("npm install", &release_dir, &self.logs, p.id, dep_id).await {
-                        self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e2));
-                        self.finish_deployment(dep_id, "failed", Some(&e2));
-                        return;
-                    }
-                } else if effective_install_cmd.contains("pip") && (e.contains("externally-managed-environment") || e.contains("break-system-packages") || e.contains("uninstall-no-record-file") || e.contains("RECORD")) {
-                    self.logs.add(Some(p.id), Some(dep_id), "build", "warn", "Pip hit Debian system package conflict or PEP 668. Retrying with --break-system-packages --ignore-installed...");
-                    let retry_cmd = format!("{} --break-system-packages --ignore-installed", effective_install_cmd);
-                    if let Err(e2) = run_shell_cmd(&retry_cmd, &release_dir, &self.logs, p.id, dep_id).await {
-                        self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e2));
-                        self.finish_deployment(dep_id, "failed", Some(&e2));
-                        return;
-                    }
-                } else {
-                    self.logs.add(Some(p.id), Some(dep_id), "build", "error", &format!("Install failed: {}", e));
-                    self.finish_deployment(dep_id, "failed", Some(&e));
-                    return;
-                }
-            }
-        }
-
-        // Stage 4: Building (auto-detect 'npm run build' if build_cmd is empty but package.json has a build script)
-        let effective_build_cmd = if !p.build_cmd.trim().is_empty() {
-            p.build_cmd.clone()
-        } else {
-            let pkg_path = release_dir.join("package.json");
-            let mut detected = String::new();
-            if let Ok(pkg_txt) = tokio::fs::read_to_string(&pkg_path).await {
-                if pkg_txt.contains("\"build\"") {
-                    detected = "npm run build".to_string();
-                }
-            }
-            detected
-        };
-
-        if !effective_build_cmd.trim().is_empty() {
-            self.update_stage(dep_id, "building");
-            self.logs.add(Some(p.id), Some(dep_id), "build", "info", &format!("Running build: {}", effective_build_cmd));
-            if let Err(e) = run_shell_cmd(&effective_build_cmd, &release_dir, &self.logs, p.id, dep_id).await {
-                self.fail_deployment_step(dep_id, p.id, "build", &format!("Build failed: {}", e));
-                return;
-            }
-        }
-
-        // Stage 5: Deploying (Atomic Symlink Switch)
-        self.update_stage(dep_id, "deploying");
-        let current_symlink = Path::new(&p.deploy_dir).join("current");
-        switch_current(&current_symlink, &release_dir);
-
-        // Stage 6: Health Checking
-        if self.runtime.get_stop_seq(p.id) != start_stop_seq {
-            self.logs.add(
-                Some(p.id),
-                Some(dep_id),
-                "deployment",
-                "warn",
-                "Website was stopped by user during deployment — release built and linked without starting process.",
-            );
-            let ts = now();
-            {
-                let conn = self.db.lock().unwrap();
-                conn.execute("UPDATE releases SET status='succeeded', build_status='success', health_status='ok', deployed_at=? WHERE id=?", params![ts, release_id]).ok();
-                conn.execute("UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?", params![release_id, head, ts, p.id]).ok();
-            }
-            self.finish_deployment(dep_id, "success", None);
-            return;
-        }
-
-        self.update_stage(dep_id, "health_checking");
-        let env_map = self.projects.get_env_map(p.id);
-        if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
-            self.fail_deployment_step(dep_id, p.id, "app", &format!("Start failed: {}", e));
-            return;
-        }
-
-        if !p.health_url.trim().is_empty() {
-            let port_str = p.port.unwrap_or(3000).to_string();
-            let resolved_health_url = p.health_url.replace("{{PORT}}", &port_str);
-            self.logs.add(Some(p.id), Some(dep_id), "health", "info", &format!("Probing health check URL: {}", resolved_health_url));
-            if let Err(e) = self.runtime.health_check(&resolved_health_url, p.health_timeout_s as u64).await {
-                self.fail_deployment_step(dep_id, p.id, "health", &format!("Health check failed: {}", e));
-                return;
-            }
-        }
-
-        // Stability window
-        if p.stability_s > 0 {
-            sleep(Duration::from_secs(p.stability_s as u64)).await;
-        }
-
-        // Mark success & record backup snapshot in SQLite
-        let ts = now();
-        {
-            let conn = self.db.lock().unwrap();
-            conn.execute(
-                "UPDATE releases SET status='succeeded', build_status='success', health_status='ok', deployed_at=? WHERE id=?",
-                params![ts, release_id],
-            ).ok();
-            conn.execute(
-                "UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?",
-                params![release_id, head, ts, p.id],
-            ).ok();
-            conn.execute(
-                "INSERT INTO backups(project_id, release_id, path, dir, size, size_bytes, note, status, ts, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
-                params![
-                    p.id,
-                    release_id,
-                    release_dir.to_str().unwrap_or(""),
-                    release_dir.to_str().unwrap_or(""),
-                    5 * 1024 * 1024i64,
-                    5 * 1024 * 1024i64,
-                    format!("Auto-snapshot for Release #{} ({})", release_id, commit_info.short_sha),
-                    ts,
-                    ts
-                ],
-            ).ok();
-        }
-
-        self.logs.add(Some(p.id), Some(dep_id), "deployment", "info", "Deployment completed successfully! Version is live.");
-        self.finish_deployment(dep_id, "success", None);
-    }
-
-    pub async fn run_rollback(self: Arc<Self>, project_id: i64, dep_id: i64, target_release_id: i64) {
-        {
-            let mut spawned = self.spawned_deployments.lock().unwrap();
-            if !spawned.insert(dep_id) {
-                return;
-            }
-        }
-
-        let permit = match self.acquire_queue_permit(project_id, dep_id, "rollback").await {
-            Some(p) => p,
-            None => return,
-        };
-
-        let p = match self.projects.get(project_id) {
-            Ok(Some(p)) => p,
-            _ => {
-                self.finish_deployment(dep_id, "failed", Some("Project not found"));
-                drop(permit);
-                return;
-            }
-        };
-
-        let releases = self.list_releases(project_id);
-        let target = releases
-            .into_iter()
-            .find(|r| r.id == target_release_id)
-            .or_else(|| self.list_releases(project_id).into_iter().find(|r| r.status == "succeeded"));
-
-        let target = match target {
-            Some(r) => r,
-            None => {
-                self.execute_deploy_inner(project_id, dep_id).await;
-                drop(permit);
-                return;
-            }
-        };
-
-        self.logs.add(
-            Some(p.id),
-            Some(dep_id),
-            "rollback",
-            "info",
-            &format!("Rolling back {} to Release #{} ({})", p.name, target.id, target.short_sha),
-        );
-
-        {
-            let conn = self.db.lock().unwrap();
-            conn.execute(
-                "UPDATE deployments SET release_id=?, from_release_id=?, sha=? WHERE id=?",
-                params![target.id, p.current_release_id, target.sha, dep_id],
-            ).ok();
-        }
-
-        self.update_stage(dep_id, "deploying");
-        let release_dir = PathBuf::from(&target.dir);
-        if !release_dir.exists() {
-            self.execute_deploy_inner(project_id, dep_id).await;
-            drop(permit);
-            return;
-        }
-
-        let current_symlink = Path::new(&p.deploy_dir).join("current");
-        switch_current(&current_symlink, &release_dir);
-
-        self.update_stage(dep_id, "health_checking");
-        let env_map = self.projects.get_env_map(p.id);
-        if let Err(e) = self.runtime.start_project(&p, env_map, Some(&release_dir)).await {
-            self.fail_deployment_step(dep_id, p.id, "rollback", &format!("Start failed: {}", e));
-            drop(permit);
-            return;
-        }
-
-        let ts = now();
-        {
-            let conn = self.db.lock().unwrap();
-            conn.execute(
-                "UPDATE projects SET current_release_id=?, deployed_sha=?, updated_at=? WHERE id=?",
-                params![target.id, target.sha, ts, p.id],
-            ).ok();
-        }
-
-        self.logs.add(Some(p.id), Some(dep_id), "rollback", "info", &format!("Rollback to Release #{} succeeded!", target.id));
-        self.finish_deployment(dep_id, "success", None);
-        drop(permit);
-    }
 }
-
-/// Recursively copy `src` into `dst`, overwriting same-named files but never deleting anything in `dst`.
-/// The `.git` folder is skipped.
-fn merge_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        if name == ".git" {
-            continue;
-        }
-        let from = entry.path();
-        let to = dst.join(&name);
-        let ft = entry.file_type().map_err(|e| e.to_string())?;
-        if ft.is_dir() {
-            merge_copy_dir(&from, &to)?;
-        } else if ft.is_file() {
-            fs::copy(&from, &to).map_err(|e| format!("{}: {}", to.display(), e))?;
-        }
-    }
-    Ok(())
-}
-
-fn switch_current(current_link: &Path, target_dir: &Path) {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let abs_link = if current_link.is_absolute() {
-        current_link.to_path_buf()
-    } else {
-        let stripped = current_link.to_string_lossy();
-        let clean = stripped.strip_prefix("./").or_else(|| stripped.strip_prefix(".\\")).unwrap_or(&stripped);
-        cwd.join(clean)
-    };
-    let abs_target = std::fs::canonicalize(target_dir).unwrap_or_else(|_| {
-        if target_dir.is_absolute() {
-            target_dir.to_path_buf()
-        } else {
-            let stripped = target_dir.to_string_lossy();
-            let clean = stripped.strip_prefix("./").or_else(|| stripped.strip_prefix(".\\")).unwrap_or(&stripped);
-            cwd.join(clean)
-        }
-    });
-    // Strip Windows \\?\ extended-length prefix if canonicalize added it, as cmd mklink /J prefers standard paths
-    #[cfg(windows)]
-    let target_str = abs_target.to_string_lossy().trim_start_matches(r"\\?\").to_string();
-    #[cfg(windows)]
-    let link_str = abs_link.to_string_lossy().trim_start_matches(r"\\?\").to_string();
-
-    if abs_link.exists() || fs::symlink_metadata(&abs_link).is_ok() {
-        #[cfg(windows)]
-        {
-            let _ = std::process::Command::new("cmd")
-                .args(["/C", "rmdir", &link_str])
-                .output();
-        }
-        let _ = fs::remove_file(&abs_link);
-        let _ = fs::remove_dir_all(&abs_link);
-    }
-    #[cfg(windows)]
-    {
-        // Try mklink /J (NTFS junction, does not require admin rights) with absolute paths
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J", &link_str, &target_str])
-            .output();
-    }
-    #[cfg(unix)]
-    {
-        let _ = std::os::unix::fs::symlink(&abs_target, &abs_link);
-    }
-}
-
-async fn run_shell_cmd(
-    cmd_str: &str,
-    cwd: &Path,
-    logs: &Logs,
-    project_id: i64,
-    dep_id: i64,
-) -> Result<(), String> {
-    #[cfg(windows)]
-    let mut cmd = tokio::process::Command::new("cmd");
-    #[cfg(windows)]
-    {
-        cmd.arg("/C");
-        cmd.raw_arg(cmd_str);
-    }
-
-    #[cfg(unix)]
-    let mut resolved_shell_cmd = cmd_str.to_string();
-    #[cfg(unix)]
-    {
-        let has_python = std::path::Path::new("/usr/bin/python").exists()
-            || std::path::Path::new("/usr/local/bin/python").exists()
-            || cwd.join(".venv/bin/python").exists()
-            || cwd.join("venv/bin/python").exists();
-
-        if !has_python && resolved_shell_cmd.contains("python") {
-            let parts: Vec<&str> = resolved_shell_cmd.split(' ').collect();
-            resolved_shell_cmd = parts
-                .into_iter()
-                .map(|token| if token == "python" { "python3" } else { token })
-                .collect::<Vec<_>>()
-                .join(" ");
-        }
-    }
-
-    #[cfg(unix)]
-    let mut cmd = tokio::process::Command::new("sh");
-    #[cfg(unix)]
-    cmd.args(["-c", &resolved_shell_cmd]);
-
-    cmd.current_dir(cwd)
-        .env("CI", "true")
-        .env("npm_config_jobs", "1")
-        .env("npm_config_audit", "false")
-        .env("npm_config_fund", "false")
-        .env("npm_config_progress", "false")
-        .env("PIP_BREAK_SYSTEM_PACKAGES", "1");
-    if std::env::var("NODE_OPTIONS").is_err() {
-        cmd.env("NODE_OPTIONS", "--max-old-space-size=448");
-    }
-    if let Some((_, ref java_home)) = crate::runtime::detect_java_exe() {
-        let bin_dir = java_home.join("bin");
-        let cur_path = std::env::var("PATH").unwrap_or_default();
-        #[cfg(windows)]
-        let new_path = format!("{};{}", bin_dir.display(), cur_path);
-        #[cfg(unix)]
-        let new_path = format!("{}:{}", bin_dir.display(), cur_path);
-
-        cmd.env("PATH", new_path);
-        cmd.env("JAVA_HOME", java_home);
-    }
-
-    // Auto-detect virtualenv (.venv or venv) in workspace and route python/pip to it
-    let venv_dir = if cwd.join(".venv").is_dir() {
-        Some(cwd.join(".venv"))
-    } else if cwd.join("venv").is_dir() {
-        Some(cwd.join("venv"))
-    } else {
-        None
-    };
-    if let Some(ref venv) = venv_dir {
-        #[cfg(windows)]
-        let venv_bin = venv.join("Scripts");
-        #[cfg(not(windows))]
-        let venv_bin = venv.join("bin");
-
-        if venv_bin.exists() {
-            let cur_path = std::env::var("PATH").unwrap_or_default();
-            #[cfg(windows)]
-            let new_path = format!("{};{}", venv_bin.display(), cur_path);
-            #[cfg(not(windows))]
-            let new_path = format!("{}:{}", venv_bin.display(), cur_path);
-
-            cmd.env("PATH", new_path);
-            cmd.env("VIRTUAL_ENV", venv);
-        }
-    }
-    let out = cmd.output().await.map_err(|e| e.to_string())?;
-
-    let stdout_str = String::from_utf8_lossy(&out.stdout);
-    for line in stdout_str.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            logs.add(Some(project_id), Some(dep_id), "build", "info", trimmed);
-        }
-    }
-
-    let stderr_str = String::from_utf8_lossy(&out.stderr);
-    for line in stderr_str.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            let lvl = if out.status.success() { "info" } else { "error" };
-            logs.add(Some(project_id), Some(dep_id), "build", lvl, trimmed);
-        }
-    }
-
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(stderr_str.to_string())
-    }
-}
-

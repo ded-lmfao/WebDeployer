@@ -10,11 +10,12 @@ use crate::logs::Logs;
 pub mod container;
 pub mod port;
 pub mod process;
+pub mod tree;
 pub mod maintenance;
 pub mod supervisor;
 
 pub use container::WebsiteContainer;
-pub use process::{detect_java_exe, is_pid_alive};
+pub use tree::{detect_java_exe, is_pid_alive};
 
 pub struct Runtime {
     pub(crate) db: DbPool,

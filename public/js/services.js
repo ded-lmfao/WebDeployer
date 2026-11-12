@@ -1,335 +1,237 @@
-async function loadServicesView() {
-  if (typeof window.loadProjects === 'function') {
-    await window.loadProjects();
-  }
-  renderServicesList();
-}
-window.loadServicesView = loadServicesView;
-
 /**
- * WebDep Backend Services & Daemons Subsystem
- * Background worker daemons, Telegram/Discord bots, and custom services
+ * WebDep Backend Services & Standalone Daemons Subsystem
+ * Discord bots, Lavalink audio servers, background python workers, and pipeline status sync.
  */
 
 import { icon } from './icons.js';
-import {
-  state,
-  PAGE_SIZE,
-  paginateAndRender,
-  escapeHtml,
-  formatRelativeTime,
-  openModal,
-  closeModal,
-  showConfirmDialog,
-  invalidateClientCache,
-  setHtmlIfChanged,
-  PRESETS,
-} from './state.js';
+import { state, escapeHtml } from './state.js';
 import { api, toast } from './api.js';
-import { renderPipelineStages } from './deployments.js';
+import { loadProjects } from './websites.js';
+import { openWebsiteWorkspace, navigateTo } from './workspace.js';
 
-// ============================================================================
-// View 2.5: Backend Services & Bots
-// ============================================================================
+// Re-export modal submodule so consumers have full backward compatibility
+export * from './services_modal.js';
 
-// Backend Services & Bots Pipeline Stages (5-Step Lifecycle & Deployment Pipeline)
-const SERVICE_PIPELINE_STAGES = [
-  { id: 'source', label: 'Source' },
-  { id: 'deps', label: 'Deps' },
-  { id: 'build', label: 'Build' },
-  { id: 'daemon', label: 'Daemon' },
-  { id: 'online', label: 'Online' },
-];
-
-const SERVICE_STAGE_MAP = {
-  pending: 'source',
-  fetching: 'source',
-  pulling: 'source',
-  source: 'source',
-  sandbox: 'source',
-  port: 'source',
-
-  installing: 'deps',
-  install: 'deps',
-  deps: 'deps',
-
-  building: 'build',
-  build: 'build',
-  config: 'build',
-
-  deploying: 'daemon',
-  deploy: 'daemon',
-  spawning: 'daemon',
-  daemon: 'daemon',
-
-  health_checking: 'online',
-  healthy: 'online',
-  online: 'online',
-  success: 'online',
-};
-
-function renderSingleServicePipeline(serviceId, currentStage, currentStatus, detailText = '') {
-  const containerId = `service-pipeline-track-${serviceId}`;
-  const container = document.getElementById(containerId);
-  const badge = document.getElementById(`service-pipeline-badge-${serviceId}`);
+export async function loadServicesView() {
+  const container = document.getElementById('services-list');
   if (!container) return;
 
-  const mappedStage = SERVICE_STAGE_MAP[currentStage] || 'source';
-
-  if (badge) {
-    if (currentStatus === 'idle') {
-      badge.textContent = detailText ? detailText.toUpperCase() : 'IDLE';
-      badge.className = 'badge badge-neutral';
-      badge.onclick = null;
-      badge.style.cursor = 'default';
-    } else if (currentStatus === 'failed') {
-      badge.textContent = detailText ? detailText.toUpperCase() : `FAILED (${currentStage.toUpperCase()}) — VIEW LOGS`;
-      badge.className = 'badge badge-danger';
-      badge.style.cursor = 'pointer';
-      badge.onclick = (e) => {
-        e.stopPropagation();
-        openWebsiteWorkspace(serviceId, 'logs');
-      };
-    } else if (currentStatus === 'success') {
-      badge.textContent = detailText ? detailText.toUpperCase() : 'READY';
-      badge.className = 'badge badge-success';
-      badge.onclick = null;
-      badge.style.cursor = 'default';
-    } else {
-      badge.textContent = detailText ? detailText.toUpperCase() : `RUNNING (${currentStage.toUpperCase()})`;
-      badge.className = 'badge badge-warning';
-      badge.onclick = null;
-      badge.style.cursor = 'default';
-    }
-  }
-
-  renderPipelineStages(containerId, mappedStage, currentStatus, serviceId, SERVICE_PIPELINE_STAGES);
-}
-window.renderSingleServicePipeline = renderSingleServicePipeline;
-
-function syncServiceCardPipeline(p) {
-  if (!p) return;
-  const uptimeEl = document.getElementById(`service-uptime-${p.id}`);
-  if (uptimeEl) {
-    const isOnline = p.app_status === 'running';
-    uptimeEl.textContent = isOnline && p.app_started_at
-      ? `Started ${formatRelativeTime(p.app_started_at)}`
-      : (isOnline ? 'Active process' : 'Process inactive');
-  }
-
-  const ovItem = (state.overview?.projects || []).find((x) => x.project?.id === p.id);
-  const activeDep = ovItem?.active || (state.activeDeployment && state.activeDeployment.project_id === p.id ? state.activeDeployment : null);
-
-  if (activeDep && (activeDep.status === 'running' || activeDep.status === 'pending')) {
-    const stageLabel = activeDep.stage ? activeDep.stage.toUpperCase() : 'DEPLOYING';
-    renderSingleServicePipeline(p.id, activeDep.stage, activeDep.status, `DEPLOY (${stageLabel})`);
-    return;
-  }
-
-  if (p.app_status === 'starting') {
-    renderSingleServicePipeline(p.id, 'daemon', 'running', 'STARTING DAEMON');
-  } else if (p.app_status === 'stopping') {
-    renderSingleServicePipeline(p.id, 'daemon', 'running', 'STOPPING...');
-  } else if (p.app_status === 'running') {
-    renderSingleServicePipeline(p.id, 'online', 'success', 'READY');
-  } else if (p.app_status === 'error' || p.app_status === 'failed') {
-    renderSingleServicePipeline(p.id, 'daemon', 'failed', 'FAILED — VIEW LOGS');
-  } else {
-    renderSingleServicePipeline(p.id, 'source', 'idle', 'STOPPED');
+  try {
+    const list = await api('/api/projects');
+    state.projects = Array.isArray(list) ? list : [];
+    renderServicesList();
+  } catch (err) {
+    container.innerHTML = `<div style="grid-column: 1 / -1; color: var(--danger-light); padding: 20px;">Failed to load services: ${escapeHtml(err.message)}</div>`;
   }
 }
-window.syncServiceCardPipeline = syncServiceCardPipeline;
 
-function renderServicesList() {
-  const container = document.getElementById('services-cards-container');
-  if (!container) return;
+export function renderSingleServicePipeline(serviceId, currentStage, currentStatus, detailText = '') {
+  const el = document.getElementById(`service-pipeline-${serviceId}`);
+  if (!el) return;
 
-  const services = (state.projects || []).filter((p) => p.project_kind === 'service');
+  const stages = [
+    { key: 'prepare', label: 'Fetch' },
+    { key: 'build', label: 'Build' },
+    { key: 'deploy', label: 'Deploy' },
+    { key: 'health', label: 'Online' },
+  ];
 
-  if (!state.serviceStatusFilter) state.serviceStatusFilter = 'all';
+  const stageOrder = ['prepare', 'build', 'deploy', 'health'];
+  const curIdx = stageOrder.indexOf(currentStage);
 
-  const countAll = services.length;
-  const countRunning = services.filter((p) => p.app_status === 'running').length;
-  const countStopped = countAll - countRunning;
-  const elAll = document.getElementById('services-filter-count-all');
-  const elRunning = document.getElementById('services-filter-count-running');
-  const elStopped = document.getElementById('services-filter-count-stopped');
-  if (elAll) elAll.textContent = countAll;
-  if (elRunning) elRunning.textContent = countRunning;
-  if (elStopped) elStopped.textContent = countStopped;
+  const dotsHtml = stages.map((st, idx) => {
+    let cls = 'dot-idle';
+    let iconStr = idx + 1;
 
-  document.querySelectorAll('#services-status-filters .pill').forEach((btn) => {
-    btn.classList.toggle('active', btn.getAttribute('data-filter') === state.serviceStatusFilter);
-  });
-
-  const search = (document.getElementById('services-search-input')?.value || '').toLowerCase();
-  const filtered = services.filter((p) => {
-    const isOnline = p.app_status === 'running';
-    if (state.serviceStatusFilter === 'running' && !isOnline) return false;
-    if (state.serviceStatusFilter === 'stopped' && isOnline) return false;
-    return p.name.toLowerCase().includes(search) ||
-      p.slug.toLowerCase().includes(search) ||
-      (p.start_cmd && p.start_cmd.toLowerCase().includes(search)) ||
-      (p.project_type && p.project_type.toLowerCase().includes(search));
-  });
-
-  if (!filtered.length) {
-    setHtmlIfChanged(container, `
-      <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
-        <div style="margin-bottom: 12px; color: var(--text-dim);">${icon('bot', { size: 40, stroke: 1.5 })}</div>
-        <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No backend services or bots yet</p>
-        <p style="color: var(--text-muted); font-size: 13.5px; max-width: 460px; margin: 0 auto 20px auto; line-height: 1.5;">
-          Deploy 24/7 Discord bots, Telegram bots, queue workers, and background scripts directly on your server with automatic process supervision.
-        </p>
-        <button class="btn btn-primary" onclick="openAddServiceModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-          <span>New Service / Bot</span>
-        </button>
-      </div>
-    `);
-    return;
-  }
-
-  setHtmlIfChanged(container, filtered.map((p) => {
-    const isOnline = p.app_status === 'running';
-    const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
-
-    let typeIconName = 'bot';
-    let typeName = 'Backend Service';
-    const pt = (p.project_type || '').toLowerCase();
-    if (pt.includes('discord')) {
-      typeIconName = 'bot';
-      typeName = 'Discord Bot';
-    } else if (pt.includes('telegram')) {
-      typeIconName = 'send';
-      typeName = 'Telegram Bot';
-    } else if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) {
-      typeIconName = 'coffee';
-      typeName = 'Audio Daemon';
-    } else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) {
-      typeIconName = 'terminal';
-      typeName = 'Python Daemon';
-    } else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) {
-      typeIconName = 'zap';
-      typeName = 'Node.js Worker';
-    } else if (pt.includes('worker')) {
-      typeIconName = 'settings';
-      typeName = 'Queue Worker';
-    }
-
-    const uptimeText = isOnline ? 'Active process' : 'Process inactive';
-
-    const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
-    const defaultTab = 'deployments';
-
-    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
-    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
-
-    let accessBadge = `<span class="badge badge-neutral" style="font-size: 10px;">${icon('lock', { size: 10 })} Localhost Only</span>`;
-    if (p.access_mode === 'allowlist') {
-      const ipList = p.allowed_ips ? p.allowed_ips.split(/[,;\n]/).filter(Boolean).length : 0;
-      accessBadge = `<span class="badge badge-primary" style="font-size: 10px;">${icon('shield', { size: 10 })} Allowlist (${ipList} IP${ipList === 1 ? '' : 's'})</span>`;
-    } else if (p.access_mode === 'public') {
-      accessBadge = `<span class="badge badge-warning" style="font-size: 10px;">${icon('globe', { size: 10 })} Public</span>`;
-    }
-
-    const domainBadge = (p.domains && p.domains.length > 0)
-      ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">${icon('globe', { size: 10 })} ${escapeHtml(p.domains[0])}</span>`
-      : '';
-    const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
-
-    let subTitle = typeName;
-    if (!isLocal && p.branch) {
-      subTitle = `${typeName} &bull; ${escapeHtml(p.branch)}`;
-    } else if (p.name.toLowerCase() === typeName.toLowerCase()) {
-      subTitle = isLocal ? 'Manual Files' : 'Service';
+    if (idx < curIdx) {
+      cls = 'dot-done';
+      iconStr = '✓';
+    } else if (idx === curIdx) {
+      if (currentStatus === 'building' || currentStatus === 'running' || currentStatus === 'in_progress') {
+        cls = 'dot-active';
+        iconStr = '↻';
+      } else if (currentStatus === 'success') {
+        cls = 'dot-done';
+        iconStr = '✓';
+      } else if (currentStatus === 'error' || currentStatus === 'failed') {
+        cls = 'dot-error';
+        iconStr = '✕';
+      }
     }
 
     return `
-      <div class="project-card service-card" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
-        <!-- Header -->
-        <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.12); color: #818cf8; display: flex; align-items: center; justify-content: center;">
-              ${icon(typeIconName, { size: 18 })}
+      <div class="pipeline-step ${cls}">
+        <div class="pipeline-dot">${iconStr}</div>
+        <span class="pipeline-label">${st.label}</span>
+      </div>
+    `;
+  }).join('<div class="pipeline-pipe"></div>');
+
+  el.innerHTML = `
+    <div class="service-pipeline-container">
+      <div class="pipeline-stepper-row">${dotsHtml}</div>
+      ${detailText ? `<div class="pipeline-detail-text">${escapeHtml(detailText)}</div>` : ''}
+    </div>
+  `;
+}
+
+export function syncServiceCardPipeline(p) {
+  const dep = p.deployStatus;
+  const isDeploying = dep && (dep.status === 'in_progress' || dep.status === 'building' || dep.status === 'pending');
+  const pipeEl = document.getElementById(`service-pipeline-${p.id}`);
+  const fluidEl = document.getElementById(`service-fluid-${p.id}`);
+
+  if (isDeploying) {
+    if (pipeEl) pipeEl.style.display = 'block';
+    renderSingleServicePipeline(p.id, dep.stage || 'prepare', dep.status, dep.message || 'Building service...');
+    if (fluidEl) {
+      fluidEl.style.display = 'block';
+      if (window.renderOrganicFluidPipeline) {
+        window.renderOrganicFluidPipeline(`service-fluid-canvas-${p.id}`, dep.stage || 'build', 45, dep.status);
+      }
+    }
+  } else {
+    if (pipeEl) pipeEl.style.display = 'none';
+    if (fluidEl) fluidEl.style.display = 'none';
+  }
+}
+
+export function renderServicesList() {
+  const container = document.getElementById('services-list');
+  if (!container) return;
+
+  const allProjects = state.projects || [];
+  const services = allProjects.filter((p) => p.project_kind === 'service');
+
+  const countBadge = document.getElementById('services-count-badge');
+  if (countBadge) {
+    countBadge.textContent = `${services.length} Total Service${services.length === 1 ? '' : 's'}`;
+  }
+
+  const q = (document.getElementById('services-search-input')?.value || '').toLowerCase().trim();
+  const filter = state.serviceStatusFilter || 'all';
+
+  const filtered = services.filter((s) => {
+    const isOnline = s.status?.appStatus === 'running' || s.status?.running;
+    if (filter === 'online' && !isOnline) return false;
+    if (filter === 'stopped' && isOnline) return false;
+    if (!q) return true;
+    return (s.name || '').toLowerCase().includes(q) || (s.slug || '').toLowerCase().includes(q) || (s.start_cmd || '').toLowerCase().includes(q);
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div class="empty-state-card" style="grid-column: 1 / -1; padding: 48px; text-align: center; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-subtle);">
+        <div style="font-size: 36px; margin-bottom: 12px; opacity: 0.6;">🤖</div>
+        <h3 style="margin-bottom: 6px; font-size: 16px;">No backend services found</h3>
+        <p style="color: var(--text-muted); font-size: 13px; max-width: 420px; margin: 0 auto 16px;">
+          ${q ? 'No services match your search query.' : 'Deploy Discord bots, Lavalink nodes, or queue workers with zero downtime and automatic crash recovery.'}
+        </p>
+        <button class="btn btn-primary" onclick="openAddServiceModal()">
+          ${icon('plus', { size: 14 })} Add Backend Service
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map((s) => {
+    const isOnline = s.status?.appStatus === 'running' || s.status?.running;
+    const isBuilding = s.deployStatus?.status === 'in_progress' || s.deployStatus?.status === 'building';
+    const statusText = isBuilding ? 'BUILDING' : (isOnline ? 'ONLINE' : 'STOPPED');
+    const statusBadgeClass = isBuilding ? 'badge-warning' : (isOnline ? 'badge-success' : 'badge-neutral');
+
+    const pt = s.project_type || 'custom';
+    let iconName = 'terminal';
+    let typeLabel = 'Backend Service';
+    if (pt === 'lavalink') {
+      iconName = 'coffee';
+      typeLabel = 'Audio Daemon';
+    } else if (pt === 'python') {
+      iconName = 'terminal';
+      typeLabel = 'Python Daemon';
+    } else if (pt === 'node') {
+      iconName = 'layers';
+      typeLabel = 'Node.js Daemon';
+    } else if (pt === 'discord-node' || pt === 'discord-py') {
+      iconName = 'message-square';
+      typeLabel = 'Discord Bot';
+    } else if (pt === 'telegram-py') {
+      iconName = 'send';
+      typeLabel = 'Telegram Bot';
+    } else if (pt === 'worker-py') {
+      iconName = 'cpu';
+      typeLabel = 'Queue Worker';
+    }
+
+    const sha = s.deployedSha ? s.deployedSha.slice(0, 7).toUpperCase() : (s.repo_url === 'local' ? 'MANUAL' : 'AUTO');
+    const portText = s.port ? `PORT ${s.port}` : 'NO PORT';
+    const accessText = s.access_mode === 'public' ? 'PUBLIC REVERSE PROXY' : (s.access_mode === 'allowed_ips' ? 'IP WHITELIST' : 'LOCALHOST ONLY');
+
+    return `
+      <div class="service-card" id="service-card-${s.id}">
+        <div class="service-card-header">
+          <div class="service-avatar-box">
+            ${icon(iconName, { size: 18 })}
+          </div>
+          <div class="service-title-col">
+            <div class="service-name-row">
+              <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+              <strong class="service-name">${escapeHtml(s.name)}</strong>
             </div>
-            <div style="min-width: 0;">
-              <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
-                <span>${escapeHtml(p.name)}</span>
-              </div>
-              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${escapeHtml(subTitle)}">
-                ${subTitle}
-              </div>
+            <div class="service-subtitle">
+              <span>${typeLabel}</span>
+              ${s.slug && s.slug !== s.name.toLowerCase() ? `<span class="service-slug-pill">• ${escapeHtml(s.slug)}</span>` : ''}
             </div>
           </div>
-          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
-        </div>
-
-        <!-- Command Line -->
-        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
-          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(p.start_cmd || '')}">
-            $ ${escapeHtml(p.start_cmd || 'node index.js')}
-          </span>
-          ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px; flex-shrink: 0;">PID ${p.app_pid}</span>` : ''}
-        </div>
-
-        <!-- Lifecycle Pipeline Track -->
-        <div style="margin: 8px 0; padding: 10px 12px; background: var(--bg-alt); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);" onclick="event.stopPropagation()">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);">Lifecycle Pipeline</span>
-            <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" id="service-pipeline-badge-${p.id}" style="font-size: 9.5px; padding: 2px 7px;">
-              ${isOnline ? 'READY' : 'STOPPED'}
-            </span>
-          </div>
-          <div class="pipeline-track card-pipeline-track" id="service-pipeline-track-${p.id}">
-            <!-- Rendered with fluid animated vials and pipes -->
+          <div class="service-header-status">
+            <span class="badge ${statusBadgeClass}">${statusText}</span>
           </div>
         </div>
 
-        <!-- Badges & Telemetry Row -->
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 0; min-height: 24px;">
-          ${isLocal
-            ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px;">${icon('folder', { size: 10 })} Manual Files</span>`
-            : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">${icon('git-branch', { size: 10 })} ${escapeHtml(shaText)}</span>`
-          }
-          ${portBadge}
-          ${domainBadge}
-          ${accessBadge}
-          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
-          <span id="service-uptime-${p.id}" style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-left: auto;">${uptimeText}</span>
+        <div class="service-command-preview">
+          <code><span class="prompt-sig">$</span> ${escapeHtml(s.start_cmd || './start.sh')}</code>
+          ${s.status?.pid ? `<span class="pid-badge">PID ${s.status.pid}</span>` : ''}
         </div>
 
-        <!-- Actions Footer -->
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto;">
-          <div style="display: flex; gap: 6px; align-items: center;">
-            ${isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Start</button>`
-            }
-            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Deploy</button>` : ''}
-            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 4px 10px; font-size: 11.5px;" title="Upload and manage service files">Files</button>
-            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 4px 10px; font-size: 11.5px;" title="View live logs">Logs</button>
-            <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Settings">
-              ${icon('settings', { size: 12 })}
-            </button>
+        <div class="service-meta-chips">
+          <span class="meta-chip meta-chip-sha">${sha}</span>
+          <span class="meta-chip">${portText}</span>
+          <span class="meta-chip meta-chip-access">${accessText}</span>
+        </div>
+
+        <div id="service-pipeline-${s.id}" style="display:none; margin: 12px 0 6px 0;"></div>
+        <div id="service-fluid-${s.id}" class="organic-fluid-container" style="display:none; margin-bottom: 8px;">
+          <canvas id="service-fluid-canvas-${s.id}" class="organic-fluid-canvas" width="400" height="42"></canvas>
+        </div>
+
+        <div class="service-actions-row">
+          <div class="service-left-actions">
+            ${isOnline ? `
+              <button class="btn btn-danger btn-sm" onclick="stopProject(${s.id})" title="Stop Service">Stop</button>
+              <button class="btn btn-secondary btn-sm" onclick="restartProject(${s.id})" title="Restart Service">Restart</button>
+            ` : `
+              <button class="btn btn-success btn-sm" onclick="startProject(${s.id})" title="Start Service">Start</button>
+            `}
+            ${s.repo_url !== 'local' ? `
+              <button class="btn btn-secondary btn-sm" onclick="deployProject(${s.id})" title="Deploy Latest Commit">Deploy</button>
+            ` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${s.id}, 'files')" title="Manage Files">Files</button>
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${s.id}, 'logs')" title="Live Console Logs">Logs</button>
+            <button class="btn btn-icon btn-sm" onclick="openEditServiceModal(${s.id})" title="Edit Service Settings">${icon('settings', { size: 14 })}</button>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')" style="padding: 4px 12px; font-size: 11.5px; font-weight: 500;">
+          <button class="btn btn-primary btn-sm service-manage-btn" onclick="openWebsiteWorkspace(${s.id}, 'overview')">
             Manage &rarr;
           </button>
         </div>
       </div>
     `;
-  }).join(''));
+  }).join('');
 
-  // Hydrate each service card's dedicated water pipeline
-  filtered.forEach((p) => {
-    syncServiceCardPipeline(p);
-  });
+  filtered.forEach(syncServiceCardPipeline);
 }
-window.renderServicesList = renderServicesList;
 
-// Services search & filter bindings
+// Bind search and status filters
 document.getElementById('services-search-input')?.addEventListener('input', renderServicesList);
 document.querySelectorAll('#services-status-filters .pill').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -338,340 +240,7 @@ document.querySelectorAll('#services-status-filters .pill').forEach((btn) => {
   });
 });
 
-// ============================================================================
-// Add / Edit Backend Service Modal
-// ============================================================================
-function setServiceSourceMode(mode) {
-  const hiddenInput = document.getElementById('service-source-mode');
-  if (hiddenInput) hiddenInput.value = mode;
-
-  const btnManual = document.getElementById('service-source-mode-manual');
-  const btnGit = document.getElementById('service-source-mode-git');
-  if (btnManual) btnManual.classList.toggle('active', mode === 'manual');
-  if (btnGit) btnGit.classList.toggle('active', mode === 'git');
-
-  const repoGroup = document.getElementById('service-repo-group');
-  const branchGroup = document.getElementById('service-branch-group');
-  const infoBox = document.getElementById('service-manual-info-box');
-  const gridRow = document.getElementById('service-name-branch-row');
-
-  if (mode === 'manual') {
-    if (repoGroup) repoGroup.style.display = 'none';
-    if (branchGroup) branchGroup.style.display = 'none';
-    if (infoBox) infoBox.style.display = 'block';
-    if (gridRow) gridRow.style.gridTemplateColumns = '1fr';
-    const repoInput = document.getElementById('service-repo');
-    if (repoInput) repoInput.value = '';
-  } else {
-    if (repoGroup) repoGroup.style.display = 'block';
-    if (branchGroup) branchGroup.style.display = 'block';
-    if (infoBox) infoBox.style.display = 'none';
-    if (gridRow) gridRow.style.gridTemplateColumns = '2fr 1fr';
-  }
-}
-window.setServiceSourceMode = setServiceSourceMode;
-
-function openAddServiceModal() {
-  const form = document.getElementById('service-form');
-  if (form) form.reset();
-  document.getElementById('service-form-id').value = '';
-  document.getElementById('modal-service-title').textContent = 'Add Backend Service / Bot';
-  document.getElementById('save-service-submit-btn').textContent = 'Create Service';
-  document.getElementById('service-name').value = '';
-  document.getElementById('service-slug').value = '';
-  document.getElementById('service-deploy-dir').value = '';
-  document.getElementById('service-repo').value = '';
-  document.getElementById('service-branch').value = 'main';
-  document.getElementById('service-branch').dataset.touched = '';
-  document.getElementById('service-install-cmd').value = '';
-  document.getElementById('service-start-cmd').value = '';
-
-  const portInput = document.getElementById('service-port');
-  if (portInput) portInput.value = getNextAvailablePort(8000);
-  const domainInput = document.getElementById('service-domain');
-  if (domainInput) domainInput.value = '';
-  const accessInput = document.getElementById('service-access-mode');
-  if (accessInput) accessInput.value = 'local';
-  const ipsInput = document.getElementById('service-allowed-ips');
-  if (ipsInput) ipsInput.value = '';
-  toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap');
-
-  applyServicePreset('lavalink');
-  openModal('modal-service');
-}
-window.openAddServiceModal = openAddServiceModal;
-
-function applyServicePreset(preset) {
-  const hiddenPreset = document.getElementById('service-preset-type');
-  if (hiddenPreset) hiddenPreset.value = preset;
-
-  document.querySelectorAll('#service-preset-buttons .preset-chip').forEach((c) => {
-    c.classList.toggle('active', c.getAttribute('data-service-preset') === preset);
-  });
-
-  const nameInput = document.getElementById('service-name');
-  const installInput = document.getElementById('service-install-cmd');
-  const startInput = document.getElementById('service-start-cmd');
-  const portInput = document.getElementById('service-port');
-  const isEditing = Boolean(document.getElementById('service-form-id')?.value);
-  const currentPort = portInput ? portInput.value : '';
-
-  switch (preset) {
-    case 'lavalink':
-      setServiceSourceMode('manual');
-      if (nameInput) {
-        nameInput.value = 'Lavalink';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = '';
-      if (startInput) startInput.value = 'java -jar Lavalink.jar';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(1112);
-      break;
-    case 'discord-node':
-      setServiceSourceMode('git');
-      if (nameInput) {
-        nameInput.value = 'Discord Bot';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = 'npm ci';
-      if (startInput) startInput.value = 'node index.js';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
-      break;
-    case 'discord-py':
-      setServiceSourceMode('git');
-      if (nameInput) {
-        nameInput.value = 'Discord Bot';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
-      if (startInput) startInput.value = 'python3 -u bot.py';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
-      break;
-    case 'telegram-py':
-      setServiceSourceMode('git');
-      if (nameInput) {
-        nameInput.value = 'Telegram Bot';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
-      if (startInput) startInput.value = 'python3 -u main.py';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
-      break;
-    case 'worker-py':
-      setServiceSourceMode('manual');
-      if (nameInput) {
-        nameInput.value = 'Queue Worker';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
-      if (startInput) startInput.value = 'python3 -u worker.py';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
-      break;
-    case 'custom':
-      if (nameInput && ['Lavalink', 'Discord Bot', 'Telegram Bot', 'Queue Worker'].includes(nameInput.value)) {
-        nameInput.value = '';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = '';
-      if (startInput) startInput.value = '';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getNextAvailablePort(8000);
-      break;
-  }
-}
-window.applyServicePreset = applyServicePreset;
-
-function openEditServiceModal(id) {
-  const p = state.projects.find((x) => x.id === id);
-  if (!p) return;
-
-  document.getElementById('service-form-id').value = p.id;
-  document.getElementById('modal-service-title').textContent = 'Edit Backend Service / Bot';
-  document.getElementById('save-service-submit-btn').textContent = 'Update Service';
-  document.getElementById('service-name').value = p.name || '';
-  document.getElementById('service-slug').value = p.slug || '';
-  document.getElementById('service-branch').value = p.branch || 'main';
-  document.getElementById('service-repo').value = p.repo_url === 'local' ? '' : (p.repo_url || '');
-  document.getElementById('service-deploy-dir').value = p.deploy_dir || '';
-  document.getElementById('service-install-cmd').value = p.install_cmd || '';
-  document.getElementById('service-start-cmd').value = p.start_cmd || '';
-
-  const isLocal = !p.repo_url || p.repo_url === 'local';
-  setServiceSourceMode(isLocal ? 'manual' : 'git');
-
-  const portInput = document.getElementById('service-port');
-  if (portInput) portInput.value = p.port || getNextAvailablePort(8000);
-  const domainInput = document.getElementById('service-domain');
-  if (domainInput) domainInput.value = (p.domains && p.domains[0]) || '';
-  const accessInput = document.getElementById('service-access-mode');
-  if (accessInput) accessInput.value = p.access_mode || 'local';
-  const ipsInput = document.getElementById('service-allowed-ips');
-  if (ipsInput) ipsInput.value = p.allowed_ips || '';
-  toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap');
-
-  const pt = p.project_type || 'custom';
-  document.querySelectorAll('#service-preset-buttons .preset-chip').forEach((c) => {
-    c.classList.toggle('active', c.getAttribute('data-service-preset') === pt);
-  });
-
-  openModal('modal-service');
-}
-window.openEditServiceModal = openEditServiceModal;
-
-// Service Preset Chips Click
-document.querySelectorAll('#service-preset-buttons .preset-chip').forEach((chip) => {
-  chip.addEventListener('click', () => {
-    const preset = chip.getAttribute('data-service-preset');
-    if (preset) applyServicePreset(preset);
-  });
-});
-
-// Auto-derive service slug
-document.getElementById('service-name')?.addEventListener('input', (e) => {
-  if (!document.getElementById('service-form-id').value) {
-    const slug = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-    document.getElementById('service-slug').value = slug;
-    document.getElementById('service-deploy-dir').value = slug ? `./data/services/${slug}` : '';
-  }
-});
-
-// Browse GitHub repos for service
-document.getElementById('service-browse-github-repos-btn')?.addEventListener('click', async () => {
-  const sel = document.getElementById('service-github-repos-select');
-  const input = document.getElementById('service-repo');
-  try {
-    toast('Fetching visible GitHub repositories...', 'info');
-    const repos = await api('/api/github/repos');
-    if (!repos.length) {
-      toast('No repositories found for configured token.', 'info');
-      return;
-    }
-    sel.innerHTML = '<option value="">-- Choose a repository --</option>' +
-      repos.map((r) => {
-        const prefix = r.token_label ? `[${escapeHtml(r.token_label)}] ` : '';
-        return `<option value="${escapeHtml(r.clone_url)}">${prefix}${escapeHtml(r.full_name)} (${r.private ? 'Private' : 'Public'})</option>`;
-      }).join('');
-    sel.style.display = 'block';
-    sel.onchange = () => {
-      if (sel.value) {
-        input.value = sel.value;
-        const selected = repos.find((r) => r.clone_url === sel.value);
-        if (selected) {
-          if (document.getElementById('service-branch').dataset.touched !== '1') document.getElementById('service-branch').value = selected.default_branch || 'main';
-          if (!document.getElementById('service-name').value) {
-            const shortName = selected.full_name.split('/')[1] || selected.full_name;
-            document.getElementById('service-name').value = shortName;
-            document.getElementById('service-name').dispatchEvent(new Event('input'));
-          }
-        }
-      }
-    };
-  } catch (err) {
-    toast(`Could not load repos: ${err.message}. Configure your GitHub token in Settings.`, 'warning');
-  }
-});
-
-// Remember when the user typed a branch so GitHub repo selection never overwrites it
-['service-branch', 'website-branch'].forEach((bid) => {
-  document.getElementById(bid)?.addEventListener('input', (ev) => { ev.target.dataset.touched = '1'; });
-});
-
-// Submit Add / Edit Service Form
-document.getElementById('save-service-submit-btn')?.addEventListener('click', async (e) => {
-  e.preventDefault();
-  const form = document.getElementById('service-form');
-  if (!form.reportValidity()) return;
-
-  const submitBtn = document.getElementById('save-service-submit-btn');
-  const originalText = submitBtn.textContent;
-  submitBtn.disabled = true;
-  submitBtn.innerHTML = '<span class="status-dot online" style="display:inline-block; margin-right:6px; animation: pulse 1s infinite;"></span> Saving...';
-
-  const id = document.getElementById('service-form-id').value;
-  const name = document.getElementById('service-name').value.trim();
-  const startCmd = document.getElementById('service-start-cmd').value.trim();
-  let slug = document.getElementById('service-slug').value.trim();
-  if (!slug) {
-    slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-  }
-
-  let projectType = 'custom';
-  const scLower = startCmd.toLowerCase();
-  if (scLower.includes('lavalink') || scLower.includes('.jar')) {
-    projectType = 'lavalink';
-  } else if (scLower.includes('python') || scLower.includes('.py')) {
-    projectType = 'python';
-  } else if (scLower.includes('node') || scLower.includes('.js')) {
-    projectType = 'node';
-  }
-
-  const sourceMode = document.getElementById('service-source-mode')?.value || 'manual';
-  const repoVal = document.getElementById('service-repo')?.value.trim() || '';
-  const isManual = sourceMode === 'manual' || !repoVal;
-
-  const portVal = document.getElementById('service-port')?.value.trim();
-  const domainVal = document.getElementById('service-domain')?.value.trim();
-  const accessMode = document.getElementById('service-access-mode')?.value || 'local';
-  const allowedIps = document.getElementById('service-allowed-ips')?.value.trim() || '';
-
-  const payload = {
-    name,
-    slug,
-    repo_url: isManual ? 'local' : repoVal,
-    branch: isManual ? 'local' : (document.getElementById('service-branch').value.trim() || 'main'),
-    project_kind: 'service',
-    project_type: projectType,
-    deploy_method: 'managed',
-    deploy_dir: document.getElementById('service-deploy-dir').value.trim() || `./data/services/${slug}`,
-    install_cmd: document.getElementById('service-install-cmd').value.trim(),
-    build_cmd: '',
-    start_cmd: document.getElementById('service-start-cmd').value.trim(),
-    health_url: '',
-    port: portVal ? Number(portVal) : getNextAvailablePort(8000),
-    domains: domainVal ? [domainVal] : [],
-    access_mode: accessMode,
-    allowed_ips: allowedIps,
-    auto_deploy: false,
-  };
-
-  try {
-    let targetId = id;
-    if (id) {
-      await api(`/api/projects/${id}`, { method: 'PUT', body: payload });
-      toast('Service updated!', 'success');
-    } else {
-      const res = await api('/api/projects', { method: 'POST', body: payload });
-      targetId = res.project ? res.project.id : res.id;
-      toast(`Service "${payload.name}" created!`, 'success');
-      state.selectedProjectId = targetId;
-    }
-    closeModal('modal-service');
-    await loadProjects();
-    if (isManual) {
-      toast(`Service "${payload.name}" ready! Upload your files in the Files tab.`, 'info');
-      openWebsiteWorkspace(targetId, 'files');
-    } else {
-      navigateTo('services');
-    }
-  } catch (err) {
-    toast(`Save failed: ${err.message}`, 'error');
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalText;
-  }
-});
-
-
-
 window.loadServicesView = loadServicesView;
 window.renderServicesList = renderServicesList;
-
-export {
-  loadServicesView,
-  renderServicesList,
-  renderSingleServicePipeline,
-  syncServiceCardPipeline,
-  openAddServiceModal,
-  openEditServiceModal,
-  setServiceSourceMode,
-  applyServicePreset,
-};
+window.renderSingleServicePipeline = renderSingleServicePipeline;
+window.syncServiceCardPipeline = syncServiceCardPipeline;

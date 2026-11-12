@@ -1,18 +1,18 @@
 /**
- * WebDep File Explorer & In-Browser IDE Subsystem
- * Enterprise file manager, directory navigator, syntax editor, and file upload dropzone
+ * WebDep File Explorer & Storage Management Subsystem
+ * Directory navigator, breadcrumbs, search filter, file actions, and drag-and-drop uploader.
  */
 
 import { icon, FILE_KINDS } from './icons.js';
 import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard } from './state.js';
 import { api, toast } from './api.js';
-import { highlightHTML } from '../vendor/speed-highlight/index.js';
+import { getSelectedProject } from './websites.js';
 
-// ============================================================================
-// Backend Service File Browser
-// ============================================================================
-// Modern Enterprise File Explorer & In-Browser IDE Editor
-// ============================================================================
+// Re-export editor submodule so imports from './files.js' remain 100% compatible
+export * from './files_editor.js';
+
+import { filesCloseEditor, filesOpen } from './files_editor.js';
+
 state.filesPath = '';
 state.filesOpenPath = null;
 state.filesProjectId = null;
@@ -21,12 +21,12 @@ state.filesFilter = '';
 state.filesEditorInitialContent = '';
 state.filesEditorDirty = false;
 
-function filesJoin(dir, name) {
+export function filesJoin(dir, name) {
   if (!dir) return name;
   return dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`;
 }
 
-function formatFileBytes(bytes) {
+export function formatFileBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -35,7 +35,7 @@ function formatFileBytes(bytes) {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-function formatFileDate(unixSec) {
+export function formatFileDate(unixSec) {
   if (!unixSec || unixSec <= 0) return { relative: '—', full: '' };
   const d = new Date(unixSec * 1000);
   const now = Date.now();
@@ -54,7 +54,7 @@ function formatFileDate(unixSec) {
   return { relative, full };
 }
 
-function getFileMeta(entry) {
+export function getFileMeta(entry) {
   const build = (kindKey, extLabel, isEditable, isBinary, isDir = false) => {
     const k = FILE_KINDS[kindKey] || FILE_KINDS.file;
     return {
@@ -97,7 +97,7 @@ function getFileMeta(entry) {
   };
 }
 
-async function loadFilesView() {
+export async function loadFilesView() {
   const p = getSelectedProject();
   if (!p) return;
 
@@ -123,7 +123,6 @@ async function loadFilesView() {
     setTimeout(() => refreshBtn.classList.remove('loading-spin'), 600);
   }
 
-  // Render modern breadcrumbs
   const parts = state.filesPath ? state.filesPath.split('/').filter(Boolean) : [];
   let crumbHtml = `<a href="javascript:void(0)" class="file-crumb-item ${parts.length === 0 ? 'active' : ''}" onclick="filesGo('')">
     ${icon('folder-open', { size: 14 })}
@@ -157,9 +156,8 @@ async function loadFilesView() {
     }
   }
 }
-window.loadFilesView = loadFilesView;
 
-function renderFilesTable() {
+export function renderFilesTable() {
   const tableBody = document.getElementById('files-list-body');
   const emptyState = document.getElementById('files-empty-state');
   const countBadge = document.getElementById('files-count-badge');
@@ -266,15 +264,14 @@ function renderFilesTable() {
   tableBody.innerHTML = rows.join('');
 }
 
-function filesFilterList(val) {
+export function filesFilterList(val) {
   state.filesFilter = val || '';
   const clearBtn = document.getElementById('files-filter-clear');
   if (clearBtn) clearBtn.style.display = state.filesFilter ? 'inline-block' : 'none';
   renderFilesTable();
 }
-window.filesFilterList = filesFilterList;
 
-function filesClearFilter() {
+export function filesClearFilter() {
   const input = document.getElementById('files-filter-input');
   if (input) {
     input.value = '';
@@ -282,9 +279,8 @@ function filesClearFilter() {
   }
   filesFilterList('');
 }
-window.filesClearFilter = filesClearFilter;
 
-function filesGo(path) {
+export function filesGo(path) {
   state.filesPath = path || '';
   state.filesFilter = '';
   const input = document.getElementById('files-filter-input');
@@ -293,17 +289,15 @@ function filesGo(path) {
   if (clearBtn) clearBtn.style.display = 'none';
   void loadFilesView();
 }
-window.filesGo = filesGo;
 
-function filesGoUp() {
+export function filesGoUp() {
   if (!state.filesPath) return;
   const parts = state.filesPath.split('/').filter(Boolean);
   parts.pop();
   filesGo(parts.join('/'));
 }
-window.filesGoUp = filesGoUp;
 
-function filesCopyCurrentPath() {
+export function filesCopyCurrentPath() {
   const fullVirtual = `/app${state.filesPath ? '/' + state.filesPath : ''}`;
   navigator.clipboard.writeText(fullVirtual).then(() => {
     toast(`Copied path: ${fullVirtual}`, 'success');
@@ -311,346 +305,8 @@ function filesCopyCurrentPath() {
     toast(`Path: ${fullVirtual}`, 'info');
   });
 }
-window.filesCopyCurrentPath = filesCopyCurrentPath;
 
-// In-Browser Code / Config Editor
-async function filesOpen(path) {
-  const p = getSelectedProject();
-  if (!p) return;
-
-  try {
-    toast(`Loading ${path}...`, 'info');
-    const res = await api(`/api/projects/${p.id}/files/content?path=${encodeURIComponent(path)}`, { noCache: true });
-    state.filesOpenPath = path;
-    state.filesEditorInitialContent = res.content || '';
-    state.filesEditorDirty = false;
-
-    const editorCard = document.getElementById('files-editor-card');
-    const browserView = document.getElementById('files-browser-view');
-    const headerActions = document.getElementById('files-header-actions');
-    const nameEl = document.getElementById('files-editor-name');
-    const textarea = document.getElementById('files-editor');
-    const dirtyBadge = document.getElementById('files-editor-dirty-badge');
-    const metaEl = document.getElementById('files-editor-meta');
-    const iconEl = document.getElementById('files-editor-icon');
-    const gutter = document.getElementById('files-editor-gutter');
-    const pre = document.getElementById('files-editor-pre');
-
-    if (nameEl) {
-      const parts = path.split('/');
-      const fileName = parts.pop();
-      const dirPath = parts.length ? parts.join('/') + '/' : '';
-      nameEl.innerHTML = `<span style="color:var(--text-dim);font-weight:400;">${escapeHtml(dirPath)}</span>${escapeHtml(fileName)}`;
-    }
-    if (textarea) textarea.value = res.content || '';
-    if (dirtyBadge) dirtyBadge.style.display = 'none';
-
-    const entry = (state.filesCachedEntries || []).find((x) => filesJoin(state.filesPath, x.name) === path);
-    if (metaEl && entry) {
-      metaEl.textContent = `• ${formatFileBytes(entry.size)}`;
-    } else if (metaEl) {
-      metaEl.textContent = `• ${formatFileBytes(new Blob([res.content]).size)}`;
-    }
-
-    const meta = getFileMeta({ name: path, is_dir: false });
-    if (iconEl) {
-      iconEl.innerHTML = meta.iconSvg;
-    }
-
-    const detectedLang = getSpeedHighlightLang(path);
-    const langBadge = document.getElementById('files-editor-lang-badge');
-    if (langBadge) {
-      const displayLang = detectedLang === 'py' ? 'PYTHON' : detectedLang === 'js' ? 'JAVASCRIPT' : detectedLang === 'ts' ? 'TYPESCRIPT' : detectedLang.toUpperCase();
-      langBadge.textContent = displayLang;
-      langBadge.style.background = meta.iconBg;
-      langBadge.style.color = meta.iconColor;
-    }
-
-    // Switch box view: hide file list and top buttons, open editor in the same box
-    if (browserView) browserView.style.display = 'none';
-    if (headerActions) headerActions.style.display = 'none';
-    if (editorCard) {
-      editorCard.style.display = 'block';
-    }
-
-    renderFilesTable();
-    updateEditorHighlight(true);
-    updateEditorGutter();
-    updateEditorPos();
-    bindEditorEvents();
-
-    if (textarea) {
-      textarea.scrollTop = 0;
-      textarea.scrollLeft = 0;
-    }
-    if (pre) {
-      pre.scrollTop = 0;
-      pre.scrollLeft = 0;
-    }
-    if (gutter) {
-      gutter.scrollTop = 0;
-    }
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-window.filesOpen = filesOpen;
-
-function getSpeedHighlightLang(filename) {
-  if (!filename) return 'plain';
-  const lower = filename.toLowerCase();
-  const base = lower.split('/').pop().split('\\').pop();
-
-  if (base === 'dockerfile' || base.startsWith('dockerfile.')) return 'docker';
-  if (base === '.env' || base.startsWith('.env.') || base.endsWith('.env')) return 'ini';
-  if (base.endsWith('.conf') || base.endsWith('.ini') || base.endsWith('.cfg') || base.endsWith('.properties') || base === 'requirements.txt') return 'ini';
-  if (base.endsWith('.py') || base.endsWith('.pyw')) return 'py';
-  if (base.endsWith('.js') || base.endsWith('.mjs') || base.endsWith('.cjs') || base.endsWith('.jsx')) return 'js';
-  if (base.endsWith('.ts') || base.endsWith('.tsx')) return 'ts';
-  if (base.endsWith('.json') || base.endsWith('.jsonc') || base.endsWith('.json5') || base.endsWith('.lock')) return 'json';
-  if (base.endsWith('.sh') || base.endsWith('.bash') || base.endsWith('.zsh') || base.endsWith('.ksh') || base === '.bashrc' || base === '.zshrc') return 'bash';
-  if (base.endsWith('.html') || base.endsWith('.htm') || base.endsWith('.svg') || base.endsWith('.xml') || base.endsWith('.vue')) return 'html';
-  if (base.endsWith('.css') || base.endsWith('.scss') || base.endsWith('.sass') || base.endsWith('.less')) return 'css';
-  if (base.endsWith('.yaml') || base.endsWith('.yml')) return 'yaml';
-  if (base.endsWith('.sql')) return 'sql';
-  if (base.endsWith('.rs')) return 'rs';
-  if (base.endsWith('.go')) return 'go';
-  if (base.endsWith('.md') || base.endsWith('.markdown')) return 'md';
-  return 'plain';
-}
-
-let highlightSeq = 0;
-let highlightTimer = null;
-let lastHighlightedContent = '';
-
-async function updateEditorHighlight(immediate = false) {
-  const textarea = document.getElementById('files-editor');
-  const codeEl = document.getElementById('files-editor-code');
-  const card = document.getElementById('files-editor-card');
-  if (!textarea || !codeEl) return;
-
-  const content = textarea.value;
-  if (content === lastHighlightedContent && !immediate) return;
-
-  // If file is excessively large, fallback to plain text textarea rendering
-  if (content.length > 500000 || content.split('\n').length > 15000) {
-    if (card) card.classList.add('no-highlight');
-    codeEl.textContent = content;
-    lastHighlightedContent = content;
-    return;
-  }
-
-  if (card) card.classList.remove('no-highlight');
-  const lang = getSpeedHighlightLang(state.filesOpenPath || '');
-
-  const doHighlight = async () => {
-    const seq = ++highlightSeq;
-    try {
-      let html = await highlightHTML(content, lang, { block: false });
-      if (seq !== highlightSeq) return;
-      if (content.endsWith('\n')) {
-        html += '\n';
-      }
-      codeEl.innerHTML = html;
-      lastHighlightedContent = content;
-    } catch (err) {
-      console.warn('Speed-highlight error:', err);
-      if (seq === highlightSeq) {
-        codeEl.textContent = content;
-        lastHighlightedContent = content;
-      }
-    }
-  };
-
-  if (immediate) {
-    if (highlightTimer) clearTimeout(highlightTimer);
-    highlightTimer = null;
-    await doHighlight();
-  } else {
-    if (highlightTimer) clearTimeout(highlightTimer);
-    highlightTimer = setTimeout(doHighlight, 35);
-  }
-}
-
-let lastGutterLineCount = 0;
-
-function updateEditorGutter() {
-  const textarea = document.getElementById('files-editor');
-  const gutter = document.getElementById('files-editor-gutter');
-  const linesSpan = document.getElementById('files-editor-lines');
-  const sizeSpan = document.getElementById('files-editor-size');
-  if (!textarea || !gutter) return;
-
-  const content = textarea.value;
-  const lineCount = content.split('\n').length;
-  if (lineCount !== lastGutterLineCount || !gutter.textContent) {
-    lastGutterLineCount = lineCount;
-    let nums = '';
-    for (let i = 1; i <= lineCount; i++) {
-      nums += i + '\n';
-    }
-    gutter.textContent = nums;
-    if (linesSpan) linesSpan.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
-  }
-
-  if (sizeSpan) sizeSpan.textContent = formatFileBytes(content.length);
-}
-
-function updateEditorPos() {
-  const textarea = document.getElementById('files-editor');
-  const posSpan = document.getElementById('files-editor-pos');
-  if (!textarea || !posSpan) return;
-
-  const text = textarea.value.slice(0, textarea.selectionStart);
-  const lines = text.split('\n');
-  const row = lines.length;
-  const col = lines[lines.length - 1].length + 1;
-  posSpan.textContent = `Ln ${row}, Col ${col}`;
-}
-
-function bindEditorEvents() {
-  const textarea = document.getElementById('files-editor');
-  const gutter = document.getElementById('files-editor-gutter');
-  const pre = document.getElementById('files-editor-pre');
-  if (!textarea || textarea.dataset.bound) return;
-  textarea.dataset.bound = 'true';
-
-  // Sync scroll
-  textarea.addEventListener('scroll', () => {
-    if (gutter) gutter.scrollTop = textarea.scrollTop;
-    if (pre) {
-      pre.scrollTop = textarea.scrollTop;
-      pre.scrollLeft = textarea.scrollLeft;
-    }
-  }, { passive: true });
-
-  // Track cursor position
-  textarea.addEventListener('keyup', updateEditorPos);
-  textarea.addEventListener('click', updateEditorPos);
-
-  // Track dirty state, syntax highlight, and gutter updates
-  textarea.addEventListener('input', () => {
-    updateEditorHighlight();
-    updateEditorGutter();
-    updateEditorPos();
-    const isDirty = textarea.value !== state.filesEditorInitialContent;
-    state.filesEditorDirty = isDirty;
-    const dirtyBadge = document.getElementById('files-editor-dirty-badge');
-    if (dirtyBadge) dirtyBadge.style.display = isDirty ? 'inline-block' : 'none';
-  });
-
-  // Handle Tab key indentation and Ctrl+S / Cmd+S save
-  textarea.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-      e.preventDefault();
-      void filesSaveCurrent(false);
-      return;
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      filesCloseEditor();
-      return;
-    }
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const val = textarea.value;
-      textarea.value = val.substring(0, start) + '  ' + val.substring(end);
-      textarea.selectionStart = textarea.selectionEnd = start + 2;
-      textarea.dispatchEvent(new Event('input'));
-    }
-  });
-}
-
-function filesToggleFullscreen() {
-  const card = document.getElementById('files-editor-card');
-  const btn = document.getElementById('files-fullscreen-btn');
-  if (!card) return;
-  const isFull = card.classList.toggle('fullscreen');
-  if (btn) {
-    btn.innerHTML = isFull
-      ? `${icon('x', { size: 13 })} <span>Exit Fullscreen</span>`
-      : `${icon('external-link', { size: 13 })} <span>Fullscreen</span>`;
-  }
-}
-window.filesToggleFullscreen = filesToggleFullscreen;
-
-function filesCloseEditor(force = false) {
-  if (!force && state.filesEditorDirty) {
-    if (!confirm('You have unsaved changes. Discard and return to files?')) {
-      return;
-    }
-  }
-  state.filesOpenPath = null;
-  state.filesEditorDirty = false;
-  lastGutterLineCount = 0;
-
-  const card = document.getElementById('files-editor-card');
-  const browserView = document.getElementById('files-browser-view');
-  const headerActions = document.getElementById('files-header-actions');
-  const fullscreenBtn = document.getElementById('files-fullscreen-btn');
-
-  if (card) {
-    card.classList.remove('fullscreen');
-    card.style.display = 'none';
-  }
-  if (browserView) {
-    browserView.style.display = 'block';
-  }
-  if (headerActions) {
-    headerActions.style.display = 'flex';
-  }
-  if (fullscreenBtn) {
-    fullscreenBtn.innerHTML = `${icon('external-link', { size: 13 })} <span>Fullscreen</span>`;
-  }
-
-  const codeEl = document.getElementById('files-editor-code');
-  if (codeEl) codeEl.innerHTML = '';
-  const textarea = document.getElementById('files-editor');
-  if (textarea) textarea.value = '';
-  lastHighlightedContent = '';
-  if (highlightTimer) clearTimeout(highlightTimer);
-  highlightTimer = null;
-  renderFilesTable();
-}
-window.filesCloseEditor = filesCloseEditor;
-
-async function filesSaveCurrent(andClose = true) {
-  const p = getSelectedProject();
-  if (!p || !state.filesOpenPath) return;
-
-  const btn = document.getElementById('files-save-btn');
-  const textarea = document.getElementById('files-editor');
-  const dirtyBadge = document.getElementById('files-editor-dirty-badge');
-  if (btn) btn.disabled = true;
-
-  try {
-    const savedPath = state.filesOpenPath;
-    await api(`/api/projects/${p.id}/files/content`, {
-      method: 'PUT',
-      body: { path: savedPath, content: textarea ? textarea.value : '' },
-    });
-    state.filesEditorInitialContent = textarea ? textarea.value : '';
-    state.filesEditorDirty = false;
-    if (dirtyBadge) dirtyBadge.style.display = 'none';
-    toast(`Saved ${savedPath}. Restart service to apply changes.`, 'success');
-
-    if (andClose) {
-      filesCloseEditor(true);
-      void loadFilesView();
-    } else {
-      void loadFilesView();
-    }
-  } catch (err) {
-    toast(`Save failed: ${err.message}`, 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-window.filesSaveCurrent = filesSaveCurrent;
-
-function filesDownload(path) {
+export function filesDownload(path) {
   const p = getSelectedProject();
   if (!p) return;
   const url = `/api/projects/${p.id}/files/download?path=${encodeURIComponent(path)}`;
@@ -662,15 +318,13 @@ function filesDownload(path) {
   document.body.removeChild(a);
   toast(`Downloading ${path.split('/').pop()}...`, 'info');
 }
-window.filesDownload = filesDownload;
 
-function filesDownloadCurrent() {
+export function filesDownloadCurrent() {
   if (!state.filesOpenPath) return;
   filesDownload(state.filesOpenPath);
 }
-window.filesDownloadCurrent = filesDownloadCurrent;
 
-async function filesRename(path) {
+export async function filesRename(path) {
   const p = getSelectedProject();
   if (!p) return;
 
@@ -706,9 +360,8 @@ async function filesRename(path) {
     toast(`Rename failed: ${err.message}`, 'error');
   }
 }
-window.filesRename = filesRename;
 
-async function filesNewFile() {
+export async function filesNewFile() {
   const p = getSelectedProject();
   if (!p) return;
   const input = await showPromptDialog({
@@ -729,9 +382,8 @@ async function filesNewFile() {
     toast(`Failed to create file: ${err.message}`, 'error');
   }
 }
-window.filesNewFile = filesNewFile;
 
-async function filesNewFolder() {
+export async function filesNewFolder() {
   const p = getSelectedProject();
   if (!p) return;
   const input = await showPromptDialog({
@@ -750,9 +402,8 @@ async function filesNewFolder() {
     toast(`Failed to create folder: ${err.message}`, 'error');
   }
 }
-window.filesNewFolder = filesNewFolder;
 
-async function filesDelete(path) {
+export async function filesDelete(path) {
   const p = getSelectedProject();
   if (!p) return;
   const itemName = path.split('/').pop();
@@ -772,15 +423,13 @@ async function filesDelete(path) {
     toast(`Delete failed: ${err.message}`, 'error');
   }
 }
-window.filesDelete = filesDelete;
 
-async function uploadFileList(files) {
+export async function uploadFileList(files) {
   const p = getSelectedProject();
   if (!p || !files || !files.length) return;
 
   const formData = new FormData();
   for (let i = 0; i < files.length; i++) {
-    // Preserve webkitRelativePath if folder upload, otherwise use file name
     const relPath = files[i].webkitRelativePath || files[i].name;
     formData.append('file', files[i], relPath);
   }
@@ -806,25 +455,23 @@ async function uploadFileList(files) {
   }
 }
 
-async function handleFilesUpload(e) {
+export async function handleFilesUpload(e) {
   const files = e.target?.files;
   if (files && files.length) {
     await uploadFileList(files);
   }
   if (e.target) e.target.value = '';
 }
-window.handleFilesUpload = handleFilesUpload;
 
-async function handleFolderUpload(e) {
+export async function handleFolderUpload(e) {
   const files = e.target?.files;
   if (files && files.length) {
     await uploadFileList(files);
   }
   if (e.target) e.target.value = '';
 }
-window.handleFolderUpload = handleFolderUpload;
 
-function setupFileDropzone() {
+export function setupFileDropzone() {
   const dropzone = document.getElementById('file-explorer-dropzone');
   const overlay = document.getElementById('file-drop-overlay');
   if (!dropzone || dropzone.dataset.dropBound) return;
@@ -873,29 +520,25 @@ function setupFileDropzone() {
     }
   });
 }
+
+// Bind globals for inline HTML event handlers
+window.filesJoin = filesJoin;
+window.formatFileBytes = formatFileBytes;
+window.formatFileDate = formatFileDate;
+window.getFileMeta = getFileMeta;
+window.renderFilesTable = renderFilesTable;
+window.loadFilesView = loadFilesView;
+window.filesFilterList = filesFilterList;
+window.filesClearFilter = filesClearFilter;
+window.filesGo = filesGo;
+window.filesGoUp = filesGoUp;
+window.filesCopyCurrentPath = filesCopyCurrentPath;
+window.filesDownload = filesDownload;
+window.filesDownloadCurrent = filesDownloadCurrent;
+window.filesRename = filesRename;
+window.filesNewFile = filesNewFile;
+window.filesNewFolder = filesNewFolder;
+window.filesDelete = filesDelete;
+window.handleFilesUpload = handleFilesUpload;
+window.handleFolderUpload = handleFolderUpload;
 window.setupFileDropzone = setupFileDropzone;
-
-
-
-export {
-  loadFilesView,
-  renderFilesTable,
-  filesFilterList,
-  filesClearFilter,
-  filesGo,
-  filesGoUp,
-  filesCopyCurrentPath,
-  filesOpen,
-  filesCloseEditor,
-  filesToggleFullscreen,
-  filesSaveCurrent,
-  filesDownload,
-  filesDownloadCurrent,
-  filesRename,
-  filesNewFile,
-  filesNewFolder,
-  filesDelete,
-  handleFilesUpload,
-  handleFolderUpload,
-  setupFileDropzone,
-};

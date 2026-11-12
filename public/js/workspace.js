@@ -7,6 +7,9 @@ import { icon } from './icons.js';
 import { state, WEBSITE_WORKSPACE_TABS, invalidateClientCache } from './state.js';
 import { api, toast, prefetchWebsiteWorkspace } from './api.js';
 
+// Re-export process controls and lifecycle actions submodule
+export * from './workspace_actions.js';
+
 
 function openWebsiteWorkspace(projectId, tab = null) {
   state.selectedProjectId = Number(projectId);
@@ -499,163 +502,12 @@ function renderCurrentView() {
 }
 
 
-// ============================================================================
-// Direct Process Controls (Start / Stop / Restart)
-// ============================================================================
-async function refreshCurrentViewsAfterLifecycle() {
-  await loadProjects();
-  if (state.currentView === 'projects') renderProjectsList();
-  if (state.currentView === 'services') renderServicesList();
-  if (state.currentView === 'overview') await loadOverview();
-  if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
-    state.lastWsBannerSig = null;
-    renderWebsiteWorkspaceHeader();
-  }
-}
-
-function handleAutoDeployedRedirect(res, projectId) {
-  if (res && res.autoDeployed) {
-    toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
-    navigateTo('deployments', projectId);
-    return true;
-  }
-  return false;
-}
-
-async function startProject(projectId) {
-  const btns = document.querySelectorAll(`button[onclick*="startProject(${projectId})"], button[onclick*="stopProject(${projectId})"]`);
-  btns.forEach((b) => {
-    b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Starting...';
-  });
-
-  const proj = state.projects.find((x) => x.id === projectId);
-  if (proj) {
-    proj.app_status = 'starting';
-    if (proj.project_kind === 'service') {
-      renderSingleServicePipeline(projectId, 'source', 'running', 'CHECKING FILES & PORT');
-      setTimeout(() => {
-        if (proj.app_status === 'starting') renderSingleServicePipeline(projectId, 'deps', 'running', 'ENVIRONMENT & DEPS');
-      }, 700);
-      setTimeout(() => {
-        if (proj.app_status === 'starting') renderSingleServicePipeline(projectId, 'daemon', 'running', 'SPAWNING DAEMON');
-      }, 1400);
-    }
-  }
-
-  try {
-    const res = await api(`/api/projects/${projectId}/start`, { method: 'POST' });
-    if (handleAutoDeployedRedirect(res, projectId)) return;
-    if (proj) {
-      proj.app_status = 'running';
-      if (proj.project_kind === 'service') {
-        renderSingleServicePipeline(projectId, 'online', 'success', 'READY');
-      }
-    }
-    toast('Process started successfully.', 'success');
-  } catch (err) {
-    if (proj) {
-      proj.app_status = 'stopped';
-      if (proj.project_kind === 'service') {
-        renderSingleServicePipeline(projectId, 'daemon', 'failed', 'START FAILED');
-      }
-    }
-    toast(`Start failed: ${err.message}`, 'error');
-  } finally {
-    state.lastWsBannerSig = null;
-    await refreshCurrentViewsAfterLifecycle();
-  }
-}
-window.startProject = startProject;
-
-async function stopProject(projectId) {
-  const btns = document.querySelectorAll(`button[onclick*="startProject(${projectId})"], button[onclick*="stopProject(${projectId})"]`);
-  btns.forEach((b) => {
-    b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Stopping...';
-  });
-
-  const proj = state.projects.find((x) => x.id === projectId);
-  if (proj) {
-    proj.app_status = 'stopping';
-    if (proj.project_kind === 'service') {
-      renderSingleServicePipeline(projectId, 'daemon', 'running', 'STOPPING...');
-    }
-  }
-
-  try {
-    await api(`/api/projects/${projectId}/stop`, { method: 'POST' });
-    if (proj) {
-      proj.app_status = 'stopped';
-      if (proj.project_kind === 'service') {
-        renderSingleServicePipeline(projectId, 'source', 'idle', 'STOPPED');
-      }
-    }
-    toast('Process stopped successfully.', 'info');
-  } catch (err) {
-    if (proj) {
-      proj.app_status = 'running';
-      if (proj.project_kind === 'service') {
-        renderSingleServicePipeline(projectId, 'online', 'success', 'READY');
-      }
-    }
-    toast(`Stop failed: ${err.message}`, 'error');
-  } finally {
-    state.lastWsBannerSig = null;
-    await refreshCurrentViewsAfterLifecycle();
-  }
-}
-window.stopProject = stopProject;
-
-async function toggleMaintenanceMode(projectId) {
-  try {
-    const res = await api(`/api/projects/${projectId}/maintenance`, { method: 'POST', body: {} });
-    if (res && res.maintenance) {
-      toast('Maintenance Mode enabled — visitors now see the Under Maintenance page.', 'warning');
-    } else {
-      toast('Maintenance Mode disabled — live website resumed!', 'success');
-    }
-    state.lastWsBannerSig = null;
-    await refreshCurrentViewsAfterLifecycle();
-  } catch (err) {
-    toast(`Maintenance toggle failed: ${err.message}`, 'error');
-  }
-}
-window.toggleMaintenanceMode = toggleMaintenanceMode;
-
-async function restartProject(projectId) {
-  const btns = document.querySelectorAll(`button[onclick*="restartProject(${projectId})"]`);
-  btns.forEach((b) => {
-    b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Restarting...';
-  });
-
-  const proj = state.projects.find((x) => x.id === projectId);
-  if (proj) proj.app_status = 'starting';
-
-  try {
-    const res = await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
-    if (handleAutoDeployedRedirect(res, projectId)) return;
-    if (proj) proj.app_status = 'running';
-    toast('Application restarted successfully.', 'success');
-  } catch (err) {
-    toast(`Restart failed: ${err.message}`, 'error');
-  } finally {
-    state.lastWsBannerSig = null;
-    await refreshCurrentViewsAfterLifecycle();
-  }
-}
-window.restartProject = restartProject;
-
-
-
 window.renderWebsiteWorkspaceHeader = renderWebsiteWorkspaceHeader;
 window.updateBreadcrumbs = updateBreadcrumbs;
 window.centerActiveWebsiteTab = centerActiveWebsiteTab;
 window.syncProjectSelectors = syncProjectSelectors;
 window.getGlobalAddKind = getGlobalAddKind;
 window.renderCurrentView = renderCurrentView;
-window.refreshCurrentViewsAfterLifecycle = refreshCurrentViewsAfterLifecycle;
 
 export {
   openWebsiteWorkspace,
@@ -669,9 +521,4 @@ export {
   getGlobalAddKind,
   globalAddAction,
   renderCurrentView,
-  startProject,
-  stopProject,
-  toggleMaintenanceMode,
-  restartProject,
-  refreshCurrentViewsAfterLifecycle,
 };
