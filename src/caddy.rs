@@ -16,16 +16,40 @@ impl Caddy {
         Self { caddy_dir }
     }
 
+    fn is_safe_caddy_token(s: &str) -> bool {
+        !s.is_empty()
+            && !s.chars().any(|c| {
+                c.is_whitespace()
+                    || c.is_control()
+                    || matches!(c, '{' | '}' | ';' | '#' | '"' | '\'' | '`' | '\\')
+            })
+    }
+
     /// Generates Caddyfile snippet for an individual project.
     /// In Caddy, automatic HTTPS via Let's Encrypt / ZeroSSL is 100% automatic for any domain!
     pub fn generate_config(&self, p: &Project) -> String {
         let port = p.port.unwrap_or(3000);
-        let domains = if p.domains.is_empty() {
-            vec![format!("{}.local", p.slug)]
+        let safe_slug: String = p
+            .slug
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            .collect();
+        let fallback_domain = if safe_slug.is_empty() {
+            "app.local".to_string()
         } else {
-            p.domains.clone()
+            format!("{}.local", safe_slug)
         };
-        let domain_str = domains.join(", ");
+        let domains: Vec<String> = p
+            .domains
+            .iter()
+            .map(|d| d.trim().to_string())
+            .filter(|d| Self::is_safe_caddy_token(d))
+            .collect();
+        let domain_str = if domains.is_empty() {
+            fallback_domain
+        } else {
+            domains.join(", ")
+        };
 
         let status_note = if p.app_status == "maintenance" {
             "# Status: Maintenance Page Responder active on upstream port"
@@ -33,17 +57,19 @@ impl Caddy {
             "# Status: Live application upstream"
         };
 
+        let safe_name = p.name.replace(['\r', '\n'], " ");
         let mut config = format!(
             "# WebDep Auto-Generated Caddyfile\n# Project: {name} ({slug})\n# Automatic HTTPS, HTTP/3, and reverse proxy\n{status_note}\n\n{domains} {{\n    reverse_proxy 127.0.0.1:{port}\n",
-            name = p.name,
-            slug = p.slug,
+            name = safe_name,
+            slug = safe_slug,
             status_note = status_note,
             domains = domain_str,
             port = port
         );
 
-        if !p.ssl_email.trim().is_empty() {
-            config.push_str(&format!("    tls {}\n", p.ssl_email.trim()));
+        let ssl_email = p.ssl_email.trim();
+        if !ssl_email.is_empty() && Self::is_safe_caddy_token(ssl_email) {
+            config.push_str(&format!("    tls {}\n", ssl_email));
         }
 
         config.push_str("}\n");

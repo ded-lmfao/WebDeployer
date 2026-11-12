@@ -98,7 +98,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 interval.tick().await;
                 mem_cache.prune_expired();
                 mem_auth.purge_expired_sessions();
+                mem_auth.prune_in_memory();
                 if let Ok(conn) = mem_db.lock() {
+                    crate::db::prune_old_logs(&conn, 20_000);
                     crate::db::shrink_memory(&conn);
                 }
                 #[cfg(target_os = "linux")]

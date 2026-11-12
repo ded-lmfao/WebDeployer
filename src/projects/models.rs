@@ -59,7 +59,7 @@ pub struct Project {
     pub stability_s: i64,
     #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     pub auto_deploy: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub webhook_secret: Option<String>,
     #[serde(default)]
     pub current_release_id: Option<i64>,

@@ -20,33 +20,28 @@ pub(crate) async fn list_projects_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
-    let user_opt = current_user(&state, &headers);
-    let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
-    let cache_key = format!("projects:u{}", uid);
+    let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
+    let cache_key = format!("projects:u{}", user.id);
 
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
     let mut list = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if let Some(ref u) = user_opt {
-        list.retain(|p| u.can_access_project(p.id));
-    }
+    list.retain(|p| user.can_access_project(p.id));
 
-    // Enrich projects with real-time process & port listener status
+    // Enrich projects with real-time process & port listener status (avoid spawning netstat/lsof for stopped sites)
     for p in &mut list {
-        let mut eff_pid = p.app_pid;
-        if eff_pid.is_none() || eff_pid.map(|pid| !crate::runtime::process::is_pid_alive(pid)).unwrap_or(true) {
+        let pid_alive = p.app_pid.map(crate::runtime::process::is_pid_alive).unwrap_or(false);
+        if pid_alive {
+            p.app_status = "running".to_string();
+        } else if p.app_status == "running" {
             if let Some(port) = p.port {
                 if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
-                    eff_pid = Some(port_pid);
+                    if crate::runtime::process::is_pid_alive(port_pid) {
+                        p.app_pid = Some(port_pid);
+                    }
                 }
-            }
-        }
-        if let Some(pid) = eff_pid {
-            if crate::runtime::process::is_pid_alive(pid) {
-                p.app_pid = Some(pid);
-                p.app_status = "running".to_string();
             }
         }
     }
@@ -59,10 +54,9 @@ pub(crate) async fn get_project_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<Project>, StatusCode> {
-    if let Some(u) = current_user(&state, &headers) {
-        if !u.can_access_project(id) {
-            return Err(StatusCode::FORBIDDEN);
-        }
+    let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
+    if !user.can_access_project(id) {
+        return Err(StatusCode::FORBIDDEN);
     }
     let mut p = state
         .projects
@@ -70,18 +64,16 @@ pub(crate) async fn get_project_handler(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let mut eff_pid = p.app_pid;
-    if eff_pid.is_none() || eff_pid.map(|pid| !crate::runtime::process::is_pid_alive(pid)).unwrap_or(true) {
+    let pid_alive = p.app_pid.map(crate::runtime::process::is_pid_alive).unwrap_or(false);
+    if pid_alive {
+        p.app_status = "running".to_string();
+    } else if p.app_status == "running" {
         if let Some(port) = p.port {
             if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
-                eff_pid = Some(port_pid);
+                if crate::runtime::process::is_pid_alive(port_pid) {
+                    p.app_pid = Some(port_pid);
+                }
             }
-        }
-    }
-    if let Some(pid) = eff_pid {
-        if crate::runtime::process::is_pid_alive(pid) {
-            p.app_pid = Some(pid);
-            p.app_status = "running".to_string();
         }
     }
 
@@ -177,12 +169,24 @@ pub(crate) async fn create_project_handler(
 }
 
 pub(crate) fn normalize_domain(d: &str) -> String {
-    d.trim()
+    let cleaned = d
+        .trim()
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .trim_end_matches('/')
         .trim()
-        .to_lowercase()
+        .to_lowercase();
+    if cleaned.is_empty()
+        || cleaned.len() > 253
+        || cleaned.chars().any(|c| {
+            c.is_whitespace()
+                || c.is_control()
+                || matches!(c, '{' | '}' | ';' | '#' | '"' | '\'' | '`' | '\\')
+        })
+    {
+        return String::new();
+    }
+    cleaned
 }
 
 pub(crate) fn sanitize_domains<I: IntoIterator<Item = String>>(domains: I) -> Vec<String> {

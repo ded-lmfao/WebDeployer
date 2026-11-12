@@ -23,8 +23,10 @@ pub(crate) struct AppLogsResponse {
 
 pub(crate) async fn get_app_logs_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<AppLogsResponse>, StatusCode> {
+) -> Result<Json<AppLogsResponse>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "logs", Some(id))?;
     let entries = state.logs.list(Some(id), None, Some("app"), None, 200);
     let logs = entries
         .into_iter()
@@ -50,12 +52,15 @@ pub(crate) struct LogsQuery {
 
 pub(crate) async fn list_logs_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<LogsQuery>,
-) -> Result<Json<Vec<crate::logs::LogEntry>>, StatusCode> {
+) -> Result<Json<Vec<crate::logs::LogEntry>>, (StatusCode, String)> {
     let Some(pid) = q.project else {
+        let _actor = require_current_user(&state, &headers)?;
         return Ok(Json(Vec::new()));
     };
-    let limit = q.limit.or(q.backlog).unwrap_or(300);
+    let _actor = verify_power(&state, &headers, "logs", Some(pid))?;
+    let limit = q.limit.or(q.backlog).unwrap_or(300).min(2000);
     let logs = state.logs.list(
         Some(pid),
         None,
@@ -68,9 +73,15 @@ pub(crate) async fn list_logs_handler(
 
 pub(crate) async fn logs_sse_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<LogsQuery>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let backlog_limit = q.backlog.unwrap_or(200);
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+    if let Some(pid) = q.project {
+        let _actor = verify_power(&state, &headers, "logs", Some(pid))?;
+    } else {
+        let _actor = require_current_user(&state, &headers)?;
+    }
+    let backlog_limit = q.backlog.unwrap_or(200).min(1000);
     let initial_logs = match q.project {
         Some(pid) => state.logs.list(
             Some(pid),
@@ -115,7 +126,7 @@ pub(crate) async fn logs_sse_handler(
     });
 
     let combined = futures_util::stream::iter(initial_event.into_iter()).chain(live_stream);
-    Sse::new(combined).keep_alive(KeepAlive::default())
+    Ok(Sse::new(combined).keep_alive(KeepAlive::default()))
 }
 
 #[derive(Deserialize)]
@@ -125,11 +136,18 @@ pub(crate) struct DownloadLogsQuery {
 
 pub(crate) async fn logs_download_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<DownloadLogsQuery>,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, (StatusCode, String)> {
     let logs = match q.project {
-        Some(pid) => state.logs.list(Some(pid), None, Some("app"), None, 5000),
-        None => Vec::new(),
+        Some(pid) => {
+            let _actor = verify_power(&state, &headers, "logs", Some(pid))?;
+            state.logs.list(Some(pid), None, Some("app"), None, 5000)
+        }
+        None => {
+            let _actor = require_current_user(&state, &headers)?;
+            Vec::new()
+        }
     };
     let mut out = String::new();
     for l in logs {
@@ -140,7 +158,7 @@ pub(crate) async fn logs_download_handler(
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .header(header::CONTENT_DISPOSITION, "attachment; filename=\"webdep-logs.txt\"")
         .body(Body::from(out))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to build response".to_string()))?;
 
     Ok(res)
 }

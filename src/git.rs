@@ -229,9 +229,35 @@ impl Git {
         }
     }
 
+    fn validate_git_ref(branch: &str) -> Result<String, String> {
+        let b = branch.trim();
+        if b.is_empty() {
+            return Ok(String::new());
+        }
+        if b.starts_with('-')
+            || b.contains("..")
+            || b.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '~' | '^' | ':' | '\\' | '\0'))
+        {
+            return Err(format!("Invalid git branch/ref: '{}'", b));
+        }
+        Ok(b.to_string())
+    }
+
+    fn validate_git_url(repo_url: &str) -> Result<(), String> {
+        let u = repo_url.trim();
+        if u.is_empty()
+            || u.starts_with('-')
+            || u.starts_with("ext::")
+            || u.chars().any(|c| c.is_control() || c == '\0')
+        {
+            return Err("Invalid repository URL".to_string());
+        }
+        Ok(())
+    }
+
     pub fn fetch(repo_dir: &Path, branch: &str) -> Result<(), String> {
-        let clean_branch = branch.trim();
-        let target_branch = if clean_branch.is_empty() { "main" } else { clean_branch };
+        let clean_branch = Self::validate_git_ref(branch)?;
+        let target_branch = if clean_branch.is_empty() { "main" } else { &clean_branch };
         let refspec = format!(
             "+refs/heads/{}:refs/remotes/origin/{}",
             target_branch, target_branch
@@ -287,10 +313,11 @@ impl Git {
     }
 
     pub fn clone_or_fetch(repo_url: &str, target_dir: &Path, branch: &str) -> Result<(), String> {
+        Self::validate_git_url(repo_url)?;
+        let clean_branch = Self::validate_git_ref(branch)?;
         let tokens = Self::get_sqlite_github_tokens();
         let candidates = Self::candidate_auth_urls(repo_url);
         let mut last_err = String::from("Git operation failed");
-        let clean_branch = branch.trim();
 
         if target_dir.join(".git").exists() {
             for auth_url in &candidates {
@@ -298,7 +325,7 @@ impl Git {
                     .current_dir(target_dir)
                     .args(["remote", "set-url", "origin", auth_url])
                     .output();
-                match Self::fetch(target_dir, clean_branch) {
+                match Self::fetch(target_dir, &clean_branch) {
                     Ok(()) => return Ok(()),
                     Err(e) => last_err = Self::sanitize_err(&e, &tokens),
                 }
@@ -324,7 +351,8 @@ impl Git {
                         "credential.helper=",
                         "clone",
                         "--branch",
-                        clean_branch,
+                        &clean_branch,
+                        "--",
                         auth_url,
                         target_dir.to_str().unwrap_or("."),
                     ])
@@ -337,6 +365,7 @@ impl Git {
                         "-c",
                         "credential.helper=",
                         "clone",
+                        "--",
                         auth_url,
                         target_dir.to_str().unwrap_or("."),
                     ])
@@ -358,6 +387,7 @@ impl Git {
                         "-c",
                         "credential.helper=",
                         "clone",
+                        "--",
                         auth_url,
                         target_dir.to_str().unwrap_or("."),
                     ])
@@ -375,11 +405,15 @@ impl Git {
     }
 
     pub fn checkout(repo_dir: &Path, sha: &str, destination_dir: &Path) -> Result<(), String> {
+        let clean_sha = Self::validate_git_ref(sha)?;
+        if clean_sha.is_empty() {
+            return Err("Missing commit SHA".to_string());
+        }
         std::fs::create_dir_all(destination_dir).map_err(|e| e.to_string())?;
 
         let out = Command::new("git")
             .current_dir(repo_dir)
-            .args(["checkout", "--force", sha])
+            .args(["checkout", "--force", &clean_sha, "--"])
             .output()
             .map_err(|e| format!("Git checkout error: {}", e))?;
 
@@ -495,10 +529,11 @@ impl Git {
     }
 
     pub fn ls_remote(repo_url: &str, branch: &str) -> Result<String, String> {
+        Self::validate_git_url(repo_url)?;
+        let clean_branch = Self::validate_git_ref(branch)?;
         let tokens = Self::get_sqlite_github_tokens();
         let candidates = Self::candidate_auth_urls(repo_url);
         let mut last_err = String::from("Failed to query remote repository");
-        let clean_branch = branch.trim();
         let ref_arg = if clean_branch.is_empty() {
             "HEAD".to_string()
         } else {
@@ -508,7 +543,7 @@ impl Git {
         for auth_url in &candidates {
             let out = Command::new("git")
                 .env("GIT_TERMINAL_PROMPT", "0")
-                .args(["-c", "credential.helper=", "ls-remote", auth_url, &ref_arg])
+                .args(["-c", "credential.helper=", "ls-remote", "--", auth_url, &ref_arg])
                 .output()
                 .map_err(|e| e.to_string())?;
 

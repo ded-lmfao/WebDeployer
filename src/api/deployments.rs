@@ -92,8 +92,10 @@ pub(crate) async fn rollback_project_handler(
 
 pub(crate) async fn list_releases_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<Vec<crate::deployer::Release>>, StatusCode> {
+) -> Result<Json<Vec<crate::deployer::Release>>, (StatusCode, String)> {
+    let _actor = verify_project_access(&state, &headers, id)?;
     let list = state.deployer.list_releases(id);
     Ok(Json(list))
 }
@@ -190,9 +192,22 @@ pub(crate) struct DeploymentQuery {
 
 pub(crate) async fn list_deployments_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<DeploymentQuery>,
-) -> Result<Json<Vec<crate::deployer::Deployment>>, StatusCode> {
-    let list = state.deployer.list_deployments(q.project, q.limit.unwrap_or(200));
+) -> Result<Json<Vec<crate::deployer::Deployment>>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    if let Some(pid) = q.project {
+        if !user.can_access_project(pid) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Access denied: You are not assigned to this website.".to_string(),
+            ));
+        }
+    }
+    let mut list = state.deployer.list_deployments(q.project, q.limit.unwrap_or(200));
+    if q.project.is_none() {
+        list.retain(|d| user.can_access_project(d.project_id));
+    }
     Ok(Json(list))
 }
 
@@ -204,9 +219,20 @@ pub(crate) struct DeploymentDetailResponse {
 
 pub(crate) async fn get_deployment_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<DeploymentDetailResponse>, StatusCode> {
-    let dep = state.deployer.get_deployment(id).ok_or(StatusCode::NOT_FOUND)?;
+) -> Result<Json<DeploymentDetailResponse>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    let dep = state
+        .deployer
+        .get_deployment(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+    if !user.can_access_project(dep.project_id) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Access denied: You are not assigned to this website.".to_string(),
+        ));
+    }
     let logs = state.logs.list(None, Some(id), None, None, 1000);
     Ok(Json(DeploymentDetailResponse {
         deployment: dep,
@@ -216,8 +242,20 @@ pub(crate) async fn get_deployment_handler(
 
 pub(crate) async fn get_deployment_logs_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<Vec<crate::logs::LogEntry>>, StatusCode> {
+) -> Result<Json<Vec<crate::logs::LogEntry>>, (StatusCode, String)> {
+    let user = require_current_user(&state, &headers)?;
+    let dep = state
+        .deployer
+        .get_deployment(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+    if !user.can_access_project(dep.project_id) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Access denied: You are not assigned to this website.".to_string(),
+        ));
+    }
     let logs = state.logs.list(None, Some(id), None, None, 1000);
     Ok(Json(logs))
 }

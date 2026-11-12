@@ -71,11 +71,56 @@ pub(crate) fn safe_join(root: &std::path::Path, rel: &str) -> Result<std::path::
         match part {
             "" | "." => {}
             ".." => return Err((StatusCode::BAD_REQUEST, "Invalid path".into())),
-            s if s.contains(':') => return Err((StatusCode::BAD_REQUEST, "Invalid path".into())),
+            s if s.contains(':') || s.contains('\0') => {
+                return Err((StatusCode::BAD_REQUEST, "Invalid path".into()));
+            }
             s => out.push(s),
         }
     }
     Ok(out)
+}
+
+/// Verify an existing target path resolves canonically within `root` (blocks symlink escape).
+fn ensure_existing_within_root(
+    root: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    let canon_root = std::fs::canonicalize(root)
+        .map_err(|_| (StatusCode::NOT_FOUND, "Service root not found".to_string()))?;
+    let canon_target = std::fs::canonicalize(target)
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+    if !canon_target.starts_with(&canon_root) {
+        return Err((StatusCode::FORBIDDEN, "Path escapes service root".to_string()));
+    }
+    Ok(canon_root)
+}
+
+/// Verify the deepest existing ancestor (and the target if it already exists) stays within `root`.
+fn ensure_ancestor_within_root(
+    root: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<(), (StatusCode, String)> {
+    let canon_root = std::fs::canonicalize(root)
+        .map_err(|_| (StatusCode::NOT_FOUND, "Service root not found".to_string()))?;
+    if std::fs::symlink_metadata(target).is_ok() {
+        let canon_target = std::fs::canonicalize(target)
+            .map_err(|_| (StatusCode::FORBIDDEN, "Invalid target path".to_string()))?;
+        if !canon_target.starts_with(&canon_root) {
+            return Err((StatusCode::FORBIDDEN, "Path escapes service root".to_string()));
+        }
+        return Ok(());
+    }
+    for anc in target.ancestors() {
+        if std::fs::symlink_metadata(anc).is_ok() {
+            let canon_anc = std::fs::canonicalize(anc)
+                .map_err(|_| (StatusCode::FORBIDDEN, "Invalid ancestor path".to_string()))?;
+            if !canon_anc.starts_with(&canon_root) {
+                return Err((StatusCode::FORBIDDEN, "Path escapes service root".to_string()));
+            }
+            return Ok(());
+        }
+    }
+    Err((StatusCode::FORBIDDEN, "Invalid target path".to_string()))
 }
 
 pub(crate) async fn files_list_handler(
@@ -87,11 +132,18 @@ pub(crate) async fn files_list_handler(
     let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
     let root = service_root(&p)?;
     let dir = safe_join(&root, &q.path)?;
+    let canon_root = ensure_existing_within_root(&root, &dir)?;
     let mut entries = Vec::new();
     let mut rd = tokio::fs::read_dir(&dir)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     while let Ok(Some(e)) = rd.next_entry().await {
+        if e.file_type().await.map(|ft| ft.is_symlink()).unwrap_or(false) {
+            match std::fs::canonicalize(e.path()) {
+                Ok(c) if c.starts_with(&canon_root) => {}
+                _ => continue,
+            }
+        }
         let meta = match e.metadata().await {
             Ok(m) => m,
             Err(_) => continue,
@@ -128,6 +180,7 @@ pub(crate) async fn files_read_handler(
     let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
     let root = service_root(&p)?;
     let file = safe_join(&root, &q.path)?;
+    ensure_existing_within_root(&root, &file)?;
     let meta = tokio::fs::metadata(&file)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
@@ -157,6 +210,7 @@ pub(crate) async fn files_write_handler(
     if file == root {
         return Err((StatusCode::BAD_REQUEST, "Invalid file path".into()));
     }
+    ensure_ancestor_within_root(&root, &file)?;
     if let Some(parent) = file.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
@@ -183,6 +237,7 @@ pub(crate) async fn files_mkdir_handler(
     let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
     let root = service_root(&p)?;
     let dir = safe_join(&root, &payload.path)?;
+    ensure_ancestor_within_root(&root, &dir)?;
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -201,12 +256,19 @@ pub(crate) async fn files_delete_handler(
     if target == root {
         return Err((StatusCode::BAD_REQUEST, "Cannot delete the service root".into()));
     }
-    let meta = tokio::fs::metadata(&target)
+    if let Some(parent) = target.parent() {
+        ensure_existing_within_root(&root, parent)?;
+    }
+    let meta = tokio::fs::symlink_metadata(&target)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
-    let res = if meta.is_dir() {
+    let res = if meta.file_type().is_symlink() {
+        tokio::fs::remove_file(&target).await
+    } else if meta.is_dir() {
+        ensure_existing_within_root(&root, &target)?;
         tokio::fs::remove_dir_all(&target).await
     } else {
+        ensure_existing_within_root(&root, &target)?;
         tokio::fs::remove_file(&target).await
     };
     res.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -231,9 +293,11 @@ pub(crate) async fn files_upload_handler(
     let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
     let root = service_root(&p)?;
     let target_dir = safe_join(&root, &q.path)?;
+    ensure_ancestor_within_root(&root, &target_dir)?;
     tokio::fs::create_dir_all(&target_dir)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    ensure_existing_within_root(&root, &target_dir)?;
 
     let mut uploaded = Vec::new();
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -243,16 +307,8 @@ pub(crate) async fn files_upload_handler(
         };
         // Normalize any Windows/Unix slashes for directory uploads
         let normalized = file_name.replace('\\', "/");
-        let target_file = match safe_join(&target_dir, &normalized) {
-            Ok(tf) => tf,
-            Err(_) => {
-                let clean_name = std::path::Path::new(&file_name)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&file_name);
-                safe_join(&target_dir, clean_name)?
-            }
-        };
+        let target_file = safe_join(&target_dir, &normalized)?;
+        ensure_ancestor_within_root(&root, &target_file)?;
 
         if let Some(parent) = target_file.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
@@ -287,6 +343,7 @@ pub(crate) async fn files_download_handler(
     let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
     let root = service_root(&p)?;
     let file = safe_join(&root, &q.path)?;
+    ensure_existing_within_root(&root, &file)?;
     let meta = tokio::fs::metadata(&file)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
@@ -304,7 +361,7 @@ pub(crate) async fn files_download_handler(
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .header(
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", file_name.replace('"', "\\\"")),
+            format!("attachment; filename=\"{}\"", file_name.replace('"', "\\\"").replace(['\r', '\n'], "")),
         )
         .body(Body::from(bytes))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -324,6 +381,10 @@ pub(crate) async fn files_rename_handler(
     if old_target == root || new_target == root {
         return Err((StatusCode::BAD_REQUEST, "Invalid path".into()));
     }
+    if let Some(parent) = old_target.parent() {
+        ensure_existing_within_root(&root, parent)?;
+    }
+    ensure_ancestor_within_root(&root, &new_target)?;
     if let Some(parent) = new_target.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }

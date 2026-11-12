@@ -96,8 +96,12 @@ pub(crate) async fn system_update_repo_handler(
     Ok(Json(serde_json::json!({ "ok": true, "remote_url": remote_url })))
 }
 
-pub(crate) async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
-    Json(state.cache.stats())
+pub(crate) async fn cache_stats_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::cache::CacheStats>, (StatusCode, String)> {
+    let _user = require_current_user(&state, &headers)?;
+    Ok(Json(state.cache.stats()))
 }
 
 pub(crate) async fn cache_clear_handler(

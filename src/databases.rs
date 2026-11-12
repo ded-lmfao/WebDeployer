@@ -86,9 +86,10 @@ pub struct Databases {
 
 impl Databases {
     pub fn new(db: DbPool, vault: Arc<Vault>, logs: Logs, data_dir: &Path) -> Self {
-        let abs_dir = std::fs::canonicalize(data_dir.join("databases"))
-            .unwrap_or_else(|_| data_dir.join("databases"));
-        let _ = std::fs::create_dir_all(&abs_dir);
+        let raw_dir = data_dir.join("databases");
+        let _ = std::fs::create_dir_all(&raw_dir);
+        let abs_dir = std::fs::canonicalize(&raw_dir).unwrap_or(raw_dir);
+        let clean_base = std::path::PathBuf::from(security::to_clean_path_str(&abs_dir));
 
         let public_ip = std::env::var("PUBLIC_IP")
             .ok()
@@ -99,7 +100,7 @@ impl Databases {
             db,
             vault,
             logs,
-            base_dir: abs_dir,
+            base_dir: clean_base,
             public_ip,
         }
     }

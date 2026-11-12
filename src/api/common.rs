@@ -91,9 +91,9 @@ pub(crate) async fn security_middleware(
     }
 
     let mut res = next.run(req).await;
-    if is_api && is_mutating {
+    if is_api && is_mutating && path != "/api/auth/presence" {
         state.cache.invalidate_all();
-        if path.starts_with("/api/users") || path.starts_with("/api/auth/") {
+        if path.starts_with("/api/users") || (path.starts_with("/api/auth/") && path != "/api/auth/presence") {
             state.auth.invalidate_sessions();
         }
     }
@@ -118,6 +118,10 @@ pub(crate) fn attach_security_headers(res: &mut Response, is_api: bool) {
     headers.insert(
         header::HeaderName::from_static("permissions-policy"),
         HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("cross-origin-opener-policy"),
+        HeaderValue::from_static("same-origin"),
     );
     if is_api {
         headers.insert(
@@ -160,6 +164,21 @@ pub(crate) fn current_user(state: &AppState, headers: &HeaderMap) -> Option<User
 
 pub(crate) fn require_current_user(state: &AppState, headers: &HeaderMap) -> Result<User, (StatusCode, String)> {
     current_user(state, headers).ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))
+}
+
+pub(crate) fn verify_project_access(
+    state: &AppState,
+    headers: &HeaderMap,
+    project_id: i64,
+) -> Result<User, (StatusCode, String)> {
+    let u = require_current_user(state, headers)?;
+    if !u.can_access_project(project_id) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Access denied: You are not assigned to this website.".to_string(),
+        ));
+    }
+    Ok(u)
 }
 
 pub(crate) fn verify_main_admin(state: &AppState, headers: &HeaderMap) -> Result<User, (StatusCode, String)> {

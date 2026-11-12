@@ -10,9 +10,14 @@ use crate::projects::{EnvVarInput, EnvVarView};
 
 pub(crate) async fn get_env_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<Vec<EnvVarView>>, StatusCode> {
-    let list = state.projects.get_env_vars(id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<Vec<EnvVarView>>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "env", Some(id))?;
+    let list = state
+        .projects
+        .get_env_vars(id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
     Ok(Json(list))
 }
 

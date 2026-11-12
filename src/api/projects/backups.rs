@@ -33,11 +33,20 @@ pub(crate) fn copy_backup_files(src: &std::path::Path, dst: &std::path::Path) ->
                 continue;
             }
             let src_path = entry.path();
+            // Never traverse or copy symlinks to prevent directory escape or cycles
+            let Ok(meta) = std::fs::symlink_metadata(&src_path) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
             let dst_path = dst.join(&name);
-            if src_path.is_dir() {
+            if meta.is_dir() {
                 total_bytes += copy_backup_files(&src_path, &dst_path);
-            } else if let Ok(bytes) = std::fs::copy(&src_path, &dst_path) {
-                total_bytes += bytes;
+            } else if meta.is_file() {
+                if let Ok(bytes) = std::fs::copy(&src_path, &dst_path) {
+                    total_bytes += bytes;
+                }
             }
         }
     }
@@ -46,8 +55,10 @@ pub(crate) fn copy_backup_files(src: &std::path::Path, dst: &std::path::Path) ->
 
 pub(crate) async fn list_backups_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "backups", Some(id))?;
     let cache_key = format!("backups:p{}:list", id);
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
@@ -95,6 +106,7 @@ pub(crate) async fn list_backups_handler(
     }
 
     cached_json_response(&state.cache, cache_key, &backups, std::time::Duration::from_secs(15))
+        .map_err(|code| (code, "Serialization error".to_string()))
 }
 
 #[derive(Deserialize)]
@@ -313,10 +325,23 @@ pub(crate) async fn delete_backup_handler(
         .ok()
     };
 
+    let p_opt = state.projects.get(id).ok().flatten();
     if let Some(p_str) = b_path {
         let path = std::path::Path::new(&p_str);
-        if (p_str.contains("backups") || p_str.contains("rel-snap-")) && path.exists() {
-            let _ = tokio::fs::remove_dir_all(path).await;
+        if let Some(ref p) = p_opt {
+            let backups_root = std::path::Path::new(&p.deploy_dir).join("backups");
+            let releases_root = std::path::Path::new(&p.deploy_dir).join("releases");
+            if let Ok(canon_path) = std::fs::canonicalize(path) {
+                let inside_backups = std::fs::canonicalize(&backups_root)
+                    .map(|r| canon_path.starts_with(&r) && canon_path != r)
+                    .unwrap_or(false);
+                let inside_releases = std::fs::canonicalize(&releases_root)
+                    .map(|r| canon_path.starts_with(&r) && canon_path != r)
+                    .unwrap_or(false);
+                if inside_backups || inside_releases {
+                    let _ = tokio::fs::remove_dir_all(&canon_path).await;
+                }
+            }
         }
     }
 

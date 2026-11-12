@@ -23,8 +23,10 @@ pub(crate) struct CommitView {
 
 pub(crate) async fn project_commits_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Response, (StatusCode, String)> {
+    let _actor = verify_project_access(&state, &headers, id)?;
     let p = fetch_project(&state.projects, id)?;
 
     let cache_key = format!(
@@ -86,8 +88,10 @@ pub(crate) struct CheckGitResponse {
 
 pub(crate) async fn project_check_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<CheckGitResponse>, (StatusCode, String)> {
+    let _actor = verify_project_access(&state, &headers, id)?;
     let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
@@ -128,9 +132,7 @@ pub(crate) async fn project_fetch_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<FetchGitResponse>, (StatusCode, String)> {
-    let actor = current_user(&state, &headers)
-        .map(|u| u.username)
-        .unwrap_or_else(|| "system".to_string());
+    let actor = verify_power(&state, &headers, "deploy", Some(id))?.username;
     let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
@@ -198,8 +200,10 @@ pub(crate) struct DetectProjectResponse {
 
 pub(crate) async fn detect_project_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<DetectProjectResponse>, (StatusCode, String)> {
+    let _actor = verify_project_access(&state, &headers, id)?;
     let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");
@@ -245,8 +249,10 @@ pub(crate) struct DeployKeyResponse {
 
 pub(crate) async fn project_deploy_key_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<DeployKeyResponse>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "deploy", Some(id))?;
     // Check SQLite project_keys table first
     {
         let conn = state.db.lock().unwrap();
@@ -311,10 +317,12 @@ pub(crate) struct RotateSecretResponse {
 
 pub(crate) async fn rotate_webhook_secret_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<RotateSecretResponse>, (StatusCode, String)> {
+    let actor = verify_power(&state, &headers, "deploy", Some(id))?;
     use rand::RngCore;
-    let mut bytes = [0u8; 16];
+    let mut bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut bytes);
     let new_secret = hex::encode(bytes);
 
@@ -324,6 +332,16 @@ pub(crate) async fn rotate_webhook_secret_handler(
         rusqlite::params![new_secret, id],
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    drop(conn);
+
+    log_audit_project(
+        &state,
+        Some(id),
+        &actor.username,
+        "git.webhook_rotate",
+        None,
+        Some("Rotated GitHub webhook HMAC secret"),
+    );
 
     Ok(Json(RotateSecretResponse {
         webhook_secret: new_secret,

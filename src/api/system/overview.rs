@@ -163,18 +163,15 @@ pub(crate) async fn overview_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
-    let user_opt = current_user(&state, &headers);
-    let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
-    let cache_key = format!("overview:u{}", uid);
+    let user = current_user(&state, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let cache_key = format!("overview:u{}", user.id);
 
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
     let mut projs = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if let Some(ref u) = user_opt {
-        projs.retain(|p| u.can_access_project(p.id));
-    }
+    projs.retain(|p| user.can_access_project(p.id));
 
     let mut monitor = state.monitor.sample();
     let total_vps_mem = monitor.memory.total.max(1);
@@ -190,23 +187,27 @@ pub(crate) async fn overview_handler(
 
     let mut proj_effective_pids = std::collections::HashMap::new();
     for p in &projs {
-        let mut eff_pid = p.app_pid;
-        if eff_pid.is_none() || eff_pid.map(|pid| !crate::runtime::process::is_pid_alive(pid)).unwrap_or(true) {
-            if let Some(port) = p.port {
-                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
-                    eff_pid = Some(port_pid);
-                }
-            }
-        }
-        if let Some(pid) = eff_pid {
+        if let Some(pid) = p.app_pid {
             if crate::runtime::process::is_pid_alive(pid) {
                 proj_effective_pids.insert(p.id, pid);
                 pids_to_query.push(pid);
+                continue;
+            }
+        }
+        if p.app_status == "running" {
+            if let Some(port) = p.port {
+                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
+                    if crate::runtime::process::is_pid_alive(port_pid) {
+                        proj_effective_pids.insert(p.id, port_pid);
+                        pids_to_query.push(port_pid);
+                    }
+                }
             }
         }
     }
 
-    let dbs = state.databases.list().unwrap_or_default();
+    let mut dbs = state.databases.list().unwrap_or_default();
+    dbs.retain(|db| db.linked_project_id.map(|pid| user.can_access_project(pid)).unwrap_or(true));
     let mut db_pids = Vec::with_capacity(dbs.len());
     for db in &dbs {
         let mut d_pid = None;
@@ -480,7 +481,9 @@ pub(crate) async fn overview_handler(
         total_workloads_count: total_count,
     };
 
-    let recent = state.deployer.list_deployments(None, 10);
+    let mut recent = state.deployer.list_deployments(None, 25);
+    recent.retain(|d| user.can_access_project(d.project_id));
+    recent.truncate(10);
 
     let payload = OverviewResponse {
         projects: items,
@@ -497,9 +500,8 @@ pub(crate) async fn monitor_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
-    let user_opt = current_user(&state, &headers);
-    let uid = user_opt.as_ref().map(|u| u.id).unwrap_or(0);
-    let cache_key = format!("monitor:u{}", uid);
+    let user = current_user(&state, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let cache_key = format!("monitor:u{}", user.id);
 
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
@@ -507,9 +509,7 @@ pub(crate) async fn monitor_handler(
 
     let sample = state.monitor.sample();
     let mut projs = state.projects.list().unwrap_or_default();
-    if let Some(ref u) = user_opt {
-        projs.retain(|p| u.can_access_project(p.id));
-    }
+    projs.retain(|p| user.can_access_project(p.id));
     let now_ms = now();
 
     let proj_metrics: Vec<serde_json::Value> = projs

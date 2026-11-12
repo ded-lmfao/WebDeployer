@@ -474,6 +474,37 @@ impl Auth {
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", params![now_s as i64])
             .ok();
     }
+
+    /// Evict stale in-memory auth state (MFA/WebAuthn challenges, expired failure lockouts,
+    /// idle presence heartbeats, and oversized caches) so long-running daemons never leak RAM.
+    pub fn prune_in_memory(&self) {
+        let now_s = Self::now_secs();
+        let now_ms = Self::now_millis();
+
+        if let Ok(mut mfa) = self.mfa_challenges.lock() {
+            mfa.retain(|_, (_, exp)| *exp > now_s);
+        }
+        if let Ok(mut pk) = self.passkey_challenges.lock() {
+            pk.retain(|_, (_, _, exp)| *exp > now_s);
+        }
+        if let Ok(mut fails) = self.failures.lock() {
+            fails.retain(|_, rec| {
+                rec.locked_until_s > now_s || now_s.saturating_sub(rec.first_at_s) < 900
+            });
+            if fails.len() > 2048 {
+                fails.clear();
+            }
+        }
+        if let Ok(mut cache) = self.session_cache.lock() {
+            cache.retain(|_, (_, _, exp)| *exp > now_s);
+            if cache.len() > 1024 {
+                cache.clear();
+            }
+        }
+        if let Ok(mut presence) = self.session_presence.lock() {
+            presence.retain(|_, (_, seen_ms, _)| now_ms.saturating_sub(*seen_ms) < PRESENCE_TTL_MS);
+        }
+    }
 }
 
 #[cfg(test)]

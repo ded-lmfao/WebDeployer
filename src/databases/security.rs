@@ -2,6 +2,27 @@ use std::path::Path;
 #[cfg(unix)]
 use tokio::process::Command;
 
+/// Parse and validate an IPv4/IPv6 address or CIDR notation so malformed/injected rules cannot enter pg_hba.conf or ufw.
+pub fn parse_valid_ip_or_cidr(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some((ip_str, mask_str)) = s.split_once('/') {
+        let addr: std::net::IpAddr = ip_str.parse().ok()?;
+        let mask: u8 = mask_str.parse().ok()?;
+        let max_mask = if addr.is_ipv4() { 32 } else { 128 };
+        if mask > max_mask {
+            return None;
+        }
+        Some(format!("{}/{}", addr, mask))
+    } else {
+        let addr: std::net::IpAddr = s.parse().ok()?;
+        let mask = if addr.is_ipv4() { 32 } else { 128 };
+        Some(format!("{}/{}", addr, mask))
+    }
+}
+
 pub fn generate_pg_hba(access_mode: &str, allowed_ips: &str) -> String {
     let mut hba = String::new();
     hba.push_str("# PostgreSQL Client Authentication Configuration File (WebDep Managed)\n");
@@ -18,18 +39,9 @@ pub fn generate_pg_hba(access_mode: &str, allowed_ips: &str) -> String {
         hba.push_str("host    all             all             ::/0                    scram-sha-256\n");
     } else if access_mode == "allowlist" {
         for raw in allowed_ips.split(|c| c == ',' || c == '\n' || c == ';') {
-            let ip = raw.trim();
-            if ip.is_empty() {
-                continue;
+            if let Some(cidr) = parse_valid_ip_or_cidr(raw) {
+                hba.push_str(&format!("host    all             all             {:<23} scram-sha-256\n", cidr));
             }
-            let cidr = if ip.contains('/') {
-                ip.to_string()
-            } else if ip.contains(':') {
-                format!("{}/128", ip)
-            } else {
-                format!("{}/32", ip)
-            };
-            hba.push_str(&format!("host    all             all             {:<23} scram-sha-256\n", cidr));
         }
     }
 
@@ -90,11 +102,10 @@ pub async fn sync_firewall_rules(port: u16, access_mode: &str, allowed_ips: &str
             let _ = Command::new("sudo").args(["ufw", "allow", &format!("{}/tcp", port)]).output().await;
         } else if access_mode == "allowlist" {
             let _ = Command::new("sudo").args(["ufw", "delete", "allow", &format!("{}/tcp", port)]).output().await;
-            for ip in allowed_ips.split(|c| c == ',' || c == '\n' || c == ';') {
-                let ip = ip.trim();
-                if !ip.is_empty() {
+            for raw in allowed_ips.split(|c| c == ',' || c == '\n' || c == ';') {
+                if let Some(cidr) = parse_valid_ip_or_cidr(raw) {
                     let _ = Command::new("sudo")
-                        .args(["ufw", "allow", "proto", "tcp", "from", ip, "to", "any", "port", &port.to_string()])
+                        .args(["ufw", "allow", "proto", "tcp", "from", &cidr, "to", "any", "port", &port.to_string()])
                         .output()
                         .await;
                 }
@@ -111,11 +122,10 @@ pub async fn remove_firewall_rules(port: u16, allowed_ips: &str) {
     #[cfg(unix)]
     {
         let _ = Command::new("sudo").args(["ufw", "delete", "allow", &format!("{}/tcp", port)]).output().await;
-        for ip in allowed_ips.split(|c| c == ',' || c == '\n' || c == ';') {
-            let ip = ip.trim();
-            if !ip.is_empty() {
+        for raw in allowed_ips.split(|c| c == ',' || c == '\n' || c == ';') {
+            if let Some(cidr) = parse_valid_ip_or_cidr(raw) {
                 let _ = Command::new("sudo")
-                    .args(["ufw", "delete", "allow", "proto", "tcp", "from", ip, "to", "any", "port", &port.to_string()])
+                    .args(["ufw", "delete", "allow", "proto", "tcp", "from", &cidr, "to", "any", "port", &port.to_string()])
                     .output()
                     .await;
             }
@@ -124,5 +134,21 @@ pub async fn remove_firewall_rules(port: u16, allowed_ips: &str) {
     #[cfg(not(unix))]
     {
         let _ = (port, allowed_ips);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ip_allowlist_validation() {
+        assert_eq!(parse_valid_ip_or_cidr("192.168.1.10"), Some("192.168.1.10/32".into()));
+        assert_eq!(parse_valid_ip_or_cidr("10.0.0.0/8"), Some("10.0.0.0/8".into()));
+        assert_eq!(parse_valid_ip_or_cidr("2001:db8::/32"), Some("2001:db8::/32".into()));
+        // Reject pg_hba / ufw directive injection
+        assert_eq!(parse_valid_ip_or_cidr("0.0.0.0/0 trust"), None);
+        assert_eq!(parse_valid_ip_or_cidr("127.0.0.1/99"), None);
+        assert_eq!(parse_valid_ip_or_cidr("all"), None);
     }
 }

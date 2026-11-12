@@ -52,6 +52,23 @@ pub fn shrink_memory(conn: &Connection) {
     let _ = conn.execute_batch("PRAGMA shrink_memory;");
 }
 
+/// Cap total stored log rows to prevent unbounded SQLite growth on busy services.
+pub fn prune_old_logs(conn: &Connection, max_rows: usize) {
+    if max_rows == 0 {
+        return;
+    }
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+        .unwrap_or(0);
+    if count as usize > max_rows {
+        let offset = (max_rows - 1) as i64;
+        let _ = conn.execute(
+            "DELETE FROM logs WHERE id < (SELECT id FROM logs ORDER BY id DESC LIMIT 1 OFFSET ?1)",
+            rusqlite::params![offset],
+        );
+    }
+}
+
 fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "
@@ -470,6 +487,29 @@ mod tests {
 
         drop(conn);
         drop(pool2);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_prune_old_logs_caps_rows() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-db-logs-{}", now()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let pool = open_db(&temp_dir).unwrap();
+        let conn = pool.lock().unwrap();
+        for i in 0..15 {
+            conn.execute(
+                "INSERT INTO logs (channel, level, message, ts) VALUES ('sys', 'info', ?, ?)",
+                rusqlite::params![format!("msg-{}", i), i as i64],
+            )
+            .unwrap();
+        }
+        prune_old_logs(&conn, 5);
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 5);
+        drop(conn);
+        drop(pool);
         std::fs::remove_dir_all(&temp_dir).ok();
     }
 }

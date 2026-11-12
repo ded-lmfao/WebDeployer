@@ -17,13 +17,15 @@ pub(crate) struct CaddyResponse {
 
 pub(crate) async fn get_caddy_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<CaddyResponse>, StatusCode> {
+) -> Result<Json<CaddyResponse>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "domains", Some(id))?;
     let p = state
         .projects
         .get(id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
     let conf = state.caddy.generate_config(&p);
     Ok(Json(CaddyResponse {
@@ -107,10 +109,11 @@ pub(crate) async fn apply_caddy_handler(
 }
 
 pub(crate) async fn certbot_caddy_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let _ = id;
+    let _actor = verify_power(&state, &headers, "domains", Some(id))?;
     // Caddy provisions certificates automatically via ACME, no certbot needed!
     Ok(StatusCode::OK)
 }
@@ -127,8 +130,10 @@ pub(crate) struct GithubRepoItem {
 }
 
 pub(crate) async fn github_repos_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<GithubRepoItem>>, (StatusCode, String)> {
+    let _actor = verify_power(&state, &headers, "projects_manage", None)?;
     let tokens = crate::git::Git::get_sqlite_github_tokens();
 
     if !tokens.is_empty() {
@@ -139,6 +144,8 @@ pub(crate) async fn github_repos_handler(
             let out = tokio::process::Command::new("curl")
                 .args([
                     "-s",
+                    "--max-time",
+                    "10",
                     "-H",
                     &format!("Authorization: Bearer {}", item.token.trim()),
                     "-H",

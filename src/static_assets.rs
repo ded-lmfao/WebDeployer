@@ -61,24 +61,38 @@ fn get_mime(path: &str) -> &'static str {
 }
 
 /// Locate a static asset directly on the local filesystem if available.
-/// Prevents directory traversal and supports both current directory and exe directory.
+/// Prevents directory traversal and symlink escape, supporting both cwd and exe directory.
 fn find_disk_file(clean_path: &str) -> Option<PathBuf> {
-    if clean_path.contains("..") || clean_path.starts_with('/') || clean_path.starts_with('\\') {
+    if clean_path.contains("..")
+        || clean_path.contains('\\')
+        || clean_path.contains(':')
+        || clean_path.contains('\0')
+        || clean_path.starts_with('/')
+    {
         return None;
     }
 
+    let check_base = |base: &Path| -> Option<PathBuf> {
+        let candidate = base.join(clean_path);
+        let canon_base = std::fs::canonicalize(base).ok()?;
+        let canon_cand = std::fs::canonicalize(&candidate).ok()?;
+        if canon_cand.starts_with(&canon_base) && canon_cand.is_file() {
+            Some(canon_cand)
+        } else {
+            None
+        }
+    };
+
     // 1. Check local ./public/ folder in current working directory
-    let local = Path::new("public").join(clean_path);
-    if local.is_file() {
-        return Some(local);
+    if let Some(found) = check_base(Path::new("public")) {
+        return Some(found);
     }
 
     // 2. Check ./public/ next to the executable binary
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(parent) = exe_path.parent() {
-            let exe_local = parent.join("public").join(clean_path);
-            if exe_local.is_file() {
-                return Some(exe_local);
+            if let Some(found) = check_base(&parent.join("public")) {
+                return Some(found);
             }
         }
     }
