@@ -185,7 +185,7 @@ export function renderDatabasesList() {
         </div>
 
         <!-- Actions Footer -->
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto;">
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 2px;">
           <div style="display: flex; gap: 6px; align-items: center;">
             <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
               <span>${isRunning ? 'Stop' : 'Start'}</span>

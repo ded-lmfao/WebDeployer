@@ -18,11 +18,10 @@
 
 /* Service / Bot Cards (Comfortable breathing room, balanced spacing & uniform grid height) */
 .project-card.service-card {
-  min-height: 310px;
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 14px;
   box-sizing: border-box;
   transition: border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }

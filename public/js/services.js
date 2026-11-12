@@ -178,9 +178,7 @@ export function renderServicesList() {
 
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
-    const uptimeText = isOnline && p.app_started_at
-      ? `Started ${formatRelativeTime(p.app_started_at)}`
-      : (isOnline ? 'Active process' : 'Process inactive');
+    const uptimeText = isOnline && p.app_started_at ? formatRelativeTime(p.app_started_at) : '';
 
     let subTitle = typeName;
     if (p.slug && p.slug !== p.name.toLowerCase()) {
@@ -211,7 +209,7 @@ export function renderServicesList() {
         </div>
 
         <!-- Command Line -->
-        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
+        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 2px 0 0 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
           <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(p.start_cmd || '')}">
             $ ${escapeHtml(p.start_cmd || './start.sh')}
           </span>
@@ -219,18 +217,18 @@ export function renderServicesList() {
         </div>
 
         <!-- Badges & Telemetry Row -->
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 0; min-height: 24px;">
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
           <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">
             ${isLocal ? icon('folder', { size: 10 }) + ' ' + shaText : icon('git-branch', { size: 10 }) + ' ' + escapeHtml(shaText)}
           </span>
           ${portText ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${portText}</span>` : ''}
           <span class="badge badge-neutral" style="font-size: 10px;">${icon('lock', { size: 10 })} ${accessText}</span>
           ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
-          <span id="service-uptime-${p.id}" style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-left: auto;">${uptimeText}</span>
+          ${uptimeText ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${icon('clock', { size: 10 })} Started ${uptimeText}</span>` : ''}
         </div>
 
         <!-- Actions Footer -->
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto;">
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 2px;">
           <div style="display: flex; gap: 6px; align-items: center;">
             ${isOnline
               ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Stop</button>
@@ -243,7 +241,7 @@ export function renderServicesList() {
               ${icon('settings', { size: 12 })}
             </button>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'overview')" style="padding: 4px 12px; font-size: 11.5px; font-weight: 500;">
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'overview')" style="padding: 4px 14px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
             Manage &rarr;
           </button>
         </div>
