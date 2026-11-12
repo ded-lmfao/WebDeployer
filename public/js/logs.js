@@ -3,8 +3,9 @@
  * SSE stream receiver, level filters, live autoscroll, and log exporter
  */
 
-import { state, escapeHtml, copyTextToClipboard } from './state.js';
+import { state, escapeHtml, copyTextToClipboard, getSelectedProject } from './state.js';
 import { api, toast } from './api.js';
+import { navigateTo } from './workspace.js';
 
 // ============================================================================
 // View 7: Real-Time Live Logs

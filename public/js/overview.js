@@ -7,7 +7,7 @@ import { icon } from './icons.js';
 import { state, PAGE_SIZE, paginateAndRender, setHtmlIfChanged, escapeHtml, formatDate } from './state.js';
 import { api, toast } from './api.js';
 import { loadDatabases } from './databases.js';
-import { renderPipelineStages } from './deployments.js';
+import { renderPipelineStages, waterPipelines } from './deployments.js';
 
 // ============================================================================
 // View 1: Overview & Live Resource Consumption

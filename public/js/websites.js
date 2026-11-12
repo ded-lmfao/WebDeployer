@@ -18,6 +18,7 @@ import {
   showPromptDialog,
   invalidateClientCache,
   WEBSITE_WORKSPACE_TABS,
+  PRESETS,
 } from './state.js';
 import { api, toast, prefetchWebsiteWorkspace } from './api.js';
 import { cleanDomainList } from './settings.js';
@@ -426,13 +427,11 @@ document.getElementById('website-name')?.addEventListener('input', (e) => {
 // Submit Add/Edit Website Form
 document.getElementById('save-website-submit-btn')?.addEventListener('click', async (e) => {
   e.preventDefault();
-  const form = document.getElementById('website-form');
-  if (form && !form.reportValidity()) return;
 
   const id = document.getElementById('website-form-id')?.value;
   const name = document.getElementById('website-name')?.value.trim() || '';
   if (!name) {
-    toast('Website name is required', 'warning');
+    toast('Please enter a Website Name', 'warning');
     document.getElementById('website-name')?.focus();
     return;
   }
@@ -452,6 +451,20 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     repoUrl = 'local';
   }
 
+  const portInput = document.getElementById('website-port');
+  let port = portInput?.value ? Number(portInput.value) : NaN;
+  if (!port || isNaN(port) || port < 1 || port > 65535) {
+    port = getNextAvailablePort(3000);
+    if (portInput) portInput.value = port;
+  }
+
+  const startInput = document.getElementById('website-start-cmd');
+  let startCmd = startInput?.value.trim() || '';
+  if (!startCmd) {
+    startCmd = 'node server.js';
+    if (startInput) startInput.value = startCmd;
+  }
+
   const domainsStr = document.getElementById('website-domains')?.value || '';
   const domains = cleanDomainList(domainsStr);
   const accessMode = document.getElementById('website-access-mode')?.value || 'local';
@@ -463,7 +476,7 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     repo_url: repoUrl,
     branch: document.getElementById('website-branch')?.value.trim() || 'main',
     domains,
-    port: document.getElementById('website-port')?.value ? Number(document.getElementById('website-port').value) : getNextAvailablePort(3000),
+    port,
     access_mode: accessMode,
     allowed_ips: allowedIps,
     deploy_dir: deployDir,
@@ -471,7 +484,7 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
     health_url: document.getElementById('website-health-url')?.value.trim() || '',
     install_cmd: document.getElementById('website-install-cmd')?.value.trim() || '',
     build_cmd: document.getElementById('website-build-cmd')?.value.trim() || '',
-    start_cmd: document.getElementById('website-start-cmd')?.value.trim() || 'node server.js',
+    start_cmd: startCmd,
     auto_deploy: Boolean(document.getElementById('website-auto-deploy')?.checked),
     auto_backup: Boolean(document.getElementById('website-auto-backup')?.checked),
   };
