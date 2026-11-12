@@ -101,6 +101,14 @@ impl Deployer {
         cache: Arc<AppCache>,
         data_dir: PathBuf,
     ) -> Self {
+        // Clean up any stale deployments left in active states from a previous server restart/crash
+        if let Ok(conn) = db.lock() {
+            let _ = conn.execute(
+                "UPDATE deployments SET status='failed', stage='failed', error='Interrupted by server restart', finished_at=? WHERE status IN ('pending', 'running', 'in_progress', 'queued')",
+                params![now()],
+            );
+        }
+
         Self {
             data_dir,
             db,
@@ -127,7 +135,7 @@ impl Deployer {
                     )
                     .ok();
                 if let Some(s) = status {
-                    if s == "in_progress" || s == "queued" {
+                    if s == "in_progress" || s == "running" || s == "pending" || s == "queued" {
                         return true;
                     }
                 }
@@ -239,36 +247,41 @@ impl Deployer {
     }
 
     pub fn create_deployment(&self, p: &Project, kind: &str, actor: &str, trigger: &str) -> i64 {
-        let conn = self.db.lock().unwrap();
         let ts = now();
-        conn.execute(
-            "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) \
-             VALUES(?, ?, 'in_progress', 'queued', ?, ?, ?)",
-            params![p.id, kind, trigger, actor, ts],
-        )
-        .ok();
-        let id = conn.last_insert_rowid();
+        let action_name = if kind == "rollback" { "rollback.start" } else { "deploy.start" };
+        let action_title = if kind == "rollback" { "Rollback" } else { "Deployment" };
+
+        let id = {
+            let conn = self.db.lock().unwrap();
+            conn.execute(
+                "INSERT INTO deployments(project_id, kind, status, stage, trigger, actor, started_at) \
+                 VALUES(?, ?, 'running', 'queued', ?, ?, ?)",
+                params![p.id, kind, trigger, actor, ts],
+            )
+            .ok();
+            let dep_id = conn.last_insert_rowid();
+
+            conn.execute(
+                "INSERT INTO audit(project_id, action, actor, target, detail, ts) VALUES(?, ?, ?, ?, ?, ?)",
+                params![
+                    p.id,
+                    action_name,
+                    actor,
+                    p.name,
+                    format!("Triggered {} #{} (Trigger: {})", action_title, dep_id, trigger),
+                    ts,
+                ],
+            )
+            .ok();
+
+            dep_id
+        };
 
         if let Ok(mut active) = self.active_projects.lock() {
             active.insert(p.id, id);
         }
 
         self.cache.invalidate_project(p.id);
-
-        let action_name = if kind == "rollback" { "rollback.start" } else { "deploy.start" };
-        let action_title = if kind == "rollback" { "Rollback" } else { "Deployment" };
-        conn.execute(
-            "INSERT INTO audit_logs(project_id, action, actor, target, detail, ts) VALUES(?, ?, ?, ?, ?, ?)",
-            params![
-                p.id,
-                action_name,
-                actor,
-                p.name,
-                format!("Triggered {} #{} (Trigger: {})", action_title, id, trigger),
-                ts,
-            ],
-        )
-        .ok();
 
         self.logs.add(
             Some(p.id),
@@ -337,7 +350,7 @@ impl Deployer {
         {
             let conn = self.db.lock().unwrap();
             conn.execute(
-                "INSERT INTO audit_logs(project_id, action, actor, target, detail, ts) VALUES(?, ?, ?, ?, ?, ?)",
+                "INSERT INTO audit(project_id, action, actor, target, detail, ts) VALUES(?, ?, ?, ?, ?, ?)",
                 params![project_id, action_name, actor, target_name, detail_msg, now()],
             ).ok();
         }

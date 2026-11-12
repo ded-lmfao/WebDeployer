@@ -21,6 +21,13 @@ pub(crate) async fn deploy_project_handler(
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
     let (actor, p) = get_authorized_project(&state, &headers, "deploy", id)?;
 
+    if state.deployer.has_active_deployment(p.id) {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("Deployment already in progress for '{}'", p.name),
+        ));
+    }
+
     let target_sha = serde_json::from_slice::<DeployPayload>(&body_bytes)
         .ok()
         .and_then(|b| b.sha)

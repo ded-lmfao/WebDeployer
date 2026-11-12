@@ -42,11 +42,11 @@ pub fn switch_current(current_link: &Path, target_dir: &Path) {
             cwd.join(clean)
         }
     });
-    // Strip Windows \\?\ extended-length prefix if canonicalize added it, as cmd mklink /J prefers standard paths
+    // Strip Windows \\?\ extended-length prefix if canonicalize added it, and ensure clean backslashes for cmd.exe
     #[cfg(windows)]
-    let target_str = abs_target.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let target_str = abs_target.to_string_lossy().replace('/', "\\").trim_start_matches(r"\\?\").to_string();
     #[cfg(windows)]
-    let link_str = abs_link.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let link_str = abs_link.to_string_lossy().replace('/', "\\").trim_start_matches(r"\\?\").to_string();
 
     if abs_link.exists() || fs::symlink_metadata(&abs_link).is_ok() {
         #[cfg(windows)]
@@ -61,9 +61,12 @@ pub fn switch_current(current_link: &Path, target_dir: &Path) {
     #[cfg(windows)]
     {
         // Try mklink /J (NTFS junction, does not require admin rights) with absolute paths
-        let _ = std::process::Command::new("cmd")
+        let out = std::process::Command::new("cmd")
             .args(["/C", "mklink", "/J", &link_str, &target_str])
             .output();
+        if out.map(|o| !o.status.success()).unwrap_or(true) {
+            let _ = std::os::windows::fs::symlink_dir(&abs_target, &abs_link);
+        }
     }
     #[cfg(unix)]
     {

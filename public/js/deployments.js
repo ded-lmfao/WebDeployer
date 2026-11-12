@@ -154,6 +154,8 @@ async function fetchProjectUpdates(projectId) {
 // ============================================================================
 // View 4: Deployments Pipeline
 // ============================================================================
+let deploymentPollTimer = null;
+
 async function loadDeploymentsView() {
   const p = getSelectedProject();
   const query = p ? `?project=${p.id}&limit=200` : '?limit=200';
@@ -172,9 +174,9 @@ async function loadDeploymentsView() {
   }
 
   try {
-    const deployments = await api(`/api/deployments${query}`);
+    const deployments = await api(`/api/deployments${query}`, { noCache: true });
 
-    const active = deployments.find((d) => d.status === 'running' || d.status === 'pending');
+    const active = deployments.find((d) => d.status === 'running' || d.status === 'pending' || d.status === 'in_progress');
     state.activeDeployment = active || null;
     const badge = document.getElementById('pipeline-status-badge');
     const latest = deployments.length ? deployments[0] : null;
@@ -185,28 +187,63 @@ async function loadDeploymentsView() {
         badge.className = 'badge badge-warning';
       }
       renderPipelineStages('main-pipeline-track', active.stage, active.status, active.id);
-    } else if (latest) {
-      const pWater = waterPipelines['main-pipeline-track'];
-      if (latest.status === 'success') {
-        if (pWater && pWater.isLooping && pWater.currentProgress < 6.95 && pWater.lastDeploymentId === latest.id) {
-          if (badge) {
-            badge.textContent = 'FINALIZING DEPLOYMENT...';
-            badge.className = 'badge badge-warning';
+
+      // Auto-poll while deployment is in flight so the UI updates live in real-time
+      if (deploymentPollTimer) clearTimeout(deploymentPollTimer);
+      deploymentPollTimer = setTimeout(() => {
+        if (state.currentView === 'deployments') {
+          void loadDeploymentsView();
+        }
+      }, 1500);
+    } else {
+      if (deploymentPollTimer) {
+        clearTimeout(deploymentPollTimer);
+        deploymentPollTimer = null;
+      }
+      // Re-enable any deploy buttons that were in "Deploying..." spinner state
+      const btns = document.querySelectorAll(`button[onclick*="deployProject"]`);
+      btns.forEach((b) => {
+        if (b.disabled && b.innerHTML.includes('Deploying...')) {
+          b.disabled = false;
+          b.innerHTML = 'Deploy';
+        }
+      });
+
+      if (latest) {
+        const pWater = waterPipelines['main-pipeline-track'];
+        if (latest.status === 'success') {
+          if (pWater && pWater.isLooping && pWater.currentProgress < 6.95 && pWater.lastDeploymentId === latest.id) {
+            if (badge) {
+              badge.textContent = 'FINALIZING DEPLOYMENT...';
+              badge.className = 'badge badge-warning';
+            }
+            renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
+          } else {
+            if (badge) {
+              badge.textContent = 'DEPLOYED (LIVE)';
+              badge.className = 'badge badge-success';
+            }
+            renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
           }
-          renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
+        } else if (latest.status === 'failed') {
+          if (badge) {
+            badge.textContent = `FAILED (${latest.stage.toUpperCase()})`;
+            badge.className = 'badge badge-danger';
+          }
+          renderPipelineStages('main-pipeline-track', latest.stage, 'failed', latest.id);
         } else {
           if (badge) {
-            badge.textContent = 'DEPLOYED (LIVE)';
-            badge.className = 'badge badge-success';
+            badge.textContent = 'IDLE';
+            badge.className = 'badge badge-neutral';
           }
-          renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
+          renderPipelineStages('main-pipeline-track', 'idle', 'idle');
         }
-      } else if (latest.status === 'failed') {
+      } else if (p && p.app_status === 'running') {
         if (badge) {
-          badge.textContent = `FAILED (${latest.stage.toUpperCase()})`;
-          badge.className = 'badge badge-danger';
+          badge.textContent = 'ONLINE (LIVE)';
+          badge.className = 'badge badge-success';
         }
-        renderPipelineStages('main-pipeline-track', latest.stage, 'failed', latest.id);
+        renderPipelineStages('main-pipeline-track', 'health_checking', 'success', null);
       } else {
         if (badge) {
           badge.textContent = 'IDLE';
@@ -214,18 +251,6 @@ async function loadDeploymentsView() {
         }
         renderPipelineStages('main-pipeline-track', 'idle', 'idle');
       }
-    } else if (p && p.app_status === 'running') {
-      if (badge) {
-        badge.textContent = 'ONLINE (LIVE)';
-        badge.className = 'badge badge-success';
-      }
-      renderPipelineStages('main-pipeline-track', 'health_checking', 'success', null);
-    } else {
-      if (badge) {
-        badge.textContent = 'IDLE';
-        badge.className = 'badge badge-neutral';
-      }
-      renderPipelineStages('main-pipeline-track', 'idle', 'idle');
     }
 
     if (!deployments.length) {
@@ -248,12 +273,13 @@ async function loadDeploymentsView() {
 
 function renderDeploymentRow(d, isOverview = false) {
   let badgeClass = 'badge-neutral';
+  const isRunning = d.status === 'running' || d.status === 'pending' || d.status === 'in_progress';
   if (d.status === 'success') badgeClass = 'badge-success';
   else if (d.status === 'failed') badgeClass = 'badge-danger';
-  else if (d.status === 'running') badgeClass = 'badge-warning';
+  else if (isRunning) badgeClass = 'badge-warning';
 
   const sha = d.sha ? `<span class="sha-pill">${d.sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">--</span>';
-  const duration = d.finished_at && d.started_at ? `${Math.round((d.finished_at - d.started_at) / 1000)}s` : (d.status === 'running' ? 'Running...' : '--');
+  const duration = d.finished_at && d.started_at ? `${Math.round((d.finished_at - d.started_at) / 1000)}s` : (isRunning ? 'Running...' : '--');
   const secondCol = isOverview
     ? `<td><strong>${escapeHtml(d.project_name || 'Website')}</strong></td>`
     : `<td><span class="badge badge-neutral">${escapeHtml((d.kind || 'deploy').toUpperCase())}</span></td>`;

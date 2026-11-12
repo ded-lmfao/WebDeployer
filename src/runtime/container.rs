@@ -192,7 +192,7 @@ impl Runtime {
                 copy_dir_files_if_missing(&data_subdir, target_db_dir);
                 #[cfg(windows)]
                 {
-                    let link_str = data_subdir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                    let link_str = data_subdir.to_string_lossy().replace('/', "\\").trim_start_matches(r"\\?\").to_string();
                     let _ = std::process::Command::new("cmd")
                         .args(["/C", "rmdir", &link_str])
                         .output();
@@ -204,11 +204,14 @@ impl Runtime {
         if !data_subdir.exists() && std::fs::symlink_metadata(&data_subdir).is_err() {
             #[cfg(windows)]
             {
-                let link_str = data_subdir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
-                let target_str = target_db_dir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
-                let _ = std::process::Command::new("cmd")
+                let link_str = data_subdir.to_string_lossy().replace('/', "\\").trim_start_matches(r"\\?\").to_string();
+                let target_str = target_db_dir.to_string_lossy().replace('/', "\\").trim_start_matches(r"\\?\").to_string();
+                let out = std::process::Command::new("cmd")
                     .args(["/C", "mklink", "/J", &link_str, &target_str])
                     .output();
+                if out.map(|o| !o.status.success()).unwrap_or(true) {
+                    let _ = std::os::windows::fs::symlink_dir(target_db_dir, &data_subdir);
+                }
             }
             #[cfg(unix)]
             {

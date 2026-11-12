@@ -232,7 +232,7 @@ function getCacheTtlMs(path) {
   if (path.startsWith('/api/logs') || path.includes('/files/content')) return 0; // Live logs / raw file contents
   if (path.startsWith('/api/databases')) return 3500; // Live database status
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 3000;
-  if (path.startsWith('/api/deployments')) return 4000;
+  if (path.startsWith('/api/deployments')) return 0; // Live deployment status and pipeline stage
   if (path.startsWith('/api/audit')) return 8000;
   if (path.includes('/commits')) return 45000;
   if (path.includes('/releases') || path.includes('/backups') || path.includes('/env')) return 20000;
