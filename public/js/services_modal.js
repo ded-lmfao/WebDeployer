@@ -41,7 +41,7 @@ export function openAddServiceModal() {
   const idEl = document.getElementById('service-form-id');
   if (idEl) idEl.value = '';
   const titleEl = document.getElementById('modal-service-title');
-  if (titleEl) titleEl.textContent = 'Add Backend Service / Bot';
+  if (titleEl) titleEl.textContent = 'Add Backend Service';
   const saveBtn = document.getElementById('save-service-submit-btn');
   if (saveBtn) saveBtn.textContent = 'Create Service';
 
@@ -108,30 +108,23 @@ export function applyServicePreset(preset) {
       if (startInput) startInput.value = 'java -jar Lavalink.jar';
       if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getPort(1112);
       break;
+    case 'node-service':
     case 'discord-node':
       setServiceSourceMode('git');
       if (nameInput) {
-        nameInput.value = 'Discord Bot';
+        nameInput.value = 'Node.js Service';
         nameInput.dispatchEvent(new Event('input'));
       }
       if (installInput) installInput.value = 'npm ci';
       if (startInput) startInput.value = 'node index.js';
       if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getPort(8000);
       break;
+    case 'python-service':
     case 'discord-py':
-      setServiceSourceMode('git');
-      if (nameInput) {
-        nameInput.value = 'Discord Bot';
-        nameInput.dispatchEvent(new Event('input'));
-      }
-      if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
-      if (startInput) startInput.value = 'python3 -u bot.py';
-      if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getPort(8000);
-      break;
     case 'telegram-py':
       setServiceSourceMode('git');
       if (nameInput) {
-        nameInput.value = 'Telegram Bot';
+        nameInput.value = 'Python Service';
         nameInput.dispatchEvent(new Event('input'));
       }
       if (installInput) installInput.value = 'pip install -r requirements.txt --break-system-packages --ignore-installed';
@@ -149,7 +142,7 @@ export function applyServicePreset(preset) {
       if (portInput) portInput.value = (isEditing && currentPort) ? currentPort : getPort(8000);
       break;
     case 'custom':
-      if (nameInput && ['Lavalink', 'Discord Bot', 'Telegram Bot', 'Queue Worker'].includes(nameInput.value)) {
+      if (nameInput && ['Lavalink', 'Node.js Service', 'Python Service', 'Queue Worker'].includes(nameInput.value)) {
         nameInput.value = '';
         nameInput.dispatchEvent(new Event('input'));
       }
@@ -167,7 +160,7 @@ export function openEditServiceModal(id) {
   const idEl = document.getElementById('service-form-id');
   if (idEl) idEl.value = p.id;
   const titleEl = document.getElementById('modal-service-title');
-  if (titleEl) titleEl.textContent = 'Edit Backend Service / Bot';
+  if (titleEl) titleEl.textContent = 'Edit Backend Service';
   const saveBtn = document.getElementById('save-service-submit-btn');
   if (saveBtn) saveBtn.textContent = 'Update Service';
 

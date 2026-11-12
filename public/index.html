@@ -528,12 +528,12 @@
           </div>
         </section>
 
-        <!-- ==================== BACKEND SERVICES & BOTS VIEW ==================== -->
+        <!-- ==================== BACKEND SERVICES VIEW ==================== -->
         <section id="view-services" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
-              <h1>Backend Services & Bots</h1>
-              <p>Run 24/7 background daemons, Discord bots, Telegram bots, queue workers, and scripts</p>
+              <h1>Backend Services</h1>
+              <p>Run 24/7 background daemons, audio servers, queue workers, and scripts</p>
             </div>
             <div class="view-actions">
               <div class="filter-pills" id="services-status-filters">
@@ -542,8 +542,8 @@
                 <button class="pill" data-filter="stopped">Stopped (<span id="services-filter-count-stopped">0</span>)</button>
               </div>
               <input type="text" id="services-search-input" class="form-control"
-                placeholder="Search services or bots..." style="width: 220px;"
-                aria-label="Search services or bots">
+                placeholder="Search backend services..." style="width: 220px;"
+                aria-label="Search backend services">
               <button class="btn btn-primary" onclick="openAddServiceModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1841,12 +1841,12 @@
     </div>
   </div>
 
-  <!-- ADD / EDIT BACKEND SERVICE / BOT MODAL -->
+  <!-- ADD / EDIT BACKEND SERVICE MODAL -->
   <div class="modal-overlay" id="modal-service">
     <div class="modal-container" style="max-width: 620px;">
       <div class="modal-header">
         <div>
-          <h3 class="modal-title" id="modal-service-title">Add Backend Service / Bot</h3>
+          <h3 class="modal-title" id="modal-service-title">Add Backend Service</h3>
           <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">24/7 background daemon with automatic process supervision and environment secrets</div>
         </div>
         <button class="modal-close" data-close-modal>&times;</button>
@@ -1858,9 +1858,8 @@
           <label class="form-label" style="margin-bottom: 6px;">Service Template Preset</label>
           <div class="preset-selector" id="service-preset-buttons">
             <div class="preset-chip active" data-service-preset="lavalink">Lavalink (Java)</div>
-            <div class="preset-chip" data-service-preset="discord-node">Discord.js (Node)</div>
-            <div class="preset-chip" data-service-preset="discord-py">Discord.py (Python)</div>
-            <div class="preset-chip" data-service-preset="telegram-py">Telegram Bot</div>
+            <div class="preset-chip" data-service-preset="node-service">Node.js Service</div>
+            <div class="preset-chip" data-service-preset="python-service">Python Service</div>
             <div class="preset-chip" data-service-preset="worker-py">Queue Worker</div>
             <div class="preset-chip" data-service-preset="custom">Custom Daemon</div>
           </div>
@@ -1892,8 +1891,8 @@
           <!-- Row 1: Name & Branch -->
           <div id="service-name-branch-row" class="modal-grid-2" style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
-              <label class="form-label" for="service-name">Service / Bot Name *</label>
-              <input type="text" id="service-name" class="form-control" placeholder="e.g. My Service / Bot" required>
+              <label class="form-label" for="service-name">Service Name *</label>
+              <input type="text" id="service-name" class="form-control" placeholder="e.g. My Backend Service" required>
             </div>
             <div class="form-group" id="service-branch-group" style="margin-bottom: 0; display: none;">
               <label class="form-label" for="service-branch">Branch *</label>

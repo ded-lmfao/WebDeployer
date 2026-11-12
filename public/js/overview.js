@@ -53,13 +53,10 @@ function getWorkloadIconInfo(r) {
       return { name: 'docker', color: '#2496ed', typeName: 'Docker Daemon' };
     }
     if (pt.includes('discord') || sc.includes('discord') || name.includes('discord')) {
-      return { name: 'discord', color: '#5865f2', typeName: 'Discord Bot' };
+      return { name: 'nodejs', color: '#22c55e', typeName: 'Backend Service' };
     }
     if (pt.includes('telegram') || sc.includes('telegram') || name.includes('telegram')) {
-      return { name: 'telegram', color: '#229ed9', typeName: 'Telegram Bot' };
-    }
-    if (name.includes('bot')) {
-      return { name: 'discord', color: '#5865f2', typeName: 'Backend Bot' };
+      return { name: 'python', color: '#38bdf8', typeName: 'Backend Service' };
     }
     return { name: 'terminal', color: 'var(--accent-light)', typeName: 'Backend Service' };
   }
@@ -113,7 +110,7 @@ function renderResourceBreakdown(resources) {
       emptyMsg = 'No hosted websites created yet.';
       emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="openAddWebsiteModal()">+ Add Website</button>';
     } else if (filter === 'service') {
-      emptyMsg = 'No backend services or bots created yet.';
+      emptyMsg = 'No backend services created yet.';
       emptyAction = '<button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="openAddServiceModal()">+ Add Service</button>';
     } else if (filter === 'database') {
       emptyMsg = 'No managed databases created yet.';

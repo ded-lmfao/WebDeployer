@@ -185,14 +185,6 @@ export function renderServicesList() {
       typeIconName = 'docker';
       typeName = 'Docker Container';
       iconColor = '#2496ed';
-    } else if (pt.includes('discord')) {
-      typeIconName = 'message-square';
-      typeName = 'Discord Bot';
-      iconColor = '#5865F2';
-    } else if (pt.includes('telegram')) {
-      typeIconName = 'send';
-      typeName = 'Telegram Bot';
-      iconColor = '#0088cc';
     } else if (pt.includes('worker')) {
       typeIconName = 'cpu';
       typeName = 'Queue Worker';

@@ -107,7 +107,7 @@ function updateBreadcrumbs() {
     const globalLabels = {
       overview: 'System Overview',
       projects: 'Hosted Websites',
-      services: 'Backend Services & Bots',
+      services: 'Backend Services',
       databases: 'Managed Databases',
       settings: 'Platform Settings',
     };
@@ -181,7 +181,7 @@ function renderWebsiteWorkspaceHeader() {
     if (links) {
       const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
       if (isService) {
-        let typeLabel = `${icon('bot', { size: 14 })} Service`;
+        let typeLabel = `${icon('server', { size: 14 })} Backend Service`;
         const pt = (p.project_type || '').toLowerCase();
         const sc = (p.start_cmd || '').toLowerCase();
         if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java')) typeLabel = `${icon('java', { size: 14 })} Java Audio Server`;
@@ -192,8 +192,6 @@ function renderWebsiteWorkspaceHeader() {
         else if (pt.includes('php') || sc.includes('php')) typeLabel = `${icon('php', { size: 14 })} PHP Service`;
         else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) typeLabel = `${icon('ruby', { size: 14 })} Ruby Daemon`;
         else if (pt.includes('docker') || sc.includes('docker')) typeLabel = `${icon('docker', { size: 14 })} Docker Container`;
-        else if (pt.includes('discord')) typeLabel = `${icon('message-square', { size: 14 })} Discord Bot`;
-        else if (pt.includes('telegram')) typeLabel = `${icon('send', { size: 14 })} Telegram Bot`;
         else if (pt.includes('worker')) typeLabel = `${icon('cpu', { size: 14 })} Queue Worker`;
 
         const isLocal = !p.repo_url || p.repo_url === 'local' || pt.includes('lavalink');
