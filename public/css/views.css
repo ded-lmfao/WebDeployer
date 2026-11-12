@@ -213,31 +213,98 @@
   font-size: 11px;
 }
 
-/* Modern, Clean Settings Layout */
+/* Modern, Clean Compact Card Settings Layout */
+.settings-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.project-card.settings-card {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  margin-bottom: 0;
+  transition: border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.project-card.settings-card:hover {
+  border-color: var(--border-medium);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.settings-card-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-card-inset {
+  background: var(--bg-alt);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.settings-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.settings-card .gh-token-row {
+  grid-template-columns: 1fr auto auto !important;
+  gap: 6px !important;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.settings-card .gh-token-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.settings-card .gh-token-row .gh-token-label-input {
+  grid-column: 1 / -1;
+}
+.settings-card .gh-token-row input {
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.settings-card .minimal-details {
+  background: var(--bg-alt);
+  border-radius: var(--radius-sm);
+}
+.settings-card .minimal-details summary {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
 .settings-sec-summary-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  background: var(--bg-alt);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 0;
 }
 .settings-sec-item {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 .settings-sec-label {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 500;
 }
 .settings-sec-val {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
@@ -246,8 +313,44 @@
 }
 .settings-sec-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
+}
+
+.tbl-users th,
+.tbl-users td {
+  padding: 10px 14px;
+  vertical-align: middle;
+}
+.tbl-users th,
+.tbl-users td {
+  padding: 10px 14px;
+  vertical-align: middle;
+}
+
+.tbl-users th {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.settings-users-pagination {
+  padding: 4px 2px 0 !important;
+  border-top: none !important;
+  font-size: 11.5px;
+  gap: 8px;
+}
+
+
+.tbl-users th {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.settings-users-pagination {
+  padding: 4px 2px 0 !important;
+  border-top: none !important;
+  font-size: 11.5px;
+  gap: 8px;
 }
 
 

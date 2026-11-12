@@ -200,10 +200,11 @@ export async function loadSettingsView() {
     const activeCount = state.githubTokensDraft.filter((t) => (t.token || '').trim().length > 0).length;
     if (activeCount > 0) {
       if (tokBadge) {
-        tokBadge.innerHTML = `<span class="badge badge-success">${activeCount} Token${activeCount === 1 ? '' : 's'} Saved (${escapeHtml(s.github_token_masked || 'Configured')})</span>`;
+        const maskedTip = s.github_token_masked ? ` title="${escapeHtml(s.github_token_masked)}"` : '';
+        tokBadge.innerHTML = `<span class="badge badge-success"${maskedTip}>${activeCount} ACTIVE</span>`;
       }
     } else {
-      if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">Not Configured</span>';
+      if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">NOT SET</span>';
     }
     renderGithubTokensRows();
 

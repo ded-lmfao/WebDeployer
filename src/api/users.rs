@@ -90,16 +90,8 @@ pub(crate) async fn create_user_handler(
     let hashed = hash_password(&payload.password)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let role = payload.role.unwrap_or_else(|| "operator".to_string());
-    let perms = payload.permissions.unwrap_or_else(|| {
-        if role == "admin" {
-            vec!["*".to_string()]
-        } else if role == "operator" {
-            vec!["deploy".to_string(), "process".to_string(), "logs".to_string(), "backups".to_string()]
-        } else {
-            vec!["logs".to_string()]
-        }
-    });
+    let role = payload.role.unwrap_or_else(|| "user".to_string());
+    let perms = payload.permissions.unwrap_or_default();
     let perms_json = serde_json::to_string(&perms).unwrap_or_else(|_| "[]".into());
 
     let all_projs = payload.all_projects.unwrap_or(true);

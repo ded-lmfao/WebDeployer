@@ -17,13 +17,15 @@
     display: none !important;
   }
 
-  .projects-grid { grid-template-columns: 1fr; }
+  .projects-grid,
+  .settings-cards-grid { grid-template-columns: 1fr; }
   .top-header { padding: 0 16px; height: 50px; }
   .content-area { padding: 16px 14px 78px; }
   .breadcrumbs .crumb-separator, .breadcrumbs .crumb-project { display: none !important; }
   .env-quick-add-bar { grid-template-columns: 1fr; gap: 10px; }
   .env-quick-submit .env-quick-label { display: none; }
-  .gh-token-row { grid-template-columns: 1fr auto auto !important; }
+  .gh-token-row,
+  .settings-card .gh-token-row { grid-template-columns: 1fr auto auto !important; }
   .gh-token-row .gh-token-label-input { grid-column: 1 / -1; }
   .ws-banner-header { padding: 14px 16px 14px; gap: 12px; }
   .ws-banner-identity { min-width: 0; width: 100%; }

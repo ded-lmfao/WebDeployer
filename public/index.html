@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.13.12">
+  <link rel="stylesheet" href="/style.css?v=3.13.15">
 </head>
 
 <body>
@@ -1353,15 +1353,28 @@
             </div>
           </div>
 
-          <!-- My Account Security Card (Clean & Compact) -->
-          <div class="card">
-            <div class="card-header" style="border-bottom: none; padding-bottom: 4px;">
-              <div>
-                <span class="card-title">Account Security</span>
+          <div class="settings-cards-grid">
+            <!-- 1. Account Security Card -->
+            <div class="project-card settings-card" id="settings-security-card">
+              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+                  <div class="project-card-icon" style="color: #38bdf8;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+                      <span>Account Security</span>
+                    </div>
+                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Passkeys &bull; TOTP 2FA &bull; Sessions
+                    </div>
+                  </div>
+                </div>
+                <span class="badge badge-neutral" id="settings-2fa-status-badge" style="flex-shrink: 0;">Checking...</span>
               </div>
-              <span class="badge badge-neutral" id="settings-2fa-status-badge">Checking...</span>
-            </div>
-            <div class="card-body">
+
               <div class="settings-sec-summary-row">
                 <div class="settings-sec-item">
                   <div class="settings-sec-label">User</div>
@@ -1381,56 +1394,57 @@
                 </div>
               </div>
 
-              <div class="settings-sec-actions">
+              <div class="project-card-actions" style="justify-content: flex-start;">
                 <button type="button" class="btn btn-primary btn-sm" id="settings-open-passkeys-btn"
                   onclick="openSecurityModal('passkeys')">Passkeys</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openSecurityModal('password')">Change
-                  Password</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openSecurityModal('password')">Password</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="settings-open-2fa-btn"
-                  onclick="openSecurityModal('2fa')">Configure 2FA</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="revokeOtherSessions()">Revoke
-                  Sessions</button>
+                  onclick="openSecurityModal('2fa')">2FA</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="revokeOtherSessions()">Revoke</button>
               </div>
             </div>
-          </div>
 
-          <div class="card" id="settings-global-config-card">
-            <div class="card-header">
-              <div>
-                <span class="card-title">GitHub Tokens &amp; Deploy Defaults</span>
-              </div>
-            </div>
-            <div class="card-body">
-              <form id="settings-form">
-                <!-- GitHub Personal Access Tokens First (The most relevant configuration) -->
-                <div class="form-group" style="margin-bottom: 20px;">
-                  <div
-                    style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;">
-                    <span class="form-label" style="margin: 0; font-size: 13px;">GitHub Access Tokens</span>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span id="github-token-status-badge" style="font-size: 11px;"></span>
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()">+ Add
-                        Token</button>
+            <!-- 2. GitHub Tokens & Deploy Defaults Card -->
+            <div class="project-card settings-card" id="settings-global-config-card">
+              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+                      <span>GitHub &amp; Deploy</span>
+                    </div>
+                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Tokens &bull; Thresholds
                     </div>
                   </div>
-                  <div id="github-tokens-list"
-                    style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;"></div>
+                </div>
+                <span id="github-token-status-badge" style="font-size: 11px; flex-shrink: 0;"></span>
+              </div>
+
+              <form id="settings-form">
+                <div class="settings-card-inset">
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span class="form-label" style="margin: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim);">Access Tokens</span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()" style="padding: 2px 8px; font-size: 11px;">+ Add</button>
+                  </div>
+                  <div id="github-tokens-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
                 </div>
 
-                <!-- Collapsible Build & Safety Thresholds -->
-                <details class="minimal-details" style="margin-bottom: 16px;">
+                <details class="minimal-details" style="margin-bottom: 0;">
                   <summary>System Thresholds &amp; Timeouts</summary>
                   <div class="minimal-details-body">
-                    <div class="form-row"
-                      style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+                    <div class="form-row" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
                       <div class="form-group" style="margin-bottom: 0;">
-                        <label class="form-label" for="setting-min-free-mb">Min Free Disk (MB)</label>
+                        <label class="form-label" for="setting-min-free-mb">Min Disk (MB)</label>
                         <input type="number" id="setting-min-free-mb" class="form-control" required min="100">
                       </div>
                       <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="setting-default-retention">Keep Releases</label>
-                        <input type="number" id="setting-default-retention" class="form-control" required min="2"
-                          max="50">
+                        <input type="number" id="setting-default-retention" class="form-control" required min="2" max="50">
                       </div>
                       <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="setting-step-timeout">Step Timeout (s)</label>
@@ -1444,91 +1458,147 @@
                   </div>
                 </details>
 
-                <div style="display: flex; justify-content: flex-end; align-items: center;">
+                <div class="project-card-actions" style="justify-content: space-between;">
+                  <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">SQLite Persisted</span>
                   <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
                 </div>
               </form>
             </div>
-          </div>
 
-          <!-- Platform Version & 1-Click Self-Update Card -->
-          <div class="card" id="settings-update-card">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-              <span class="card-title" style="margin: 0;">WebDep Platform Update</span>
-              <span class="badge" id="platform-version-badge" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-light); font-family: var(--font-mono); font-size: 11px;">Checking version...</span>
-            </div>
-            <div class="card-body">
-              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; padding: 12px 14px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 14px;">
-                <div>
-                  <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <!-- 3. Platform Version & 1-Click Self-Update Card -->
+            <div class="project-card settings-card" id="settings-update-card">
+              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--accent-light);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="23 4 23 10 17 10"></polyline>
+                      <polyline points="1 20 1 14 7 14"></polyline>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+                      <span>Platform Update</span>
+                    </div>
+                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      origin/<span id="platform-remote-branch">main</span> &bull; <code id="platform-remote-hash" style="color: var(--text-muted); font-size: 11px;">...</code>
+                    </div>
+                  </div>
+                </div>
+                <span class="badge" id="platform-version-badge" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-light); font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;">Checking...</span>
+              </div>
+
+              <div class="settings-card-inset">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                  <div style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-family: var(--font-mono);">
                     <span style="font-weight: 600; color: var(--text-main);">Instance: <span id="platform-branch-name">main</span></span>
                     <span style="color: var(--text-dim);">&bull;</span>
                     <code id="platform-commit-hash" style="color: var(--accent-light); font-size: 12px;">...</code>
                   </div>
-                  <div id="platform-commit-msg" style="font-size: 11.5px; color: var(--text-dim); margin-top: 4px; max-width: 480px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    Fetching commit details...
-                  </div>
+                  <div style="font-size: 11.5px; font-weight: 600; flex-shrink: 0;" id="platform-remote-status-text">Checking...</div>
                 </div>
-                <div style="text-align: right;">
-                  <div style="font-size: 12px; font-weight: 600;" id="platform-remote-status-text">Checking remote...</div>
-                  <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">origin/<span id="platform-remote-branch">main</span> (<code id="platform-remote-hash" style="color: var(--text-muted); font-size: 11px;">...</code>)</div>
+                <div id="platform-commit-msg" style="font-size: 11px; color: var(--text-dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  Fetching commit details...
                 </div>
               </div>
 
-              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
-                <label for="platform-update-repo-input" style="font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap;">Update Repo:</label>
+              <div style="display: flex; align-items: center; gap: 6px;">
                 <input type="text" class="form-control" id="platform-update-repo-input"
                   placeholder="owner/repo or https://github.com/owner/repo.git"
-                  style="flex: 1; min-width: 240px; font-family: var(--font-mono); font-size: 12px;"
+                  style="flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11.5px;"
                   aria-label="Platform update repository">
-                <button type="button" class="btn btn-secondary btn-sm" id="save-platform-repo-btn" onclick="savePlatformUpdateRepo()">
+                <button type="button" class="btn btn-secondary btn-sm" id="save-platform-repo-btn" onclick="savePlatformUpdateRepo()" style="flex-shrink: 0;">
                   Save Repo
                 </button>
               </div>
 
-              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                <div style="font-size: 11.5px; color: var(--text-dim);">
-                  <span style="color: var(--success); font-weight: 600;">✓ Safe:</span> Preserves your databases (<code>data/</code>) and <code>.env</code> settings.
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="project-card-actions" style="justify-content: space-between;">
+                <span class="badge badge-neutral" style="font-size: 10px;" title="Preserves data/ and .env">&#10003; Safe (data/ &amp; .env)</span>
+                <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
                   <button type="button" class="btn btn-secondary btn-sm" id="check-platform-update-btn" onclick="checkPlatformUpdates(true)">
-                    Check for Updates
+                    Check
                   </button>
                   <button type="button" class="btn btn-primary btn-sm" id="trigger-platform-update-btn" onclick="startPlatformUpdate()">
-                    ☁️ Update to Latest Commit
+                    Update
                   </button>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="card" id="settings-panel-card">
-            <div class="card-header">
-              <span class="card-title">Server Controls</span>
-            </div>
-            <div class="card-body" style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button type="button" class="btn btn-secondary btn-sm" id="restart-panel-btn">Restart Server
-                Panel</button>
-              <button type="button" class="btn btn-secondary btn-sm" id="clear-cache-btn">Clear Server Cache</button>
-            </div>
-          </div>
+            <!-- 4. Server Controls Card -->
+            <div class="project-card settings-card" id="settings-panel-card">
+              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+                  <div class="project-card-icon" style="color: #10b981;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                      <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                      <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                      <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+                      <span>Server Controls</span>
+                    </div>
+                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Daemon &bull; Cache Engine
+                    </div>
+                  </div>
+                </div>
+                <span class="badge badge-success" style="flex-shrink: 0;">ONLINE</span>
+              </div>
 
-          <div class="card" id="settings-users-card">
-            <div class="card-header">
-              <span class="card-title">User Permissions</span>
-              <button class="btn btn-primary btn-sm" id="create-user-modal-btn">+ Add User</button>
+              <div class="settings-card-inset" style="font-size: 11.5px; color: var(--text-dim); font-family: var(--font-mono); line-height: 1.5;">
+                Safely restart the WebDep panel daemon with zero workload downtime or flush server response caches.
+              </div>
+
+              <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Zero-Downtime Restart</span>
+                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Telemetry Cache</span>
+              </div>
+
+              <div class="project-card-actions" style="justify-content: flex-start;">
+                <button type="button" class="btn btn-secondary btn-sm" id="restart-panel-btn">Restart Panel</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="clear-cache-btn">Clear Cache</button>
+              </div>
             </div>
-            <div class="card-body" style="padding: 0;">
-              <div class="table-responsive">
+
+            <!-- 5. User Permissions Card (Full Width Table Card) -->
+            <div class="project-card settings-card settings-card-wide" id="settings-users-card">
+              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+                  <div class="project-card-icon" style="color: #a855f7;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="9" cy="7" r="4"></circle>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
+                      <span>User Permissions</span>
+                      <span class="badge badge-info" id="settings-users-count-badge" style="font-size: 10px;">RBAC</span>
+                    </div>
+                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Access &amp; Powers &bull; 2FA &bull; Scope
+                    </div>
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="create-user-modal-btn">+ Add User</button>
+              </div>
+
+              <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-alt);">
                 <table class="table tbl-users">
                   <thead>
                     <tr>
                       <th>User</th>
-                      <th>Role</th>
                       <th>2FA</th>
                       <th>Websites</th>
+                      <th>Powers</th>
                       <th>Status</th>
-                      <th>Actions</th>
+                      <th style="text-align: right;">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="users-table-body">
@@ -1538,7 +1608,7 @@
                   </tbody>
                 </table>
               </div>
-              <div class="pagination-bar" id="users-pagination"></div>
+              <div class="pagination-bar settings-users-pagination" id="users-pagination"></div>
             </div>
           </div>
         </section>
@@ -2091,17 +2161,6 @@
                 *</label>
               <input type="password" id="user-new-password" class="form-control" minlength="6" placeholder="••••••••">
             </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="user-new-role">Role Preset</label>
-            <select id="user-new-role" class="form-control">
-              <option value="operator">Operator (Deploy, Process, Logs, Releases)</option>
-              <option value="developer">Developer (Deploy, Process, Logs, Env Variables)</option>
-              <option value="viewer">Viewer (Read-Only Logs & Status)</option>
-              <option value="admin">Admin (Full Control)</option>
-              <option value="custom">Custom (Select Specific Powers Below)</option>
-            </select>
           </div>
 
           <div class="form-group">
@@ -2787,7 +2846,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.13.12"></script>
+  <script type="module" src="/app.js?v=3.13.15"></script>
 </body>
 
 </html>

@@ -13,13 +13,6 @@ import {
 } from './state.js';
 import { api, toast } from './api.js';
 
-export const ROLE_PRESET_POWERS = {
-  admin: ['deploy', 'process', 'logs', 'env', 'domains', 'backups', 'projects_manage', 'settings_manage'],
-  operator: ['deploy', 'process', 'logs', 'backups'],
-  developer: ['deploy', 'process', 'logs', 'env'],
-  viewer: ['logs'],
-};
-
 export const POWER_LABELS = {
   '*': 'All Powers (*)',
   deploy: 'Deploy',
@@ -93,16 +86,8 @@ export function toggleGithubTokenRowReveal(idx) {
 }
 
 // ============================================================================
-// User Roles & Access Control
+// User Access Control
 // ============================================================================
-export function applyRolePresetToCheckboxes(role) {
-  const powers = ROLE_PRESET_POWERS[role];
-  if (!powers) return;
-  document.querySelectorAll('.user-power-check').forEach((cb) => {
-    cb.checked = powers.includes(cb.value);
-  });
-}
-
 export function renderUserProjectsChecklist(selectedIds = [], allProjects = true) {
   const allCheck = document.getElementById('user-all-projects-check');
   const container = document.getElementById('user-projects-checklist');
@@ -129,43 +114,62 @@ export function renderUsersTable(users) {
   const tbody = document.getElementById('users-table-body');
   if (!tbody) return;
 
+  const countBadge = document.getElementById('settings-users-count-badge');
+  if (countBadge) {
+    const n = Array.isArray(users) ? users.length : 0;
+    countBadge.textContent = `${n} USER${n === 1 ? '' : 'S'}`;
+  }
+
+  if (!users || !users.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: var(--text-dim); font-size: 12px;">No users configured.</td></tr>';
+    const pg = document.getElementById('users-pagination');
+    if (pg) pg.innerHTML = '';
+    return;
+  }
+
   paginateAndRender(users, 'users', 'users-pagination', (slice) => {
     tbody.innerHTML = slice.map((u) => {
       const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
       const projHtml = (isMain || u.allProjects)
-        ? '<span class="badge badge-info">All Websites (*)</span>'
+        ? '<span class="badge badge-info" style="font-size: 10px;">All Websites (*)</span>'
         : (u.allowedProjects && u.allowedProjects.length
             ? u.allowedProjects.map((pid) => {
                 const proj = state.projects.find((p) => p.id === pid);
-                return `<span class="badge badge-neutral" style="margin:2px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
-              }).join(' ')
-            : '<span class="badge badge-warning">No Websites Assigned</span>');
+                return `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
+              }).join('')
+            : '<span class="badge badge-warning" style="font-size: 10px;">No Websites</span>');
 
       const perms = isMain || (u.permissions && u.permissions.includes('*'))
         ? ['*']
         : (u.permissions || []);
       const permsHtml = perms.length
-        ? perms.map((p) => `<span class="badge badge-neutral" style="margin:2px; font-size:10px;">${escapeHtml(POWER_LABELS[p] || p)}</span>`).join(' ')
-        : '<span style="color:var(--text-dim); font-size:12px;">Read-Only</span>';
-
-      const tfaBadge = u.totpEnabled
-        ? '<span class="badge badge-success">2FA ON</span>'
-        : '<span class="badge badge-neutral">OFF</span>';
+        ? perms.map((p) => `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(POWER_LABELS[p] || p)}</span>`).join('')
+        : '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>';
 
       return `
         <tr>
           <td>
-            <strong>${escapeHtml(u.username)}</strong>
-            ${isMain ? '<span class="badge badge-info" style="margin-left:6px; font-size:10px;">MAIN ADMIN</span>' : ''}
-            ${u.id === state.user?.id ? '<span style="color:var(--text-dim); font-size:11px; margin-left:4px;">(You)</span>' : ''}
+            <div style="display:flex; align-items:center; gap:7px;">
+              <span class="status-dot ${u.disabled ? 'offline' : 'online'}"></span>
+              <strong>${escapeHtml(u.username)}</strong>
+              ${isMain ? '<span class="badge badge-info" style="font-size: 9.5px;">MAIN ADMIN</span>' : ''}
+              ${u.id === state.user?.id ? '<span style="color:var(--text-dim); font-size:11px;">(You)</span>' : ''}
+            </div>
           </td>
-          <td><span class="badge badge-neutral">${escapeHtml((u.role || 'operator').toUpperCase())}</span></td>
-          <td>${tfaBadge}</td>
-          <td>${projHtml}</td>
-          <td style="max-width: 260px;">${permsHtml}</td>
-          <td>${u.disabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
           <td>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${u.totpEnabled
+              ? '<span class="badge badge-success" style="font-size: 10px;">Enabled</span>'
+              : '<span class="badge badge-neutral" style="font-size: 10px;">Off</span>'}
+          </td>
+          <td><div style="display:flex; flex-wrap:wrap; gap:4px;">${projHtml}</div></td>
+          <td><div style="display:flex; flex-wrap:wrap; gap:4px;">${permsHtml}</div></td>
+          <td>
+            ${u.disabled
+              ? '<span class="badge badge-danger" style="font-size: 10px;">Disabled</span>'
+              : '<span class="badge badge-success" style="font-size: 10px;">Active</span>'}
+          </td>
+          <td>
+            <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
               ${!isMain ? `
                 <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${u.id})">Edit Access</button>
                 <button class="btn btn-secondary btn-sm" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">
@@ -177,7 +181,7 @@ export function renderUsersTable(users) {
                 ${u.id !== state.user?.id ? `
                   <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
                 ` : ''}
-              ` : '<span style="color:var(--text-dim); font-size:12px;">Full Root Access</span>'}
+              ` : '<span class="badge badge-neutral" style="font-size: 10px;">Full Root Access</span>'}
             </div>
           </td>
         </tr>
@@ -211,9 +215,6 @@ export function openEditUserModal(userId) {
     passInput.value = '';
     passInput.placeholder = 'Leave blank to keep current password';
   }
-
-  const roleEl = document.getElementById('user-new-role');
-  if (roleEl) roleEl.value = u.role || 'custom';
 
   const hasWildcard = (u.permissions || []).includes('*');
   document.querySelectorAll('.user-power-check').forEach((cb) => {
@@ -252,10 +253,6 @@ export async function deleteUser(userId, username) {
 }
 
 // Bind DOM event listeners
-document.getElementById('user-new-role')?.addEventListener('change', (e) => {
-  applyRolePresetToCheckboxes(e.target.value);
-});
-
 document.getElementById('user-all-projects-check')?.addEventListener('change', (e) => {
   const isAll = e.target.checked;
   const currentSelected = Array.from(document.querySelectorAll('.user-project-check:checked')).map((cb) => Number(cb.value));
@@ -276,9 +273,6 @@ document.getElementById('create-user-modal-btn')?.addEventListener('click', () =
   if (passLabel) passLabel.textContent = 'Password (min 6 chars) *';
   const passInput = document.getElementById('user-new-password');
   if (passInput) passInput.placeholder = '••••••••';
-  const roleEl = document.getElementById('user-new-role');
-  if (roleEl) roleEl.value = 'operator';
-  applyRolePresetToCheckboxes('operator');
   renderUserProjectsChecklist([], true);
   openModal('modal-create-user');
 });
@@ -288,7 +282,6 @@ document.getElementById('save-new-user-btn')?.addEventListener('click', async (e
   const editId = document.getElementById('user-edit-id')?.value.trim();
   const username = document.getElementById('user-new-username')?.value.trim();
   const password = document.getElementById('user-new-password')?.value;
-  const role = document.getElementById('user-new-role')?.value;
   const permissions = Array.from(document.querySelectorAll('.user-power-check:checked')).map((cb) => cb.value);
   const allProjects = document.getElementById('user-all-projects-check')?.checked;
   const allowedProjects = allProjects
@@ -306,14 +299,14 @@ document.getElementById('save-new-user-btn')?.addEventListener('click', async (e
 
   try {
     if (editId) {
-      const body = { role, permissions, allProjects, allowedProjects };
+      const body = { role: 'user', permissions, allProjects, allowedProjects };
       if (password) body.password = password;
       await api(`/api/users/${editId}`, { method: 'PUT', body });
       toast(`Updated permissions & website access for "${username}".`, 'success');
     } else {
       await api('/api/users', {
         method: 'POST',
-        body: { username, password, role, permissions, allProjects, allowedProjects },
+        body: { username, password, role: 'user', permissions, allProjects, allowedProjects },
       });
       toast(`User "${username}" created in SQLite.`, 'success');
     }
