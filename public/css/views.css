@@ -16,9 +16,10 @@
 }
 .project-card:hover { border-color: var(--border-medium); }
 
-/* Service & Database Cards (Comfortable breathing room, balanced spacing & uniform grid height) */
+/* Website, Service & Database Cards (Comfortable breathing room, balanced spacing & uniform grid height) */
 .project-card.service-card,
-.project-card.database-card {
+.project-card.database-card,
+.project-card.website-card {
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
@@ -27,7 +28,8 @@
   transition: border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 .project-card.service-card:hover,
-.project-card.database-card:hover {
+.project-card.database-card:hover,
+.project-card.website-card:hover {
   border-color: var(--border-medium);
   transform: translateY(-2px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);

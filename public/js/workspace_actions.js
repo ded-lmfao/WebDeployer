@@ -6,8 +6,33 @@
 import { state } from './state.js';
 import { api, toast } from './api.js';
 
+function setActionButtonsLoading(projectId, activeAction) {
+  const allBtns = document.querySelectorAll(
+    `button[onclick*="(${projectId})"], button[onclick*="(${projectId},"]`
+  );
+  allBtns.forEach((b) => {
+    const oc = b.getAttribute('onclick') || '';
+    const isStart = /(?:^|\s|;)(?:window\.)?startProject\(/.test(oc);
+    const isStop = /(?:^|\s|;)(?:window\.)?stopProject\(/.test(oc);
+    const isRestart = /(?:^|\s|;)(?:window\.)?restartProject\(/.test(oc);
+    const isDeploy = /(?:^|\s|;)(?:window\.)?deployProject\(/.test(oc);
+
+    if (isStart || isStop || isRestart || isDeploy) {
+      b.disabled = true;
+      if (activeAction === 'start' && isStart) {
+        b.innerHTML = '<span class="btn-spinner"></span> Starting...';
+      } else if (activeAction === 'stop' && isStop) {
+        b.innerHTML = '<span class="btn-spinner"></span> Stopping...';
+      } else if (activeAction === 'restart' && isRestart) {
+        b.innerHTML = '<span class="btn-spinner"></span> Restarting...';
+      }
+    }
+  });
+}
+
 export async function refreshCurrentViewsAfterLifecycle() {
-  if (window.loadProjects) await window.loadProjects();
+  state.lastWsBannerSig = null;
+  if (window.loadProjects) await window.loadProjects(true);
   if (state.currentView === 'projects' && window.renderProjectsList) window.renderProjectsList();
   if (state.currentView === 'services' && window.renderServicesList) window.renderServicesList();
   if (state.currentView === 'overview' && window.loadOverview) await window.loadOverview();
@@ -28,11 +53,7 @@ export function handleAutoDeployedRedirect(res, projectId) {
 }
 
 export async function startProject(projectId) {
-  const btns = document.querySelectorAll(`button[onclick*="startProject(${projectId})"], button[onclick*="stopProject(${projectId})"]`);
-  btns.forEach((b) => {
-    b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Starting...';
-  });
+  setActionButtonsLoading(projectId, 'start');
 
   const proj = state.projects.find((x) => x.id === projectId);
   if (proj) {
@@ -73,11 +94,7 @@ export async function startProject(projectId) {
 }
 
 export async function stopProject(projectId) {
-  const btns = document.querySelectorAll(`button[onclick*="startProject(${projectId})"], button[onclick*="stopProject(${projectId})"]`);
-  btns.forEach((b) => {
-    b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Stopping...';
-  });
+  setActionButtonsLoading(projectId, 'stop');
 
   const proj = state.projects.find((x) => x.id === projectId);
   if (proj) {
@@ -126,11 +143,7 @@ export async function toggleMaintenanceMode(projectId) {
 }
 
 export async function restartProject(projectId) {
-  const btns = document.querySelectorAll(`button[onclick*="restartProject(${projectId})"]`);
-  btns.forEach((b) => {
-    b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Restarting...';
-  });
+  setActionButtonsLoading(projectId, 'restart');
 
   const proj = state.projects.find((x) => x.id === projectId);
   if (proj) proj.app_status = 'starting';

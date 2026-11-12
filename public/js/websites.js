@@ -138,62 +138,84 @@ function renderProjectsList() {
 
     const pt = (p.project_type || '').toLowerCase();
     const sc = (p.start_cmd || '').toLowerCase();
-    let langDevicon = '';
-    if (pt.includes('node') || pt.includes('express') || sc.includes('node') || sc.includes('npm')) {
-      langDevicon = icon('nodejs', { size: 16 });
+    let typeIconName = 'globe';
+    let iconColor = 'var(--accent-light)';
+
+    if (pt.includes('node') || pt.includes('express') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
+      typeIconName = 'nodejs';
+      iconColor = '#22c55e';
     } else if (pt.includes('next') || pt.includes('react') || pt.includes('typescript')) {
-      langDevicon = icon('typescript', { size: 16 });
+      typeIconName = 'typescript';
+      iconColor = '#3b82f6';
     } else if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
-      langDevicon = icon('python', { size: 16 });
+      typeIconName = 'python';
+      iconColor = '#38bdf8';
     } else if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
-      langDevicon = icon('go', { size: 16 });
+      typeIconName = 'go';
+      iconColor = '#00add8';
     } else if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
-      langDevicon = icon('rust', { size: 16 });
+      typeIconName = 'rust';
+      iconColor = '#dea584';
     } else if (pt.includes('php') || sc.includes('php')) {
-      langDevicon = icon('php', { size: 16 });
+      typeIconName = 'php';
+      iconColor = '#777bb4';
     } else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) {
-      langDevicon = icon('ruby', { size: 16 });
+      typeIconName = 'ruby';
+      iconColor = '#cc342d';
     } else if (pt.includes('docker') || sc.includes('docker')) {
-      langDevicon = icon('docker', { size: 16 });
+      typeIconName = 'docker';
+      iconColor = '#2496ed';
     }
 
     return `
-      <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
-        <div class="project-card-header">
-          <div>
-            <div class="project-info-title">
-              <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
-              ${langDevicon ? `<span style="display: inline-flex; align-items: center; margin-right: 4px;">${langDevicon}</span>` : ''}
-              <span>${escapeHtml(p.name)}</span>
+      <div class="project-card website-card" id="project-card-${p.id}" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
+        <!-- Header -->
+        <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+            <div style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; color: ${iconColor};">
+              ${icon(typeIconName, { size: 28 })}
             </div>
-            ${primaryDomain ? `<div class="project-info-domains">${primaryDomain}</div>` : ''}
+            <div style="min-width: 0;">
+              <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
+                <span>${escapeHtml(p.name)}</span>
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;" title="${escapeHtml(primaryDomain || p.branch || 'main')}">
+                ${primaryDomain ? primaryDomain : `${escapeHtml(p.branch || 'main')} &bull; ${escapeHtml(p.project_type || 'Website')}`}
+              </div>
+            </div>
           </div>
-          <span class="badge ${isOnline ? 'badge-success' : isMaintenance ? 'badge-warning' : 'badge-danger'}">${isOnline ? 'ONLINE' : isMaintenance ? 'MAINTENANCE' : 'OFFLINE'}</span>
+          <span class="badge ${isOnline ? 'badge-success' : isMaintenance ? 'badge-warning' : 'badge-danger'}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">
+            ${isOnline ? 'ONLINE' : isMaintenance ? 'MAINTENANCE' : 'OFFLINE'}
+          </span>
         </div>
 
-        <div class="project-meta-row">
-          <div class="project-meta-item">
-            <span><strong>${escapeHtml(p.branch || 'main')}</strong></span>
-          </div>
-          <div class="project-meta-item">
-            <span>${sha}</span>
-          </div>
-          ${p.port ? `<div class="project-meta-item"><span>Port <strong>${p.port}</strong></span></div>` : ''}
-          ${diskStr ? `<div class="project-meta-item"><span>Disk <strong>${diskStr}</strong></span></div>` : ''}
-          <div class="project-meta-item">
-            ${accessBadge}
-          </div>
+        <!-- Badges & Telemetry Row -->
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">
+            ${icon('git-branch', { size: 10 })} ${escapeHtml(p.branch || 'main')} &bull; ${sha}
+          </span>
+          ${p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">PORT ${p.port}</span>` : ''}
+          ${accessBadge}
+          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
+          ${p.app_started_at && isOnline ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${icon('clock', { size: 10 })} Started ${formatRelativeTime(p.app_started_at)}</span>` : ''}
         </div>
 
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-          <div style="display: flex; gap: 6px;">
+        <!-- Actions Footer -->
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: auto;">
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             ${isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Start</button>`
             }
-            <button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>
+            <button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Deploy latest changes">Deploy</button>
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 4px 10px; font-size: 11.5px;" title="Manage files">Files</button>
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 4px 10px; font-size: 11.5px;" title="Live console logs">Logs</button>
+            <button class="btn btn-secondary btn-sm" onclick="openEditWebsiteModal(${p.id})" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Website Settings">
+              ${icon('settings', { size: 12 })}
+            </button>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')" style="padding: 4px 14px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
             Manage &rarr;
           </button>
         </div>

@@ -297,7 +297,7 @@ function renderWebsiteWorkspaceHeader() {
           ` : ''}
           ${hasPower('process') ? `
             ${!isOnline
-              ? `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">
+              ? `<button class="btn btn-success btn-sm ws-btn-start" onclick="startProject(${p.id})">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                    <span>Start</span>
                  </button>`
@@ -310,7 +310,7 @@ function renderWebsiteWorkspaceHeader() {
                  </button>`
               : ''
             }
-            <button class="btn btn-secondary btn-sm" onclick="restartProject(${p.id})" title="Restart process">
+            <button class="btn btn-secondary btn-sm ws-btn-restart" onclick="restartProject(${p.id})" title="Restart process">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
               <span>Restart</span>
             </button>
