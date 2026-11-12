@@ -130,7 +130,7 @@ export function renderDatabasesList() {
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-            <div style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; color: #336791;">
+            <div class="project-card-icon" style="color: #336791;">
               ${icon('postgres', { size: 28 })}
             </div>
             <div style="min-width: 0;">

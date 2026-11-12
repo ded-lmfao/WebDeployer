@@ -2,7 +2,8 @@
  * WebDep Icon System & Badges
  */
 
-.icon {
+.icon,
+.devicon {
   display: inline-block;
   vertical-align: -0.15em;
   flex-shrink: 0;

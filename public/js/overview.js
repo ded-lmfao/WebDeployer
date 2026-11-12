@@ -9,6 +9,90 @@ import { api, toast } from './api.js';
 import { loadDatabases } from './databases.js';
 import { renderPipelineStages, waterPipelines } from './deployments.js';
 
+function getWorkloadIconInfo(r) {
+  if (r.kind === 'database') {
+    return { name: 'postgres', color: '#336791', typeName: 'PostgreSQL Instance' };
+  }
+  if (r.kind === 'panel') {
+    return { name: 'zap', color: '#38bdf8', typeName: 'Core Platform Daemon' };
+  }
+
+  const pId = r.projectId ?? r.project_id;
+  const p = (state.projects || []).find((x) => x.id === pId)
+    || (state.overview?.projects || []).map((x) => x.project).find((x) => x && x.id === pId)
+    || {};
+
+  const pt = ((r.projectType || r.project_type || p.project_type || '')).toLowerCase();
+  const sc = ((r.startCmd || r.start_cmd || p.start_cmd || '')).toLowerCase();
+  const name = ((r.name || p.name || '')).toLowerCase();
+  const isService = r.kind === 'service' || p.project_kind === 'service';
+
+  if (isService) {
+    if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java') || name.includes('lavalink')) {
+      return { name: 'java', color: '#f97316', typeName: 'Java Daemon' };
+    }
+    if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
+      return { name: 'python', color: '#38bdf8', typeName: 'Python Daemon' };
+    }
+    if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
+      return { name: 'rust', color: '#dea584', typeName: 'Rust Daemon' };
+    }
+    if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
+      return { name: 'go', color: '#00add8', typeName: 'Go Daemon' };
+    }
+    if (pt.includes('node') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
+      return { name: 'nodejs', color: '#22c55e', typeName: 'Node.js Daemon' };
+    }
+    if (pt.includes('php') || sc.includes('php')) {
+      return { name: 'php', color: '#777bb4', typeName: 'PHP Daemon' };
+    }
+    if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails') || sc.includes('puma')) {
+      return { name: 'ruby', color: '#cc342d', typeName: 'Ruby Daemon' };
+    }
+    if (pt.includes('docker') || sc.includes('docker')) {
+      return { name: 'docker', color: '#2496ed', typeName: 'Docker Daemon' };
+    }
+    if (pt.includes('discord') || sc.includes('discord')) {
+      return { name: 'discord', color: '#5865f2', typeName: 'Discord Bot' };
+    }
+    if (pt.includes('telegram') || sc.includes('telegram')) {
+      return { name: 'telegram', color: '#229ed9', typeName: 'Telegram Bot' };
+    }
+    return { name: 'terminal', color: 'var(--accent-light)', typeName: 'Backend Service' };
+  }
+
+  // Website kind
+  if (pt.includes('node') || pt.includes('express') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
+    return { name: 'nodejs', color: '#22c55e', typeName: 'Node.js App' };
+  }
+  if (pt.includes('next')) {
+    return { name: 'typescript', color: '#3b82f6', typeName: 'Next.js App' };
+  }
+  if (pt.includes('react') || pt.includes('typescript')) {
+    return { name: 'typescript', color: '#3b82f6', typeName: 'React / TS App' };
+  }
+  if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
+    return { name: 'python', color: '#38bdf8', typeName: 'Python Web' };
+  }
+  if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
+    return { name: 'go', color: '#00add8', typeName: 'Go Web App' };
+  }
+  if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
+    return { name: 'rust', color: '#dea584', typeName: 'Rust Web App' };
+  }
+  if (pt.includes('php') || sc.includes('php')) {
+    return { name: 'php', color: '#777bb4', typeName: 'PHP Site' };
+  }
+  if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) {
+    return { name: 'ruby', color: '#cc342d', typeName: 'Ruby Web App' };
+  }
+  if (pt.includes('docker') || sc.includes('docker')) {
+    return { name: 'docker', color: '#2496ed', typeName: 'Docker Container' };
+  }
+
+  return { name: 'globe', color: 'var(--accent-light)', typeName: p.project_type || 'Website' };
+}
+
 // ============================================================================
 // View 1: Overview & Live Resource Consumption
 // ============================================================================
@@ -44,8 +128,8 @@ function renderResourceBreakdown(resources) {
     const isMaintenance = r.status === 'maintenance';
     const kindUpper = r.kind.toUpperCase();
     const kindBadgeClass = `badge-res-${r.kind}`;
-    const kindIconName = r.kind === 'panel' ? 'zap' : r.kind === 'database' ? 'database' : r.kind === 'service' ? 'bot' : 'globe';
-    const kindIconSvg = icon(kindIconName, { size: 16, cls: `res-icon-${r.kind}` });
+    const iconInfo = getWorkloadIconInfo(r);
+    const kindIconSvg = icon(iconInfo.name, { size: 24, cls: `res-icon-${r.kind}` });
     
     let subtitle = '';
     if (r.kind === 'panel') {
@@ -97,7 +181,7 @@ function renderResourceBreakdown(resources) {
       <tr ${rowClick}>
         <td>
           <div class="res-workload-title">
-            <div class="res-workload-icon">${kindIconSvg}</div>
+            <div class="res-workload-icon" style="color: ${iconInfo.color};">${kindIconSvg}</div>
             <div>
               <div class="res-workload-name">${escapeHtml(r.name)}</div>
               <div class="res-workload-sub">${subtitle}</div>

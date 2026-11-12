@@ -65,6 +65,10 @@ pub struct ResourceItem {
     #[serde(rename = "commitSha")]
     pub commit_sha: Option<String>,
     pub domain: Option<String>,
+    #[serde(rename = "projectType", skip_serializing_if = "Option::is_none")]
+    pub project_type: Option<String>,
+    #[serde(rename = "startCmd", skip_serializing_if = "Option::is_none")]
+    pub start_cmd: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -244,6 +248,8 @@ pub(crate) async fn overview_handler(
         database_id: None,
         commit_sha: None,
         domain: None,
+        project_type: Some("panel".to_string()),
+        start_cmd: None,
     });
 
     let mut items = Vec::new();
@@ -334,6 +340,8 @@ pub(crate) async fn overview_handler(
             database_id: None,
             commit_sha: p.deployed_sha.clone(),
             domain: p.domains.first().cloned(),
+            project_type: Some(p.project_type.clone()),
+            start_cmd: Some(p.start_cmd.clone()),
         });
     }
 
@@ -390,6 +398,8 @@ pub(crate) async fn overview_handler(
             database_id: Some(db.id),
             commit_sha: None,
             domain: if db.domain.is_empty() { None } else { Some(db.domain.clone()) },
+            project_type: Some("postgres".to_string()),
+            start_cmd: None,
         });
     }
 

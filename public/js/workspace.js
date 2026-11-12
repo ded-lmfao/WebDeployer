@@ -361,9 +361,7 @@ function renderWebsiteWorkspaceHeader() {
     const reqPower = tabPowerMap[tab];
     const isActive = tab === state.currentView;
     const isLocalService = isService && (!p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink')));
-    if (tab === 'files' && !isService) {
-      btn.style.display = 'none';
-    } else if (isLocalService && (tab === 'github' || tab === 'releases' || tab === 'rollbacks')) {
+    if (isLocalService && (tab === 'github' || tab === 'releases' || tab === 'rollbacks')) {
       btn.style.display = 'none';
     } else if (tab === 'env' && isService) {
       btn.style.display = 'none';

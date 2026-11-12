@@ -203,11 +203,10 @@ export function renderServicesList() {
     const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7).toUpperCase() : (p.deployedSha ? p.deployedSha.slice(0, 7).toUpperCase() : (isLocal ? 'MANUAL' : 'AUTO'));
     const portText = p.port ? `PORT ${p.port}` : '';
     const accessText = p.access_mode === 'public' ? 'PUBLIC REVERSE PROXY' : (p.access_mode === 'allowlist' || p.access_mode === 'allowed_ips' ? 'IP WHITELIST' : 'LOCALHOST ONLY');
-    const pidVal = p.app_pid || p.status?.pid;
-
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
     const uptimeText = isOnline && p.app_started_at ? formatRelativeTime(p.app_started_at) : '';
+    const pidVal = (isOnline && (p.app_pid || p.status?.pid || resItem?.pid)) ? (p.app_pid || p.status?.pid || resItem?.pid) : null;
 
     let subTitle = typeName;
     if (p.slug && p.slug !== p.name.toLowerCase()) {
@@ -221,7 +220,7 @@ export function renderServicesList() {
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-            <div style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; color: ${iconColor};">
+            <div class="project-card-icon" style="color: ${iconColor};">
               ${icon(typeIconName, { size: 28 })}
             </div>
             <div style="min-width: 0;">
