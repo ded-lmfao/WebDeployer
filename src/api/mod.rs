@@ -48,6 +48,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/auth/sessions/revoke-others", post(revoke_other_sessions_handler))
         .route("/api/auth/logout", post(logout_handler))
         .route("/api/auth/me", get(me_handler))
+        .route("/api/auth/presence", post(presence_handler))
         .route("/api/auth/password", post(change_password_handler))
         // Projects
         .route("/api/projects", get(list_projects_handler).post(create_project_handler))

@@ -188,11 +188,16 @@ pub(crate) async fn me_handler(
     headers: HeaderMap,
 ) -> Result<Json<LoginResponse>, StatusCode> {
     let session_id = extract_session_id(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
-    let (session, user) = state
+    let (session, mut user) = state
         .auth
         .get_session(&session_id)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
+    user.presence = if user.disabled {
+        "offline".to_string()
+    } else {
+        state.auth.presence_for_user(user.id)
+    };
     let active_sessions = state.auth.count_active_sessions(user.id);
     let passkey_count = state.auth.count_user_passkeys(user.id);
     Ok(Json(LoginResponse {
@@ -201,6 +206,36 @@ pub(crate) async fn me_handler(
         active_sessions,
         passkey_count,
     }))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PresencePayload {
+    state: String,
+}
+
+pub(crate) async fn presence_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<PresencePayload>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let session_id = extract_session_id(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let (_, user) = state
+        .auth
+        .get_session(&session_id)
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let normalized = match payload.state.trim().to_ascii_lowercase().as_str() {
+        "online" => "online",
+        "idle" => "idle",
+        "offline" => "offline",
+        _ => "online",
+    };
+    state.auth.set_session_presence(&session_id, user.id, normalized);
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "presence": if user.disabled { "offline".to_string() } else { state.auth.presence_for_user(user.id) }
+    })))
 }
 
 #[derive(Deserialize)]
@@ -267,8 +302,8 @@ pub(crate) async fn change_password_handler(
     {
         let conn = state.db.lock().unwrap();
         conn.execute(
-            "UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?",
-            rusqlite::params![next_hash, now(), user.id],
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            rusqlite::params![next_hash, user.id],
         )
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
     }

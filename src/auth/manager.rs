@@ -16,6 +16,8 @@ pub(crate) struct FailureRecord {
     pub(crate) locked_until_s: u64,
 }
 
+const PRESENCE_TTL_MS: u64 = 95_000;
+
 pub struct Auth {
     pub(crate) db: DbPool,
     pub session_ttl_s: u64,
@@ -23,6 +25,7 @@ pub struct Auth {
     pub(crate) passkey_challenges: Mutex<HashMap<String, (Option<i64>, String, u64)>>,
     pub(crate) failures: Mutex<HashMap<String, FailureRecord>>,
     pub(crate) session_cache: Mutex<HashMap<String, (Session, User, u64)>>,
+    pub(crate) session_presence: Mutex<HashMap<String, (i64, u64, bool)>>,
 }
 
 
@@ -35,12 +38,74 @@ impl Auth {
             passkey_challenges: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
             session_cache: Mutex::new(HashMap::new()),
+            session_presence: Mutex::new(HashMap::new()),
         };
         auth.ensure_admin();
         std::thread::spawn(|| {
             sync_real_utc_offset();
         });
         auth
+    }
+
+    pub(crate) fn now_millis() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    pub fn set_session_presence(&self, session_id: &str, user_id: i64, state_str: &str) {
+        let now_ms = Self::now_millis();
+        if let Ok(mut map) = self.session_presence.lock() {
+            map.retain(|_, (_, seen_ms, _)| now_ms.saturating_sub(*seen_ms) <= PRESENCE_TTL_MS);
+            match state_str {
+                "offline" => {
+                    map.remove(session_id);
+                }
+                "idle" => {
+                    map.insert(session_id.to_string(), (user_id, now_ms, false));
+                }
+                _ => {
+                    map.insert(session_id.to_string(), (user_id, now_ms, true));
+                }
+            }
+        }
+    }
+
+    pub fn ensure_session_presence(&self, session_id: &str, user_id: i64) {
+        let now_ms = Self::now_millis();
+        if let Ok(mut map) = self.session_presence.lock() {
+            map.retain(|_, (_, seen_ms, _)| now_ms.saturating_sub(*seen_ms) <= PRESENCE_TTL_MS);
+            map.entry(session_id.to_string())
+                .or_insert((user_id, now_ms, true));
+        }
+    }
+
+    pub fn clear_user_presence(&self, user_id: i64) {
+        self.invalidate_sessions();
+        if let Ok(mut map) = self.session_presence.lock() {
+            map.retain(|_, (uid, _, _)| *uid != user_id);
+        }
+    }
+
+    pub fn presence_for_user(&self, user_id: i64) -> String {
+        let now_ms = Self::now_millis();
+        if let Ok(mut map) = self.session_presence.lock() {
+            map.retain(|_, (_, seen_ms, _)| now_ms.saturating_sub(*seen_ms) <= PRESENCE_TTL_MS);
+            let mut has_session = false;
+            for &(uid, _, active) in map.values() {
+                if uid == user_id {
+                    if active {
+                        return "online".to_string();
+                    }
+                    has_session = true;
+                }
+            }
+            if has_session {
+                return "idle".to_string();
+            }
+        }
+        "offline".to_string()
     }
 
     pub fn invalidate_sessions(&self) {
@@ -184,7 +249,7 @@ impl Auth {
 
         let existing_main: Option<(i64, String, String)> = conn
             .query_row(
-                "SELECT id, username, password_hash FROM users WHERE id = 1 OR LOWER(username) = LOWER(?) OR role = 'admin' ORDER BY CASE WHEN id = 1 THEN 0 ELSE 1 END, id ASC LIMIT 1",
+                "SELECT id, username, password_hash FROM users WHERE id = 1 OR LOWER(username) = LOWER(?) ORDER BY CASE WHEN id = 1 THEN 0 ELSE 1 END, id ASC LIMIT 1",
                 params![&env_user],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
@@ -195,7 +260,7 @@ impl Auth {
 
             if current_username != env_user {
                 conn.execute(
-                    "UPDATE users SET username = ?, role = 'admin', disabled = 0 WHERE id = ?",
+                    "UPDATE users SET username = ?, disabled = 0 WHERE id = ?",
                     params![&env_user, admin_id],
                 )
                 .ok();
@@ -205,7 +270,7 @@ impl Auth {
             if current_hash.starts_with("scrypt$") || !verify_password(&env_pass, &current_hash) {
                 if let Ok(hashed) = hash_password(&env_pass) {
                     conn.execute(
-                        "UPDATE users SET password_hash = ?, role = 'admin', disabled = 0 WHERE id = ?",
+                        "UPDATE users SET password_hash = ?, disabled = 0 WHERE id = ?",
                         params![hashed, admin_id],
                     )
                     .ok();
@@ -235,7 +300,7 @@ impl Auth {
                 .unwrap_or_default()
                 .as_millis() as i64;
             conn.execute(
-                "INSERT INTO users(id, username, password_hash, salt, role, disabled, permissions, allowed_projects, created_at) VALUES(1, ?, ?, '', 'admin', 0, '[\"*\"]', '[\"*\"]', ?)",
+                "INSERT INTO users(id, username, password_hash, disabled, permissions, allowed_projects, created_at) VALUES(1, ?, ?, 0, '[\"*\"]', '[\"*\"]', ?)",
                 params![&env_user, hashed, now],
             )
             .ok();
@@ -244,27 +309,44 @@ impl Auth {
 
     pub fn get_user_by_id(&self, id: i64) -> Option<User> {
         let conn = self.db.lock().unwrap();
-        conn.query_row(
-            "SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users WHERE id = ?",
-            params![id],
-            User::from_row,
-        )
-        .ok()
+        let mut u = conn
+            .query_row(
+                "SELECT id, username, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users WHERE id = ?",
+                params![id],
+                User::from_row,
+            )
+            .ok()?;
+        drop(conn);
+        u.presence = if u.disabled {
+            "offline".to_string()
+        } else {
+            self.presence_for_user(u.id)
+        };
+        Some(u)
     }
 
     pub fn list_users(&self) -> rusqlite::Result<Vec<User>> {
         let conn = self.db.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users ORDER BY id ASC")?;
-        let rows = stmt.query_map([], User::from_row)?;
-        Ok(rows.flatten().collect())
+        let mut stmt = conn.prepare("SELECT id, username, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at FROM users ORDER BY id ASC")?;
+        let mut list: Vec<User> = stmt.query_map([], User::from_row)?.flatten().collect();
+        drop(stmt);
+        drop(conn);
+        for u in &mut list {
+            u.presence = if u.disabled {
+                "offline".to_string()
+            } else {
+                self.presence_for_user(u.id)
+            };
+        }
+        Ok(list)
     }
 
     pub fn get_user_by_username(&self, username: &str) -> Option<(User, String)> {
         let conn = self.db.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at, password_hash FROM users WHERE LOWER(username) = LOWER(?)",
+            "SELECT id, username, disabled, permissions, allowed_projects, COALESCE(totp_enabled, 0), created_at, password_hash FROM users WHERE LOWER(username) = LOWER(?)",
             params![username],
-            |r| Ok((User::from_row(r)?, r.get(8)?)),
+            |r| Ok((User::from_row(r)?, r.get(7)?)),
         )
         .ok()
     }
@@ -282,6 +364,8 @@ impl Auth {
         )?;
         drop(conn);
 
+        self.set_session_presence(&session_id, user_id, "online");
+
         Ok(Session {
             id: session_id,
             user_id,
@@ -297,6 +381,7 @@ impl Auth {
         if let Ok(cache) = self.session_cache.lock() {
             if let Some((sess, usr, cached_until)) = cache.get(session_id) {
                 if *cached_until > now_s && sess.expires_at > (now_s as i64) && !usr.disabled {
+                    self.ensure_session_presence(session_id, usr.id);
                     return Some((sess.clone(), usr.clone()));
                 }
             }
@@ -304,7 +389,7 @@ impl Auth {
 
         let conn = self.db.lock().unwrap();
         let res = conn.query_row(
-            "SELECT s.id, s.user_id, s.expires_at, s.csrf_token, u.username, u.role, u.disabled, u.permissions, u.allowed_projects, COALESCE(u.totp_enabled, 0), u.created_at
+            "SELECT s.id, s.user_id, s.expires_at, s.csrf_token, u.username, u.disabled, u.permissions, u.allowed_projects, COALESCE(u.totp_enabled, 0), u.created_at
              FROM sessions s
              JOIN users u ON u.id = s.user_id
              WHERE s.id = ? AND s.expires_at > ?",
@@ -319,12 +404,11 @@ impl Auth {
                 let user = User::from_db(
                     r.get(1)?,
                     r.get(4)?,
-                    r.get(5)?,
-                    r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                    r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    r.get::<_, Option<String>>(6)?.unwrap_or_else(|| "[\"*\"]".into()),
                     r.get::<_, Option<String>>(7)?.unwrap_or_else(|| "[\"*\"]".into()),
-                    r.get::<_, Option<String>>(8)?.unwrap_or_else(|| "[\"*\"]".into()),
-                    r.get::<_, Option<i64>>(9)?.unwrap_or(0),
-                    r.get(10)?,
+                    r.get::<_, Option<i64>>(8)?.unwrap_or(0),
+                    r.get(9)?,
                 );
                 Ok((session, user))
             },
@@ -332,6 +416,7 @@ impl Auth {
         drop(conn);
 
         let valid = res.ok().filter(|(_, u)| !u.disabled)?;
+        self.ensure_session_presence(session_id, valid.1.id);
         if let Ok(mut cache) = self.session_cache.lock() {
             if cache.len() > 256 {
                 cache.retain(|_, (_, _, exp)| *exp > now_s);
@@ -348,6 +433,9 @@ impl Auth {
         if let Ok(mut cache) = self.session_cache.lock() {
             cache.remove(session_id);
         }
+        if let Ok(mut map) = self.session_presence.lock() {
+            map.remove(session_id);
+        }
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE id = ?", params![session_id])
             .ok();
@@ -355,6 +443,9 @@ impl Auth {
 
     pub fn revoke_other_sessions(&self, user_id: i64, keep_session_id: &str) -> usize {
         self.invalidate_sessions();
+        if let Ok(mut map) = self.session_presence.lock() {
+            map.retain(|sid, (uid, _, _)| *uid != user_id || sid == keep_session_id);
+        }
         let conn = self.db.lock().unwrap();
         conn.execute(
             "DELETE FROM sessions WHERE user_id = ? AND id != ?",
@@ -383,6 +474,36 @@ impl Auth {
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", params![now_s as i64])
             .ok();
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn test_session_presence_transitions() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-auth-presence-{}", Auth::now_millis()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db = crate::db::open_db(&temp_dir).unwrap();
+        let auth = Auth::new(db, 3600);
+
+        assert_eq!(auth.presence_for_user(2), "offline");
+        auth.set_session_presence("sid-a", 2, "online");
+        assert_eq!(auth.presence_for_user(2), "online");
+
+        auth.set_session_presence("sid-b", 2, "idle");
+        assert_eq!(auth.presence_for_user(2), "online");
+
+        auth.set_session_presence("sid-a", 2, "idle");
+        assert_eq!(auth.presence_for_user(2), "idle");
+
+        auth.set_session_presence("sid-a", 2, "offline");
+        assert_eq!(auth.presence_for_user(2), "idle");
+
+        auth.set_session_presence("sid-b", 2, "offline");
+        assert_eq!(auth.presence_for_user(2), "offline");
+
+        drop(auth);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
 }

@@ -82,11 +82,11 @@ impl Projects {
         conn.execute(
             "INSERT INTO projects(
                 name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port,
-                install_cmd, build_cmd, start_cmd, health_url, health_cmd, health_timeout_s,
-                stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention,
-                persistent_paths, app_status, domains, ssl_enabled, ssl_email, nginx_configured,
+                install_cmd, build_cmd, start_cmd, health_url, health_timeout_s,
+                stability_s, auto_deploy, poll_interval_s, webhook_secret, retention,
+                persistent_paths, app_status, domains, ssl_enabled, ssl_email,
                 created_at, updated_at, project_kind, access_mode, allowed_ips
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 p.name,
                 p.slug,
@@ -100,10 +100,8 @@ impl Projects {
                 p.build_cmd,
                 p.start_cmd,
                 p.health_url,
-                p.health_cmd,
                 p.health_timeout_s,
                 p.stability_s,
-                if p.preflight { 1 } else { 0 },
                 if p.auto_deploy { 1 } else { 0 },
                 p.poll_interval_s,
                 p.webhook_secret,
@@ -113,7 +111,6 @@ impl Projects {
                 domains_json,
                 if p.ssl_enabled { 1 } else { 0 },
                 p.ssl_email,
-                if p.nginx_configured { 1 } else { 0 },
                 ts,
                 ts,
                 p.project_kind,
@@ -142,9 +139,9 @@ impl Projects {
         conn.execute(
             "UPDATE projects SET
                 name=?, repo_url=?, branch=?, project_type=?, deploy_method=?, deploy_dir=?, port=?,
-                install_cmd=?, build_cmd=?, start_cmd=?, health_url=?, health_cmd=?, health_timeout_s=?,
-                stability_s=?, preflight=?, auto_deploy=?, poll_interval_s=?, retention=?,
-                persistent_paths=?, domains=?, ssl_enabled=?, ssl_email=?, nginx_configured=?, updated_at=?,
+                install_cmd=?, build_cmd=?, start_cmd=?, health_url=?, health_timeout_s=?,
+                stability_s=?, auto_deploy=?, poll_interval_s=?, retention=?,
+                persistent_paths=?, domains=?, ssl_enabled=?, ssl_email=?, updated_at=?,
                 project_kind=?, access_mode=?, allowed_ips=?
              WHERE id=?",
             params![
@@ -159,10 +156,8 @@ impl Projects {
                 p.build_cmd,
                 p.start_cmd,
                 p.health_url,
-                p.health_cmd,
                 p.health_timeout_s,
                 p.stability_s,
-                if p.preflight { 1 } else { 0 },
                 if p.auto_deploy { 1 } else { 0 },
                 p.poll_interval_s,
                 p.retention,
@@ -170,7 +165,6 @@ impl Projects {
                 domains_json,
                 if p.ssl_enabled { 1 } else { 0 },
                 p.ssl_email,
-                if p.nginx_configured { 1 } else { 0 },
                 ts,
                 p.project_kind,
                 p.access_mode,
@@ -194,7 +188,6 @@ impl Projects {
             tx.execute("DELETE FROM releases WHERE project_id = ?", params![id]).ok();
             tx.execute("DELETE FROM project_env WHERE project_id = ?", params![id]).ok();
             tx.execute("DELETE FROM project_keys WHERE project_id = ?", params![id]).ok();
-            tx.execute("DELETE FROM jobs WHERE project_id = ?", params![id]).ok();
             tx.execute("DELETE FROM audit WHERE project_id = ? AND action != 'website.delete'", params![id]).ok();
             tx.execute("DELETE FROM projects WHERE id = ?", params![id])?;
             tx.commit()?;

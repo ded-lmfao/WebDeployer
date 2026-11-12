@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+fn default_presence() -> String {
+    "offline".to_string()
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct User {
     pub id: i64,
     pub username: String,
-    pub role: String,
     pub disabled: bool,
     pub permissions: Vec<String>,
     #[serde(rename = "allowedProjects")]
@@ -15,6 +18,8 @@ pub struct User {
     pub is_main_admin: bool,
     #[serde(rename = "totpEnabled")]
     pub totp_enabled: bool,
+    #[serde(default = "default_presence")]
+    pub presence: String,
     pub created_at: i64,
 }
 
@@ -22,7 +27,6 @@ impl User {
     pub fn from_db(
         id: i64,
         username: String,
-        role: String,
         disabled_int: i64,
         perms_json: String,
         proj_json: String,
@@ -34,8 +38,6 @@ impl User {
 
         let mut permissions: Vec<String> = serde_json::from_str(&perms_json).unwrap_or_default();
         if is_main_admin {
-            permissions = vec!["*".to_string()];
-        } else if permissions.is_empty() && role == "admin" {
             permissions = vec!["*".to_string()];
         }
 
@@ -62,13 +64,13 @@ impl User {
         Self {
             id,
             username,
-            role: if is_main_admin { "admin".to_string() } else { role },
             disabled,
             permissions,
             allowed_projects,
             all_projects,
             is_main_admin,
             totp_enabled: totp_enabled_int != 0,
+            presence: default_presence(),
             created_at,
         }
     }
@@ -77,12 +79,11 @@ impl User {
         Ok(Self::from_db(
             r.get(0)?,
             r.get(1)?,
-            r.get(2)?,
-            r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            r.get::<_, Option<String>>(3)?.unwrap_or_else(|| "[\"*\"]".into()),
             r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[\"*\"]".into()),
-            r.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[\"*\"]".into()),
-            r.get::<_, Option<i64>>(6)?.unwrap_or(0),
-            r.get(7)?,
+            r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+            r.get(6)?,
         ))
     }
 

@@ -43,7 +43,94 @@ export function resetCleanUrl() {
   } catch (_) {}
 }
 
+let presenceTimer = null;
+let presenceListenersBound = false;
+let lastUserInteractionAt = Date.now();
+let lastReportedPresence = null;
+let lastMouseTouchAt = 0;
+
+function computePresenceState() {
+  if (!state.user || !state.csrf) return null;
+  if (document.hidden) return 'idle';
+  return Date.now() - lastUserInteractionAt < 60_000 ? 'online' : 'idle';
+}
+
+async function sendPresenceUpdate(nextState, useKeepalive = false) {
+  if (!state.user || !state.csrf || !nextState) return;
+  lastReportedPresence = nextState;
+  try {
+    if (useKeepalive) {
+      await fetch('/api/auth/presence', {
+        method: 'POST',
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-csrf-token': state.csrf,
+        },
+        body: JSON.stringify({ state: nextState }),
+      });
+    } else {
+      await api('/api/auth/presence', {
+        method: 'POST',
+        body: { state: nextState },
+      });
+    }
+  } catch (_) {}
+}
+
+function recordUserInteraction(throttled = false) {
+  const now = Date.now();
+  if (throttled && now - lastMouseTouchAt < 5000) return;
+  lastMouseTouchAt = now;
+  lastUserInteractionAt = now;
+  if (state.user && !document.hidden && lastReportedPresence !== 'online') {
+    void sendPresenceUpdate('online');
+  }
+}
+
+export function stopPresenceHeartbeat() {
+  if (presenceTimer) {
+    clearInterval(presenceTimer);
+    presenceTimer = null;
+  }
+  lastReportedPresence = null;
+}
+
+export function startPresenceHeartbeat() {
+  lastUserInteractionAt = Date.now();
+  if (!presenceListenersBound) {
+    presenceListenersBound = true;
+    window.addEventListener('pointerdown', () => recordUserInteraction(false), { passive: true });
+    window.addEventListener('keydown', () => recordUserInteraction(false), { passive: true });
+    window.addEventListener('mousemove', () => recordUserInteraction(true), { passive: true });
+    window.addEventListener('scroll', () => recordUserInteraction(true), { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      if (!state.user || !state.csrf) return;
+      if (document.hidden) {
+        void sendPresenceUpdate('idle', true);
+      } else {
+        lastUserInteractionAt = Date.now();
+        void sendPresenceUpdate('online');
+      }
+    });
+    window.addEventListener('pagehide', () => {
+      if (state.user && state.csrf) {
+        void sendPresenceUpdate('offline', true);
+      }
+    });
+  }
+
+  if (presenceTimer) clearInterval(presenceTimer);
+  void sendPresenceUpdate(computePresenceState() || 'online');
+  presenceTimer = setInterval(() => {
+    const nextState = computePresenceState();
+    if (nextState) void sendPresenceUpdate(nextState);
+  }, 20_000);
+}
+
 export function stopPolling() {
+  stopPresenceHeartbeat();
   if (state.overviewTimer) {
     clearInterval(state.overviewTimer);
     state.overviewTimer = null;
@@ -173,7 +260,7 @@ export async function onAuthenticated(isFreshLogin = false) {
   const curUserEl = document.getElementById('current-user-name');
   if (curUserEl) curUserEl.textContent = state.user.username;
   const curRoleEl = document.getElementById('current-user-role');
-  if (curRoleEl) curRoleEl.textContent = state.user.isMainAdmin ? 'MAIN ADMIN' : (state.user.role || 'user').toUpperCase();
+  if (curRoleEl) curRoleEl.textContent = state.user.isMainAdmin ? 'MAIN ADMIN' : 'USER';
   const curAvatarEl = document.getElementById('current-user-avatar');
   if (curAvatarEl) curAvatarEl.textContent = (state.user.username || 'AD').slice(0, 2).toUpperCase();
 
@@ -211,6 +298,7 @@ export async function onAuthenticated(isFreshLogin = false) {
     if (typeof handleHashRoute === 'function') handleHashRoute();
     else if (window.handleHashRoute) window.handleHashRoute();
   }
+  startPresenceHeartbeat();
   if (typeof window.startPolling === 'function') window.startPolling();
 }
 

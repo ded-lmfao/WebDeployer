@@ -77,6 +77,14 @@ fn ensure_column(conn: &Connection, table: &str, cols: &[String], col: &str, col
     }
 }
 
+fn drop_column_if_exists(conn: &Connection, table: &str, cols: &[String], col: &str) -> bool {
+    if cols.iter().any(|c| c.eq_ignore_ascii_case(col)) {
+        conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {col};")).is_ok()
+    } else {
+        false
+    }
+}
+
 fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "
@@ -101,7 +109,6 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         if !cols.iter().any(|c| c == "password_hash") && cols.iter().any(|c| c == "pass_hash") {
             let _ = conn.execute_batch("ALTER TABLE users RENAME COLUMN pass_hash TO password_hash;");
         }
-        ensure_column(conn, "users", &cols, "salt", "TEXT NOT NULL DEFAULT ''");
         ensure_column(conn, "users", &cols, "disabled", "INTEGER NOT NULL DEFAULT 0");
         ensure_column(conn, "users", &cols, "permissions", "TEXT NOT NULL DEFAULT '[\"*\"]'");
         ensure_column(conn, "users", &cols, "allowed_projects", "TEXT NOT NULL DEFAULT '[\"*\"]'");
@@ -109,7 +116,6 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         ensure_column(conn, "users", &cols, "totp_pending_secret", "TEXT");
         ensure_column(conn, "users", &cols, "totp_enabled", "INTEGER NOT NULL DEFAULT 0");
         ensure_column(conn, "users", &cols, "totp_backup_codes", "TEXT NOT NULL DEFAULT '[]'");
-        ensure_column(conn, "users", &cols, "password_changed_at", "INTEGER");
     }
 
     let has_sessions: bool = conn
@@ -163,7 +169,6 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         ensure_column(conn, "projects", &cols, "domains", "TEXT NOT NULL DEFAULT '[]'");
         ensure_column(conn, "projects", &cols, "ssl_enabled", "INTEGER NOT NULL DEFAULT 0");
         ensure_column(conn, "projects", &cols, "ssl_email", "TEXT DEFAULT ''");
-        ensure_column(conn, "projects", &cols, "nginx_configured", "INTEGER NOT NULL DEFAULT 0");
         ensure_column(conn, "projects", &cols, "project_kind", "TEXT NOT NULL DEFAULT 'web'");
         ensure_column(conn, "projects", &cols, "access_mode", "TEXT NOT NULL DEFAULT 'local'");
         ensure_column(conn, "projects", &cols, "allowed_ips", "TEXT NOT NULL DEFAULT ''");
@@ -199,10 +204,8 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 build_cmd TEXT DEFAULT '',
                 start_cmd TEXT DEFAULT '',
                 health_url TEXT DEFAULT '',
-                health_cmd TEXT DEFAULT '',
                 health_timeout_s INTEGER NOT NULL DEFAULT 30,
                 stability_s INTEGER NOT NULL DEFAULT 5,
-                preflight INTEGER NOT NULL DEFAULT 1,
                 auto_deploy INTEGER NOT NULL DEFAULT 0,
                 poll_interval_s INTEGER NOT NULL DEFAULT 60,
                 webhook_secret TEXT,
@@ -217,7 +220,6 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 domains TEXT NOT NULL DEFAULT '[]',
                 ssl_enabled INTEGER NOT NULL DEFAULT 0,
                 ssl_email TEXT DEFAULT '',
-                nginx_configured INTEGER NOT NULL DEFAULT 0,
                 project_kind TEXT NOT NULL DEFAULT 'web',
                 access_mode TEXT NOT NULL DEFAULT 'local',
                 allowed_ips TEXT NOT NULL DEFAULT '',
@@ -283,8 +285,6 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                salt TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'admin',
                 disabled INTEGER NOT NULL DEFAULT 0,
                 permissions TEXT NOT NULL DEFAULT '[\"*\"]',
                 allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]',
@@ -292,7 +292,6 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
                 totp_pending_secret TEXT,
                 totp_enabled INTEGER NOT NULL DEFAULT 0,
                 totp_backup_codes TEXT NOT NULL DEFAULT '[]',
-                password_changed_at INTEGER,
                 created_at INTEGER NOT NULL
             );
 
@@ -306,35 +305,12 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             CREATE TABLE IF NOT EXISTS backups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                ts INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL DEFAULT 0,
-                dir TEXT NOT NULL DEFAULT '',
                 path TEXT NOT NULL DEFAULT '',
-                size INTEGER NOT NULL DEFAULT 0,
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 kind TEXT NOT NULL DEFAULT 'full-snapshot',
                 note TEXT DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'ok',
                 release_id INTEGER
-            );
-
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-                type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'queued',
-                attempt INTEGER NOT NULL DEFAULT 0,
-                error TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id ASC);
-
-            CREATE TABLE IF NOT EXISTS locks (
-                key TEXT PRIMARY KEY,
-                owner TEXT NOT NULL,
-                acquired_at INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS audit (
@@ -404,28 +380,76 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         ",
     )?;
 
-    // Dynamically align existing backups table columns (migrating from legacy schema if needed)
+    // Align backups columns (backfilling legacy fields before dropping duplicate/dead columns)
     let b_cols = get_table_columns(conn, "backups");
     ensure_column(conn, "backups", &b_cols, "release_id", "INTEGER");
     ensure_column(conn, "backups", &b_cols, "kind", "TEXT NOT NULL DEFAULT 'full-snapshot'");
-    ensure_column(conn, "backups", &b_cols, "path", "TEXT NOT NULL DEFAULT ''");
-    ensure_column(conn, "backups", &b_cols, "dir", "TEXT NOT NULL DEFAULT ''");
+    if !b_cols.iter().any(|c| c.eq_ignore_ascii_case("path")) {
+        let _ = conn.execute_batch("ALTER TABLE backups ADD COLUMN path TEXT NOT NULL DEFAULT '';");
+        if b_cols.iter().any(|c| c.eq_ignore_ascii_case("dir")) {
+            let _ = conn.execute_batch("UPDATE backups SET path = COALESCE(dir, '');");
+        }
+    } else if b_cols.iter().any(|c| c.eq_ignore_ascii_case("dir")) {
+        let _ = conn.execute_batch("UPDATE backups SET path = dir WHERE (path IS NULL OR path = '') AND dir IS NOT NULL AND dir != '';");
+    }
     if !b_cols.iter().any(|c| c.eq_ignore_ascii_case("size_bytes")) {
         let _ = conn.execute_batch("ALTER TABLE backups ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;");
         if b_cols.iter().any(|c| c.eq_ignore_ascii_case("size")) {
             let _ = conn.execute_batch("UPDATE backups SET size_bytes = COALESCE(size, 0);");
         }
+    } else if b_cols.iter().any(|c| c.eq_ignore_ascii_case("size")) {
+        let _ = conn.execute_batch("UPDATE backups SET size_bytes = size WHERE (size_bytes IS NULL OR size_bytes = 0) AND size > 0;");
     }
-    ensure_column(conn, "backups", &b_cols, "size", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "backups", &b_cols, "note", "TEXT DEFAULT ''");
-    ensure_column(conn, "backups", &b_cols, "status", "TEXT NOT NULL DEFAULT 'ok'");
     if !b_cols.iter().any(|c| c.eq_ignore_ascii_case("created_at")) {
         let _ = conn.execute_batch("ALTER TABLE backups ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;");
         if b_cols.iter().any(|c| c.eq_ignore_ascii_case("ts")) {
             let _ = conn.execute_batch("UPDATE backups SET created_at = COALESCE(ts, 0);");
         }
+    } else if b_cols.iter().any(|c| c.eq_ignore_ascii_case("ts")) {
+        let _ = conn.execute_batch("UPDATE backups SET created_at = ts WHERE (created_at IS NULL OR created_at = 0) AND ts > 0;");
     }
-    ensure_column(conn, "backups", &b_cols, "ts", "INTEGER NOT NULL DEFAULT 0");
+
+    // Drop unused tables & columns from existing databases (idempotent)
+    let mut cleaned_schema = false;
+    for legacy_table in ["jobs", "locks"] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                [legacy_table],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if exists {
+            let _ = conn.execute_batch(&format!("DROP TABLE IF EXISTS {legacy_table};"));
+            cleaned_schema = true;
+        }
+    }
+
+    let u_cols = get_table_columns(conn, "users");
+    for col in ["salt", "role", "password_changed_at"] {
+        if drop_column_if_exists(conn, "users", &u_cols, col) {
+            cleaned_schema = true;
+        }
+    }
+
+    let b_cols_after = get_table_columns(conn, "backups");
+    for col in ["ts", "dir", "size", "status"] {
+        if drop_column_if_exists(conn, "backups", &b_cols_after, col) {
+            cleaned_schema = true;
+        }
+    }
+
+    let p_cols_after = get_table_columns(conn, "projects");
+    for col in ["health_cmd", "preflight", "nginx_configured"] {
+        if drop_column_if_exists(conn, "projects", &p_cols_after, col) {
+            cleaned_schema = true;
+        }
+    }
+
+    if cleaned_schema {
+        let _ = conn.execute_batch("INSERT OR REPLACE INTO _meta(key, value) VALUES('schema_version', '3'); VACUUM;");
+    }
 
     // Dynamically ensure releases table has deployment_id, build_status, and health_status columns
     let r_cols = get_table_columns(conn, "releases");
@@ -576,6 +600,9 @@ pub fn purge_orphaned_project_data(conn: &Connection) {
         return;
     }
 
+    let now_s = now() / 1000;
+    let _ = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", [now_s]);
+
     let _ = conn.execute_batch(
         "
         PRAGMA foreign_keys = OFF;
@@ -596,7 +623,6 @@ pub fn purge_orphaned_project_data(conn: &Connection) {
         DELETE FROM releases WHERE project_id NOT IN (SELECT id FROM projects);
         DELETE FROM project_env WHERE project_id NOT IN (SELECT id FROM projects);
         DELETE FROM project_keys WHERE project_id NOT IN (SELECT id FROM projects);
-        DELETE FROM jobs WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
         DELETE FROM logs WHERE deployment_id IS NOT NULL AND deployment_id NOT IN (SELECT id FROM deployments);
         DELETE FROM audit WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
         PRAGMA foreign_keys = ON;
@@ -706,4 +732,124 @@ pub fn allocate_global_unique_port(
     }
 
     Err("No free TCP ports available in range 1024-65535".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_schema_cleanup_drops_unused_columns_and_tables() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-db-clean-{}", now()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("webdep.sqlite");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "
+                CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO _meta(key, value) VALUES('schema_version', '2');
+                CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL, csrf_token TEXT NOT NULL);
+                CREATE TABLE releases (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, sha TEXT NOT NULL, short_sha TEXT NOT NULL, message TEXT, author TEXT, committed_at INTEGER, dir TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT, created_at INTEGER NOT NULL, deployed_at INTEGER);
+                CREATE TABLE deployments (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL);
+                CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, deployment_id INTEGER, channel TEXT NOT NULL DEFAULT 'system', level TEXT NOT NULL DEFAULT 'info', message TEXT NOT NULL, ts INTEGER NOT NULL);
+                CREATE TABLE project_env (project_id INTEGER NOT NULL, key TEXT NOT NULL, value_enc TEXT NOT NULL, is_secret INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(project_id, key));
+                CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT, detail TEXT, ip TEXT);
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    salt TEXT NOT NULL DEFAULT '',
+                    role TEXT NOT NULL DEFAULT 'admin',
+                    disabled INTEGER NOT NULL DEFAULT 0,
+                    permissions TEXT NOT NULL DEFAULT '[\"*\"]',
+                    allowed_projects TEXT NOT NULL DEFAULT '[\"*\"]',
+                    password_changed_at INTEGER,
+                    created_at INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO users(username, password_hash, salt, role, created_at) VALUES('admin', 'hash', '', 'admin', 100);
+                CREATE TABLE projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL UNIQUE,
+                    repo_url TEXT NOT NULL,
+                    branch TEXT NOT NULL DEFAULT 'main',
+                    project_type TEXT NOT NULL DEFAULT 'node',
+                    deploy_method TEXT NOT NULL DEFAULT 'managed',
+                    deploy_dir TEXT NOT NULL,
+                    port INTEGER,
+                    install_cmd TEXT DEFAULT '',
+                    build_cmd TEXT DEFAULT '',
+                    start_cmd TEXT DEFAULT '',
+                    health_url TEXT DEFAULT '',
+                    health_cmd TEXT DEFAULT '',
+                    health_timeout_s INTEGER NOT NULL DEFAULT 30,
+                    stability_s INTEGER NOT NULL DEFAULT 5,
+                    preflight INTEGER NOT NULL DEFAULT 1,
+                    auto_deploy INTEGER NOT NULL DEFAULT 0,
+                    poll_interval_s INTEGER NOT NULL DEFAULT 60,
+                    webhook_secret TEXT,
+                    retention INTEGER NOT NULL DEFAULT 5,
+                    persistent_paths TEXT NOT NULL DEFAULT '[]',
+                    current_release_id INTEGER,
+                    deployed_sha TEXT,
+                    last_poll_at INTEGER,
+                    app_status TEXT NOT NULL DEFAULT 'stopped',
+                    app_pid INTEGER,
+                    app_started_at INTEGER,
+                    domains TEXT NOT NULL DEFAULT '[]',
+                    ssl_enabled INTEGER NOT NULL DEFAULT 0,
+                    ssl_email TEXT DEFAULT '',
+                    nginx_configured INTEGER NOT NULL DEFAULT 0,
+                    project_kind TEXT NOT NULL DEFAULT 'web',
+                    access_mode TEXT NOT NULL DEFAULT 'local',
+                    allowed_ips TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE backups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    ts INTEGER NOT NULL DEFAULT 0,
+                    dir TEXT NOT NULL DEFAULT '',
+                    size INTEGER NOT NULL DEFAULT 0,
+                    kind TEXT NOT NULL DEFAULT 'full-snapshot',
+                    note TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'ok',
+                    release_id INTEGER
+                );
+                CREATE TABLE jobs (id INTEGER PRIMARY KEY);
+                CREATE TABLE locks (key TEXT PRIMARY KEY);
+                ",
+            )
+            .unwrap();
+        }
+
+        let pool = open_db(&temp_dir).unwrap();
+        let conn = pool.lock().unwrap();
+        let u_cols = get_table_columns(&conn, "users");
+        assert!(!u_cols.iter().any(|c| c == "salt" || c == "role" || c == "password_changed_at"));
+        let b_cols = get_table_columns(&conn, "backups");
+        assert!(!b_cols.iter().any(|c| c == "ts" || c == "dir" || c == "size" || c == "status"));
+        assert!(b_cols.iter().any(|c| c == "created_at"));
+        assert!(b_cols.iter().any(|c| c == "path"));
+        assert!(b_cols.iter().any(|c| c == "size_bytes"));
+        let p_cols = get_table_columns(&conn, "projects");
+        assert!(!p_cols.iter().any(|c| c == "health_cmd" || c == "preflight" || c == "nginx_configured"));
+
+        let jobs_exists: bool = conn
+            .query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'", [], |_| Ok(true))
+            .unwrap_or(false);
+        let locks_exists: bool = conn
+            .query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='locks'", [], |_| Ok(true))
+            .unwrap_or(false);
+        assert!(!jobs_exists);
+        assert!(!locks_exists);
+
+        drop(conn);
+        drop(pool);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
 }

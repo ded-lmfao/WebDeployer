@@ -67,7 +67,6 @@ pub(crate) async fn list_users_handler(
 pub(crate) struct CreateUserPayload {
     username: String,
     password: String,
-    role: Option<String>,
     permissions: Option<Vec<String>>,
     #[serde(rename = "allProjects")]
     all_projects: Option<bool>,
@@ -90,7 +89,6 @@ pub(crate) async fn create_user_handler(
     let hashed = hash_password(&payload.password)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let role = payload.role.unwrap_or_else(|| "user".to_string());
     let perms = payload.permissions.unwrap_or_default();
     let perms_json = serde_json::to_string(&perms).unwrap_or_else(|_| "[]".into());
 
@@ -106,18 +104,17 @@ pub(crate) async fn create_user_handler(
     let id = {
         let conn = state.db.lock().unwrap();
         conn.execute(
-            "INSERT INTO users(username, password_hash, salt, role, disabled, permissions, allowed_projects, created_at) VALUES(?, ?, '', ?, 0, ?, ?, ?)",
-            rusqlite::params![uname, hashed, role, perms_json, allowed_json, ts],
+            "INSERT INTO users(username, password_hash, disabled, permissions, allowed_projects, created_at) VALUES(?, ?, 0, ?, ?, ?)",
+            rusqlite::params![uname, hashed, perms_json, allowed_json, ts],
         ).map_err(|e| (StatusCode::BAD_REQUEST, format!("Could not create user: {}", e)))?;
         conn.last_insert_rowid()
     };
 
-    log_audit(&state, &actor.username, "user.create", Some(&uname), Some(&format!("role={}", role)));
+    log_audit(&state, &actor.username, "user.create", Some(&uname), Some(&format!("perms={}", perms_json)));
 
     Ok(Json(User::from_db(
         id,
         uname,
-        role,
         0,
         perms_json,
         allowed_json,
@@ -129,7 +126,6 @@ pub(crate) async fn create_user_handler(
 #[derive(Deserialize)]
 pub(crate) struct UpdateUserPayload {
     disabled: Option<serde_json::Value>,
-    role: Option<String>,
     password: Option<String>,
     permissions: Option<Vec<String>>,
     #[serde(rename = "allProjects")]
@@ -169,9 +165,6 @@ pub(crate) async fn update_user_handler(
     }
 
     if !existing.is_main_admin {
-        if let Some(r) = payload.role.as_ref() {
-            conn.execute("UPDATE users SET role=? WHERE id=?", rusqlite::params![r, id]).ok();
-        }
         if let Some(d_val) = payload.disabled {
             let is_disabled = match d_val {
                 serde_json::Value::Bool(b) => b,
@@ -186,6 +179,7 @@ pub(crate) async fn update_user_handler(
             .ok();
             if is_disabled {
                 conn.execute("DELETE FROM sessions WHERE user_id=?", rusqlite::params![id]).ok();
+                state.auth.clear_user_presence(id);
             }
         }
         if let Some(perms) = payload.permissions.as_ref() {
@@ -236,6 +230,7 @@ pub(crate) async fn delete_user_handler(
     {
         let conn = state.db.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE user_id = ?", rusqlite::params![id]).ok();
+        state.auth.clear_user_presence(id);
         conn.execute("DELETE FROM users WHERE id = ?", rusqlite::params![id])
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }

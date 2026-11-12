@@ -188,18 +188,15 @@ pub(crate) async fn create_backup_handler(
     let backup_id = {
         let conn = state.db.lock().unwrap();
         conn.execute(
-            "INSERT INTO backups(project_id, release_id, kind, path, dir, size, size_bytes, note, status, ts, created_at)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
+            "INSERT INTO backups(project_id, release_id, kind, path, size_bytes, note, created_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?)",
             rusqlite::params![
                 id,
                 rel_id,
                 kind,
                 &backup_path_str,
-                &backup_path_str,
-                total_size as i64,
                 total_size as i64,
                 note,
-                ts,
                 ts
             ],
         )

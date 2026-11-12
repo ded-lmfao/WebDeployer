@@ -146,11 +146,21 @@ export function renderUsersTable(users) {
         ? perms.map((p) => `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(POWER_LABELS[p] || p)}</span>`).join('')
         : '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>';
 
+      const presence = u.disabled
+        ? 'disabled'
+        : String(u.presence || 'offline').toLowerCase();
+      const statusBadge = presence === 'disabled'
+        ? '<span class="badge badge-danger" style="font-size: 10px;">Disabled</span>'
+        : presence === 'online'
+          ? '<span class="badge badge-success" style="font-size: 10px;">Online</span>'
+          : presence === 'idle'
+            ? '<span class="badge badge-warning" style="font-size: 10px;">Idle</span>'
+            : '<span class="badge badge-neutral" style="font-size: 10px;">Offline</span>';
+
       return `
         <tr>
           <td>
             <div style="display:flex; align-items:center; gap:7px;">
-              <span class="status-dot ${u.disabled ? 'offline' : 'online'}"></span>
               <strong>${escapeHtml(u.username)}</strong>
               ${isMain ? '<span class="badge badge-info" style="font-size: 9.5px;">MAIN ADMIN</span>' : ''}
               ${u.id === state.user?.id ? '<span style="color:var(--text-dim); font-size:11px;">(You)</span>' : ''}
@@ -163,11 +173,7 @@ export function renderUsersTable(users) {
           </td>
           <td><div style="display:flex; flex-wrap:wrap; gap:4px;">${projHtml}</div></td>
           <td><div style="display:flex; flex-wrap:wrap; gap:4px;">${permsHtml}</div></td>
-          <td>
-            ${u.disabled
-              ? '<span class="badge badge-danger" style="font-size: 10px;">Disabled</span>'
-              : '<span class="badge badge-success" style="font-size: 10px;">Active</span>'}
-          </td>
+          <td>${statusBadge}</td>
           <td>
             <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
               ${!isMain ? `
@@ -299,14 +305,14 @@ document.getElementById('save-new-user-btn')?.addEventListener('click', async (e
 
   try {
     if (editId) {
-      const body = { role: 'user', permissions, allProjects, allowedProjects };
+      const body = { permissions, allProjects, allowedProjects };
       if (password) body.password = password;
       await api(`/api/users/${editId}`, { method: 'PUT', body });
       toast(`Updated permissions & website access for "${username}".`, 'success');
     } else {
       await api('/api/users', {
         method: 'POST',
-        body: { username, password, role: 'user', permissions, allProjects, allowedProjects },
+        body: { username, password, permissions, allProjects, allowedProjects },
       });
       toast(`User "${username}" created in SQLite.`, 'success');
     }
@@ -324,4 +330,14 @@ window.toggleGithubTokenRowReveal = toggleGithubTokenRowReveal;
 window.openEditUserModal = openEditUserModal;
 window.toggleUserDisabled = toggleUserDisabled;
 window.deleteUser = deleteUser;
+
+// Keep user online / idle / offline presence live while viewing Settings as Main Admin
+setInterval(async () => {
+  if (state.currentView !== 'settings' || !state.user?.isMainAdmin || document.hidden) return;
+  try {
+    const users = await api('/api/users', { noCache: true });
+    state.usersList = users;
+    renderUsersTable(users);
+  } catch (_) {}
+}, 10_000);
 

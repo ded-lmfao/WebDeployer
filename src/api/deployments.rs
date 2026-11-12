@@ -154,9 +154,9 @@ pub(crate) async fn create_release_handler(
             let conn = state.db.lock().unwrap();
             let p_str = rel_dir.to_string_lossy().to_string();
             conn.execute(
-                "INSERT INTO backups(project_id, release_id, kind, path, dir, size, size_bytes, note, status, ts, created_at)
-                 VALUES(?, ?, 'release-snapshot', ?, ?, 5242880, 5242880, ?, 'ok', ?, ?)",
-                rusqlite::params![id, rel_id, &p_str, &p_str, format!("Release #{} ({})", rel_id, note), ts, ts],
+                "INSERT INTO backups(project_id, release_id, kind, path, size_bytes, note, created_at)
+                 VALUES(?, ?, 'release-snapshot', ?, 5242880, ?, ?)",
+                rusqlite::params![id, rel_id, &p_str, format!("Release #{} ({})", rel_id, note), ts],
             ).ok();
         }
 

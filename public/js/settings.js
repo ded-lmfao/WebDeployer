@@ -116,7 +116,7 @@ export function renderSecurityStatusSummary() {
     }
   }
   const unameEl = document.getElementById('settings-sec-username');
-  if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main Admin' : state.user.role})`;
+  if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main Admin' : 'User'})`;
 
   const pkText = document.getElementById('settings-sec-passkeys-text');
   if (pkText) {
@@ -151,18 +151,16 @@ export async function loadSettingsView() {
   renderSecurityStatusSummary();
   if (window.loadPasskeysList) window.loadPasskeysList().catch(() => {});
 
-  const canManagePlatform = hasPower('settings_manage');
   const isMain = Boolean(state.user && state.user.isMainAdmin);
   const globalCard = document.getElementById('settings-global-config-card');
   const usersCard = document.getElementById('settings-users-card');
   const panelCard = document.getElementById('settings-panel-card');
   const updateCard = document.getElementById('settings-update-card');
-  if (globalCard) globalCard.style.display = canManagePlatform ? '' : 'none';
+  if (globalCard) globalCard.style.display = '';
+  if (panelCard) panelCard.style.display = '';
+  if (updateCard) updateCard.style.display = '';
   if (usersCard) usersCard.style.display = isMain ? '' : 'none';
-  if (panelCard) panelCard.style.display = isMain ? '' : 'none';
-  if (updateCard) updateCard.style.display = isMain ? '' : 'none';
-  if (isMain) loadSystemVersionInfo(true).catch(() => {});
-  if (!canManagePlatform && !isMain) return;
+  loadSystemVersionInfo(true).catch(() => {});
 
   try {
     const s = await api('/api/settings');
@@ -210,7 +208,7 @@ export async function loadSettingsView() {
 
     // Users list
     if (isMain) {
-      const users = await api('/api/users');
+      const users = await api('/api/users', { noCache: true });
       state.usersList = users;
       renderUsersTable(users);
     }

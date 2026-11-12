@@ -11,7 +11,8 @@ pub(crate) async fn restart_panel_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_main_admin(&state, &headers)?;
+    let actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     log_audit(
         &state,
         &actor.username,
@@ -49,7 +50,8 @@ pub(crate) async fn system_update_handler(
     headers: HeaderMap,
     payload: Option<Json<crate::updater::TriggerUpdatePayload>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_main_admin(&state, &headers)?;
+    let actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     log_audit(
         &state,
         &actor.username,
@@ -71,7 +73,8 @@ pub(crate) async fn system_update_repo_handler(
     headers: HeaderMap,
     Json(payload): Json<crate::updater::SetUpdateRepoPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_main_admin(&state, &headers)?;
+    let actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     let remote_url = state.updater.set_remote_repo(&payload.repo)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
@@ -125,7 +128,8 @@ pub(crate) async fn get_settings_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<HashMap<String, String>>, (StatusCode, String)> {
-    let _actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let _actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     let (mut map, current_tok) = {
         let conn = state.db.lock().unwrap();
         let mut stmt = conn
@@ -207,7 +211,8 @@ pub(crate) async fn update_settings_handler(
     headers: HeaderMap,
     Json(payload): Json<HashMap<String, serde_json::Value>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let actor = current_user(&state, &headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
         if k == "github_tokens" {

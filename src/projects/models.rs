@@ -55,14 +55,10 @@ pub struct Project {
     pub start_cmd: String,
     #[serde(default)]
     pub health_url: String,
-    #[serde(default)]
-    pub health_cmd: String,
     #[serde(default = "default_health_timeout_s")]
     pub health_timeout_s: i64,
     #[serde(default = "default_stability_s")]
     pub stability_s: i64,
-    #[serde(default = "default_true", deserialize_with = "deserialize_bool_or_int")]
-    pub preflight: bool,
     #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     pub auto_deploy: bool,
     #[serde(default = "default_poll_interval_s")]
@@ -91,8 +87,6 @@ pub struct Project {
     pub ssl_enabled: bool,
     #[serde(default)]
     pub ssl_email: String,
-    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
-    pub nginx_configured: bool,
     #[serde(default)]
     pub created_at: i64,
     #[serde(default)]
@@ -124,16 +118,16 @@ pub struct EnvVarInput {
 
 pub const SELECT_PROJECT_FIELDS: &str = "\
     id, name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port, \
-    install_cmd, build_cmd, start_cmd, health_url, health_cmd, health_timeout_s, \
-    stability_s, preflight, auto_deploy, poll_interval_s, webhook_secret, retention, \
+    install_cmd, build_cmd, start_cmd, health_url, health_timeout_s, \
+    stability_s, auto_deploy, poll_interval_s, webhook_secret, retention, \
     persistent_paths, current_release_id, deployed_sha, last_poll_at, app_status, \
-    app_pid, app_started_at, domains, ssl_enabled, ssl_email, nginx_configured, \
+    app_pid, app_started_at, domains, ssl_enabled, ssl_email, \
     created_at, updated_at, project_kind, access_mode, allowed_ips";
 
 pub fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
-    let p_paths_str: String = r.get(21)?;
+    let p_paths_str: String = r.get(19)?;
     let p_paths: Vec<String> = serde_json::from_str(&p_paths_str).unwrap_or_default();
-    let domains_str: String = r.get(28)?;
+    let domains_str: String = r.get(26)?;
     let domains: Vec<String> = serde_json::from_str(&domains_str).unwrap_or_default();
 
     Ok(Project {
@@ -150,30 +144,27 @@ pub fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
         build_cmd: r.get(10)?,
         start_cmd: r.get(11)?,
         health_url: r.get(12)?,
-        health_cmd: r.get(13)?,
-        health_timeout_s: r.get(14)?,
-        stability_s: r.get(15)?,
-        preflight: r.get::<_, i64>(16)? != 0,
-        auto_deploy: r.get::<_, i64>(17)? != 0,
-        poll_interval_s: r.get(18)?,
-        webhook_secret: r.get(19)?,
-        retention: r.get(20)?,
+        health_timeout_s: r.get(13)?,
+        stability_s: r.get(14)?,
+        auto_deploy: r.get::<_, i64>(15)? != 0,
+        poll_interval_s: r.get(16)?,
+        webhook_secret: r.get(17)?,
+        retention: r.get(18)?,
         persistent_paths: p_paths,
-        current_release_id: r.get(22)?,
-        deployed_sha: r.get(23)?,
-        last_poll_at: r.get(24)?,
-        app_status: r.get(25)?,
-        app_pid: r.get::<_, Option<u32>>(26)?,
-        app_started_at: r.get(27)?,
+        current_release_id: r.get(20)?,
+        deployed_sha: r.get(21)?,
+        last_poll_at: r.get(22)?,
+        app_status: r.get(23)?,
+        app_pid: r.get::<_, Option<u32>>(24)?,
+        app_started_at: r.get(25)?,
         domains,
-        ssl_enabled: r.get::<_, i64>(29)? != 0,
-        ssl_email: r.get(30)?,
-        nginx_configured: r.get::<_, i64>(31)? != 0,
-        created_at: r.get(32)?,
-        updated_at: r.get(33)?,
-        project_kind: r.get::<_, Option<String>>(34)?.unwrap_or_else(default_project_kind),
-        access_mode: r.get::<_, Option<String>>(35)?.unwrap_or_else(default_access_mode),
-        allowed_ips: r.get::<_, Option<String>>(36)?.unwrap_or_default(),
+        ssl_enabled: r.get::<_, i64>(27)? != 0,
+        ssl_email: r.get(28)?,
+        created_at: r.get(29)?,
+        updated_at: r.get(30)?,
+        project_kind: r.get::<_, Option<String>>(31)?.unwrap_or_else(default_project_kind),
+        access_mode: r.get::<_, Option<String>>(32)?.unwrap_or_else(default_access_mode),
+        allowed_ips: r.get::<_, Option<String>>(33)?.unwrap_or_default(),
     })
 }
 

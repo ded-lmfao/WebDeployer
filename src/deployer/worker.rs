@@ -274,16 +274,13 @@ impl Deployer {
                 params![release_id, head, ts, p.id],
             ).ok();
             conn.execute(
-                "INSERT INTO backups(project_id, release_id, path, dir, size, size_bytes, note, status, ts, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
+                "INSERT INTO backups(project_id, release_id, path, size_bytes, note, created_at) VALUES(?, ?, ?, ?, ?, ?)",
                 params![
                     p.id,
                     release_id,
                     release_dir.to_str().unwrap_or(""),
-                    release_dir.to_str().unwrap_or(""),
-                    5 * 1024 * 1024i64,
                     5 * 1024 * 1024i64,
                     format!("Auto-snapshot for Release #{} ({})", release_id, commit_info.short_sha),
-                    ts,
                     ts
                 ],
             ).ok();
