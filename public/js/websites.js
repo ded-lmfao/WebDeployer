@@ -26,10 +26,6 @@ import { renderWebsiteWorkspaceHeader, navigateTo, openWebsiteWorkspace } from '
 import { renderServicesList } from './services.js';
 import { startProject, stopProject, restartProject } from './workspace_actions.js';
 import { deployProject } from './deployments.js';
-import { toggleDatabaseAccessIpFields } from './databases_modal.js';
-import { renderWebsiteWorkspaceHeader, navigateTo, openWebsiteWorkspace } from './workspace.js';
-import { renderServicesList } from './services.js';
-import { startProject, stopProject, restartProject, deployProject } from './workspace_actions.js';
 
 // ============================================================================
 // Projects Management
