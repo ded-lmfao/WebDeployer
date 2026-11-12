@@ -135,9 +135,9 @@ impl Deployer {
         let release_id = {
             let conn = self.db.lock().unwrap();
             conn.execute(
-                "INSERT INTO releases(project_id, sha, short_sha, message, author, committed_at, dir, status, created_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, 'pulled', ?)",
-                params![p.id, head, commit_info.short_sha, commit_info.message, commit_info.author, commit_info.date, release_dir.to_str().unwrap_or(""), now()],
+                "INSERT INTO releases(project_id, deployment_id, sha, short_sha, message, author, committed_at, dir, status, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'pulled', ?)",
+                params![p.id, dep_id, head, commit_info.short_sha, commit_info.message, commit_info.author, commit_info.date, release_dir.to_str().unwrap_or(""), now()],
             ).ok();
             conn.last_insert_rowid()
         };

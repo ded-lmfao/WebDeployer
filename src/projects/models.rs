@@ -8,8 +8,6 @@ pub fn default_deploy_method() -> String { "managed".to_string() }
 pub fn default_app_status() -> String { "stopped".to_string() }
 pub fn default_health_timeout_s() -> i64 { 30 }
 pub fn default_stability_s() -> i64 { 5 }
-pub fn default_poll_interval_s() -> i64 { 60 }
-pub fn default_retention() -> i64 { 5 }
 pub fn default_true() -> bool { true }
 
 pub fn deserialize_bool_or_int<'de, D>(deserializer: D) -> Result<bool, D::Error>
@@ -61,14 +59,8 @@ pub struct Project {
     pub stability_s: i64,
     #[serde(default, deserialize_with = "deserialize_bool_or_int")]
     pub auto_deploy: bool,
-    #[serde(default = "default_poll_interval_s")]
-    pub poll_interval_s: i64,
     #[serde(default)]
     pub webhook_secret: Option<String>,
-    #[serde(default = "default_retention")]
-    pub retention: i64,
-    #[serde(default)]
-    pub persistent_paths: Vec<String>,
     #[serde(default)]
     pub current_release_id: Option<i64>,
     #[serde(default)]
@@ -83,8 +75,6 @@ pub struct Project {
     pub app_started_at: Option<i64>,
     #[serde(default)]
     pub domains: Vec<String>,
-    #[serde(default, deserialize_with = "deserialize_bool_or_int")]
-    pub ssl_enabled: bool,
     #[serde(default)]
     pub ssl_email: String,
     #[serde(default)]
@@ -119,15 +109,13 @@ pub struct EnvVarInput {
 pub const SELECT_PROJECT_FIELDS: &str = "\
     id, name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port, \
     install_cmd, build_cmd, start_cmd, health_url, health_timeout_s, \
-    stability_s, auto_deploy, poll_interval_s, webhook_secret, retention, \
-    persistent_paths, current_release_id, deployed_sha, last_poll_at, app_status, \
-    app_pid, app_started_at, domains, ssl_enabled, ssl_email, \
+    stability_s, auto_deploy, webhook_secret, \
+    current_release_id, deployed_sha, last_poll_at, app_status, \
+    app_pid, app_started_at, domains, ssl_email, \
     created_at, updated_at, project_kind, access_mode, allowed_ips";
 
 pub fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
-    let p_paths_str: String = r.get(19)?;
-    let p_paths: Vec<String> = serde_json::from_str(&p_paths_str).unwrap_or_default();
-    let domains_str: String = r.get(26)?;
+    let domains_str: String = r.get(23)?;
     let domains: Vec<String> = serde_json::from_str(&domains_str).unwrap_or_default();
 
     Ok(Project {
@@ -147,24 +135,20 @@ pub fn row_to_project(r: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
         health_timeout_s: r.get(13)?,
         stability_s: r.get(14)?,
         auto_deploy: r.get::<_, i64>(15)? != 0,
-        poll_interval_s: r.get(16)?,
-        webhook_secret: r.get(17)?,
-        retention: r.get(18)?,
-        persistent_paths: p_paths,
-        current_release_id: r.get(20)?,
-        deployed_sha: r.get(21)?,
-        last_poll_at: r.get(22)?,
-        app_status: r.get(23)?,
-        app_pid: r.get::<_, Option<u32>>(24)?,
-        app_started_at: r.get(25)?,
+        webhook_secret: r.get(16)?,
+        current_release_id: r.get(17)?,
+        deployed_sha: r.get(18)?,
+        last_poll_at: r.get(19)?,
+        app_status: r.get(20)?,
+        app_pid: r.get::<_, Option<u32>>(21)?,
+        app_started_at: r.get(22)?,
         domains,
-        ssl_enabled: r.get::<_, i64>(27)? != 0,
-        ssl_email: r.get(28)?,
-        created_at: r.get(29)?,
-        updated_at: r.get(30)?,
-        project_kind: r.get::<_, Option<String>>(31)?.unwrap_or_else(default_project_kind),
-        access_mode: r.get::<_, Option<String>>(32)?.unwrap_or_else(default_access_mode),
-        allowed_ips: r.get::<_, Option<String>>(33)?.unwrap_or_default(),
+        ssl_email: r.get(24)?,
+        created_at: r.get(25)?,
+        updated_at: r.get(26)?,
+        project_kind: r.get::<_, Option<String>>(27)?.unwrap_or_else(default_project_kind),
+        access_mode: r.get::<_, Option<String>>(28)?.unwrap_or_else(default_access_mode),
+        allowed_ips: r.get::<_, Option<String>>(29)?.unwrap_or_default(),
     })
 }
 

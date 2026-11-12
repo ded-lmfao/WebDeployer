@@ -68,7 +68,6 @@ impl Projects {
 
     pub fn create(&self, p: &Project) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
         let ts = now();
-        let p_paths_json = serde_json::to_string(&p.persistent_paths)?;
         let domains_json = serde_json::to_string(&p.domains)?;
 
         let conn = self.db.lock().unwrap();
@@ -83,10 +82,10 @@ impl Projects {
             "INSERT INTO projects(
                 name, slug, repo_url, branch, project_type, deploy_method, deploy_dir, port,
                 install_cmd, build_cmd, start_cmd, health_url, health_timeout_s,
-                stability_s, auto_deploy, poll_interval_s, webhook_secret, retention,
-                persistent_paths, app_status, domains, ssl_enabled, ssl_email,
+                stability_s, auto_deploy, webhook_secret,
+                app_status, domains, ssl_email,
                 created_at, updated_at, project_kind, access_mode, allowed_ips
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 p.name,
                 p.slug,
@@ -103,13 +102,9 @@ impl Projects {
                 p.health_timeout_s,
                 p.stability_s,
                 if p.auto_deploy { 1 } else { 0 },
-                p.poll_interval_s,
                 p.webhook_secret,
-                p.retention,
-                p_paths_json,
                 "stopped",
                 domains_json,
-                if p.ssl_enabled { 1 } else { 0 },
                 p.ssl_email,
                 ts,
                 ts,
@@ -125,7 +120,6 @@ impl Projects {
 
     pub fn update(&self, id: i64, p: &Project) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let ts = now();
-        let p_paths_json = serde_json::to_string(&p.persistent_paths)?;
         let domains_json = serde_json::to_string(&p.domains)?;
 
         let conn = self.db.lock().unwrap();
@@ -140,8 +134,8 @@ impl Projects {
             "UPDATE projects SET
                 name=?, repo_url=?, branch=?, project_type=?, deploy_method=?, deploy_dir=?, port=?,
                 install_cmd=?, build_cmd=?, start_cmd=?, health_url=?, health_timeout_s=?,
-                stability_s=?, auto_deploy=?, poll_interval_s=?, retention=?,
-                persistent_paths=?, domains=?, ssl_enabled=?, ssl_email=?, updated_at=?,
+                stability_s=?, auto_deploy=?,
+                domains=?, ssl_email=?, updated_at=?,
                 project_kind=?, access_mode=?, allowed_ips=?
              WHERE id=?",
             params![
@@ -159,11 +153,7 @@ impl Projects {
                 p.health_timeout_s,
                 p.stability_s,
                 if p.auto_deploy { 1 } else { 0 },
-                p.poll_interval_s,
-                p.retention,
-                p_paths_json,
                 domains_json,
-                if p.ssl_enabled { 1 } else { 0 },
                 p.ssl_email,
                 ts,
                 p.project_kind,

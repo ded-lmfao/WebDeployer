@@ -47,7 +47,6 @@ pub struct Release {
     pub build_status: String,
     pub health_status: String,
     pub deployment_id: Option<i64>,
-    pub error: Option<String>,
     pub created_at: i64,
     pub deployed_at: Option<i64>,
     pub live: bool,
@@ -204,7 +203,7 @@ impl Deployer {
 
         let mut stmt = match conn.prepare(
             "SELECT id, project_id, sha, short_sha, message, author, committed_at, dir, \
-                    status, build_status, health_status, deployment_id, error, created_at, deployed_at \
+                    status, build_status, health_status, deployment_id, created_at, deployed_at \
              FROM releases WHERE project_id = ? ORDER BY id DESC LIMIT 50",
         ) {
             Ok(s) => s,
@@ -233,9 +232,8 @@ impl Deployer {
                     build_status: r.get(9)?,
                     health_status: r.get(10)?,
                     deployment_id: r.get(11)?,
-                    error: r.get(12)?,
-                    created_at: r.get(13)?,
-                    deployed_at: r.get(14)?,
+                    created_at: r.get(12)?,
+                    deployed_at: r.get(13)?,
                     live,
                     available,
                 })
@@ -314,6 +312,12 @@ impl Deployer {
                 "UPDATE deployments SET status = ?, error = ?, finished_at = ? WHERE id = ?",
                 params![status, error, now(), dep_id],
             );
+            if status != "success" {
+                let _ = conn.execute(
+                    "UPDATE releases SET status = 'failed' WHERE deployment_id = ? AND status != 'succeeded'",
+                    params![dep_id],
+                );
+            }
             conn.query_row(
                 "SELECT d.project_id, d.stage, d.kind, d.actor, p.name FROM deployments d LEFT JOIN projects p ON d.project_id = p.id WHERE d.id = ?",
                 params![dep_id],
