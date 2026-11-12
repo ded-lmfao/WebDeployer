@@ -14,7 +14,8 @@ export * from './workspace_actions.js';
 function openWebsiteWorkspace(projectId, tab = null) {
   state.selectedProjectId = Number(projectId);
   prefetchWebsiteWorkspace(state.selectedProjectId);
-  const targetTab = tab || 'deployments';
+  let targetTab = tab || 'deployments';
+  if (targetTab === 'overview') targetTab = 'deployments';
   navigateTo(targetTab, state.selectedProjectId);
 }
 window.openWebsiteWorkspace = openWebsiteWorkspace;

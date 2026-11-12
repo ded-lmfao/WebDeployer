@@ -6,9 +6,18 @@
 import { icon } from './icons.js';
 import { state, escapeHtml } from './state.js';
 import { api, toast } from './api.js';
+import { renderPipelineStages } from './deployments.js';
 
 // Re-export database modals submodule for 100% backward compatibility
 export * from './databases_modal.js';
+
+export const DB_PIPELINE_STAGES = [
+  { id: 'sandbox', label: 'Sandbox' },
+  { id: 'initdb', label: 'Cluster' },
+  { id: 'security', label: 'Security' },
+  { id: 'spawning', label: 'Engine' },
+  { id: 'healthy', label: 'Online' },
+];
 
 export async function loadDatabases() {
   try {
@@ -25,54 +34,24 @@ export async function loadDatabases() {
 }
 
 export function renderSingleDatabasePipeline(dbId, currentStage, currentStatus, detailText = '') {
-  const el = document.getElementById(`db-pipeline-container-${dbId}`);
+  const containerId = `db-pipeline-track-${dbId}`;
+  let el = document.getElementById(containerId) || document.getElementById(`db-pipeline-container-${dbId}`);
   if (!el) return;
+  if (el.id !== containerId) {
+    el.id = containerId;
+  }
 
-  const stages = [
-    { key: 'sandbox', label: 'Sandbox' },
-    { key: 'initdb', label: 'Cluster' },
-    { key: 'security', label: 'Security' },
-    { key: 'spawning', label: 'Engine' },
-    { key: 'healthy', label: 'Online' },
-  ];
+  renderPipelineStages(containerId, currentStage, currentStatus, null, DB_PIPELINE_STAGES);
 
-  const stageOrder = ['sandbox', 'initdb', 'security', 'spawning', 'healthy'];
-  const curIdx = stageOrder.indexOf(currentStage);
-
-  const dotsHtml = stages.map((st, idx) => {
-    let cls = 'dot-idle';
-    let iconStr = idx + 1;
-
-    if (idx < curIdx) {
-      cls = 'dot-done';
-      iconStr = '✓';
-    } else if (idx === curIdx) {
-      if (currentStatus === 'running') {
-        cls = 'dot-active';
-        iconStr = '↻';
-      } else if (currentStatus === 'success') {
-        cls = 'dot-done';
-        iconStr = '✓';
-      } else if (currentStatus === 'failed') {
-        cls = 'dot-error';
-        iconStr = '✕';
-      }
+  if (currentStatus === 'success') {
+    const subs = el.querySelectorAll('.water-node-sub');
+    if (subs && subs.length > 0) {
+      subs[subs.length - 1].textContent = 'Online';
     }
-
-    return `
-      <div class="pipeline-step ${cls}">
-        <div class="pipeline-dot">${iconStr}</div>
-        <span class="pipeline-label">${st.label}</span>
-      </div>
-    `;
-  }).join('<div class="pipeline-pipe"></div>');
-
-  el.innerHTML = `
-    <div class="service-pipeline-container">
-      <div class="pipeline-stepper-row">${dotsHtml}</div>
-      ${detailText ? `<div class="pipeline-detail-text">${escapeHtml(detailText)}</div>` : ''}
-    </div>
-  `;
+  } else if (detailText) {
+    const activeSub = el.querySelector('.water-node-vial.active')?.closest('.water-stage-unit')?.querySelector('.water-node-sub');
+    if (activeSub) activeSub.textContent = detailText;
+  }
 }
 
 export function renderDatabasePipeline(stage, status, detailText = '') {
@@ -147,7 +126,7 @@ export function renderDatabasesList() {
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
 
     return `
-      <div class="project-card database-card" id="database-card-${d.id}" style="display: flex; flex-direction: column; justify-content: space-between;">
+      <div class="project-card database-card" id="database-card-${d.id}">
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
@@ -164,19 +143,17 @@ export function renderDatabasesList() {
               </div>
             </div>
           </div>
-          <span class="badge ${statusBadgeCls}" id="db-card-status-badge-${d.id}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${statusText}</span>
+          <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+            ${d.pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px;">PID ${d.pid}</span>` : ''}
+            <span class="badge ${statusBadgeCls}" id="db-card-status-badge-${d.id}" style="font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${statusText}</span>
+          </div>
         </div>
 
-        <!-- Connection Preview -->
-        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
-          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="postgresql://${escapeHtml(d.dbUser || d.db_user || 'app_user')}:••••@${escapeHtml(hostOrDomain)}:${d.port || 5432}/${escapeHtml(d.dbName || d.db_name || '')}">
-            &rarr; postgresql://${escapeHtml(d.dbUser || d.db_user || 'app_user')}:••••@${escapeHtml(hostOrDomain)}:${d.port || 5432}/${escapeHtml(d.dbName || d.db_name || '')}
-          </span>
-          ${d.pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px; flex-shrink: 0;">PID ${d.pid}</span>` : ''}
-        </div>
+        <!-- Lifecycle Pipeline Track (Replaces connection string) -->
+        <div class="card-pipeline-track" id="db-pipeline-track-${d.id}" style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); margin: 2px 0;"></div>
 
         <!-- Badges & Telemetry Row -->
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 0; min-height: 24px;">
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
           <span class="badge ${accessBadgeCls}" style="font-size: 10px;">${icon('lock', { size: 10 })} ${accessLabel}</span>
           <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">DB: ${escapeHtml(d.dbName || d.db_name || 'app')}</span>
           <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">USER: ${escapeHtml(d.dbUser || d.db_user || 'app_user')}</span>
@@ -185,7 +162,7 @@ export function renderDatabasesList() {
         </div>
 
         <!-- Actions Footer -->
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 2px;">
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: auto;">
           <div style="display: flex; gap: 6px; align-items: center;">
             <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
               <span>${isRunning ? 'Stop' : 'Start'}</span>
@@ -201,6 +178,38 @@ export function renderDatabasesList() {
       </div>
     `;
   }).join('');
+
+  // Synchronize pipelines for all rendered database cards
+  list.forEach((d) => {
+    const isRunning = d.status === 'running';
+    const isStarting = d.status === 'starting';
+    const isStopping = d.status === 'stopping';
+    const isError = d.status === 'error';
+
+    let stage = 'sandbox';
+    let status = 'idle';
+    let detail = '';
+
+    if (isRunning) {
+      stage = 'healthy';
+      status = 'success';
+      detail = 'Online';
+    } else if (isStarting) {
+      stage = 'spawning';
+      status = 'running';
+      detail = 'Starting';
+    } else if (isStopping) {
+      stage = 'spawning';
+      status = 'running';
+      detail = 'Stopping';
+    } else if (isError) {
+      stage = 'spawning';
+      status = 'failed';
+      detail = 'Error';
+    }
+
+    renderSingleDatabasePipeline(d.id, stage, status, detail);
+  });
 }
 
 export function syncDatabaseCardState(id, status) {
@@ -250,6 +259,18 @@ export function syncDatabaseCardState(id, status) {
       toggleBtn.title = 'Start Database';
       toggleBtn.className = 'btn btn-success btn-sm';
     }
+  }
+
+  if (isRunning) {
+    renderSingleDatabasePipeline(id, 'healthy', 'success', 'Online');
+  } else if (isStarting) {
+    renderSingleDatabasePipeline(id, 'spawning', 'running', 'Starting');
+  } else if (isStopping) {
+    renderSingleDatabasePipeline(id, 'spawning', 'running', 'Stopping');
+  } else if (isError) {
+    renderSingleDatabasePipeline(id, 'spawning', 'failed', 'Error');
+  } else {
+    renderSingleDatabasePipeline(id, 'sandbox', 'idle', 'Idle');
   }
 }
 
