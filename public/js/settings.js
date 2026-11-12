@@ -631,7 +631,7 @@ export async function startPlatformUpdate() {
         if (spinner) spinner.style.display = 'block';
         if (bannerMsg) bannerMsg.textContent = 'Restarting WebDep panel now. Reconnecting automatically...';
 
-        pollReconnectionAfterUpdate();
+        void pollReconnectionAfterUpdate();
       }
     } catch (_) {
       // transient network poll error
@@ -671,7 +671,7 @@ export async function executePostUpdateRestart() {
     toast(`Restart trigger returned: ${err.message}`, 'info');
   }
 
-  pollReconnectionAfterUpdate();
+  void pollReconnectionAfterUpdate();
 }
 
 export function copyUpdateLogs() {

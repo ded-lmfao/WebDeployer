@@ -138,7 +138,7 @@ export function bindEditorEvents() {
   textarea.addEventListener('click', updateEditorPos);
 
   textarea.addEventListener('input', () => {
-    updateEditorHighlight();
+    void updateEditorHighlight();
     updateEditorGutter();
     updateEditorPos();
     const isDirty = textarea.value !== state.filesEditorInitialContent;
@@ -231,7 +231,7 @@ export async function filesOpen(path) {
     }
 
     if (window.renderFilesTable) window.renderFilesTable();
-    updateEditorHighlight(true);
+    void updateEditorHighlight(true);
     updateEditorGutter();
     updateEditorPos();
     bindEditorEvents();

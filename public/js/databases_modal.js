@@ -254,7 +254,7 @@ export async function refreshCurrentDatabaseLogs() {
 export function copyDatabaseLogs() {
   const pre = document.getElementById('db-logs-content');
   if (pre) {
-    copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard!');
+    void copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard!');
   }
 }
 
@@ -326,7 +326,7 @@ export async function deleteDatabase(id, name) {
 export function copyElementValue(elemId) {
   const el = document.getElementById(elemId);
   if (!el) return;
-  copyTextToClipboard(el.value, 'Copied to clipboard!');
+  void copyTextToClipboard(el.value, 'Copied to clipboard!');
 }
 
 // Bind globals for inline HTML event handlers

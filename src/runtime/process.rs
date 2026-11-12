@@ -256,13 +256,14 @@ impl Runtime {
                         if let Ok(cpid) = num_str.parse::<u32>() {
                             if cpid > 0 {
                                 let pid_file = run_dir_clone.join("pids.txt");
-                                if let Ok(mut f) = std::fs::OpenOptions::new()
+                                if let Ok(mut f) = tokio::fs::OpenOptions::new()
                                     .create(true)
                                     .append(true)
                                     .open(&pid_file)
+                                    .await
                                 {
-                                    use std::io::Write;
-                                    let _ = writeln!(f, "{}", cpid);
+                                    use tokio::io::AsyncWriteExt;
+                                    let _ = f.write_all(format!("{}\n", cpid).as_bytes()).await;
                                 }
                             }
                         }

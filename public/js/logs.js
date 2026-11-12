@@ -145,7 +145,8 @@ function appendTerminalLogs(newLines) {
 function ansiToHtml(str) {
   if (!str) return '';
   const escaped = escapeHtml(str);
-  const ansiRegex = /(?:\x1b|\u001b)\[([0-9;]*)m/g;
+  const esc = String.fromCharCode(27);
+  const ansiRegex = new RegExp(`${esc}\\[([0-9;]*)m`, 'g');
   const colors = {
     '30': 'var(--text-dim)',
     '31': '#ef4444',

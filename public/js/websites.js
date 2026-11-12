@@ -502,8 +502,8 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
   }
 
   const portInput = document.getElementById('website-port');
-  let port = portInput?.value ? Number(portInput.value) : NaN;
-  if (!port || isNaN(port) || port < 1 || port > 65535) {
+  let port = portInput?.value ? Number(portInput.value) : Number.NaN;
+  if (!port || Number.isNaN(port) || port < 1 || port > 65535) {
     port = getNextAvailablePort(3000);
     if (portInput) portInput.value = port;
   }

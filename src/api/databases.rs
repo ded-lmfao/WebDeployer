@@ -150,28 +150,66 @@ pub(crate) struct LinkDbPayload {
     project_id: i64,
 }
 
+const LINKED_DB_ENV_KEYS: [&str; 6] = [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGDATABASE",
+];
+
+fn service_dotenv_path(p: &crate::projects::Project) -> std::path::PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let raw = std::path::Path::new(&p.deploy_dir);
+    let base = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        cwd.join(p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\"))
+    };
+    base.join("app").join(".env")
+}
+
+fn strip_linked_db_env_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter(|line| {
+            line.split_once('=')
+                .map(|(k, _)| !LINKED_DB_ENV_KEYS.contains(&k.trim()))
+                .unwrap_or(true)
+        })
+        .map(|line| line.to_string())
+        .collect()
+}
+
 pub(crate) async fn link_database_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Json(payload): Json<LinkDbPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let user = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let p = fetch_project(&state.projects, payload.project_id)?;
+    let user = verify_power(&state, &headers, "env", Some(p.id))?;
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
 
-    let p = fetch_project(&state.projects, payload.project_id)?;
     let raw_pass = db.db_password.unwrap_or_default();
-    let internal_url = format!("postgresql://{}:{}@127.0.0.1:{}/{}", db.db_user, raw_pass, db.port, db.db_name);
+    let port_str = db.port.to_string();
+    let internal_url = format!("postgresql://{}:{}@127.0.0.1:{}/{}", db.db_user, raw_pass, port_str, db.db_name);
+    let entries: [(&str, &str, bool); 6] = [
+        (LINKED_DB_ENV_KEYS[0], &internal_url, true),
+        (LINKED_DB_ENV_KEYS[1], "127.0.0.1", false),
+        (LINKED_DB_ENV_KEYS[2], &port_str, false),
+        (LINKED_DB_ENV_KEYS[3], &db.db_user, false),
+        (LINKED_DB_ENV_KEYS[4], &raw_pass, true),
+        (LINKED_DB_ENV_KEYS[5], &db.db_name, false),
+    ];
 
-    state.projects.set_env_var(p.id, "DATABASE_URL", &internal_url, true).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.projects.set_env_var(p.id, "PGHOST", "127.0.0.1", false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.projects.set_env_var(p.id, "PGPORT", &db.port.to_string(), false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.projects.set_env_var(p.id, "PGUSER", &db.db_user, false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.projects.set_env_var(p.id, "PGPASSWORD", &raw_pass, true).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.projects.set_env_var(p.id, "PGDATABASE", &db.db_name, false).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    for (key, val, is_secret) in entries {
+        state.projects.set_env_var(p.id, key, val, is_secret)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
 
     state.databases.set_linked_project(id, Some(p.id)).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     state.cache.invalidate_project(p.id);
@@ -182,27 +220,13 @@ pub(crate) async fn link_database_handler(
     let target_noun = if is_service { "service" } else { "website" };
 
     if is_service {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let raw = std::path::Path::new(&p.deploy_dir);
-        let base = if raw.is_absolute() {
-            raw.to_path_buf()
-        } else {
-            cwd.join(p.deploy_dir.trim_start_matches("./").trim_start_matches(".\\"))
-        };
-        let app_dir = base.join("app");
-        let dotenv_path = app_dir.join(".env");
+        let dotenv_path = service_dotenv_path(&p);
         if dotenv_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&dotenv_path).await {
-                let mut lines: Vec<String> = content.lines()
-                    .filter(|l| !l.starts_with("DATABASE_URL=") && !l.starts_with("PGHOST=") && !l.starts_with("PGPORT=") && !l.starts_with("PGUSER=") && !l.starts_with("PGPASSWORD=") && !l.starts_with("PGDATABASE="))
-                    .map(|l| l.to_string())
-                    .collect();
-                lines.push(format!("DATABASE_URL={}", internal_url));
-                lines.push("PGHOST=127.0.0.1".to_string());
-                lines.push(format!("PGPORT={}", db.port));
-                lines.push(format!("PGUSER={}", db.db_user));
-                lines.push(format!("PGPASSWORD={}", raw_pass));
-                lines.push(format!("PGDATABASE={}", db.db_name));
+                let mut lines = strip_linked_db_env_lines(&content);
+                for (key, val, _) in entries {
+                    lines.push(format!("{}={}", key, val));
+                }
                 let _ = tokio::fs::write(&dotenv_path, lines.join("\n") + "\n").await;
             }
         }
@@ -220,13 +244,41 @@ pub(crate) async fn unlink_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?.ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
     let old_proj = db.linked_project_id.and_then(|pid| state.projects.get(pid).ok().flatten());
+    let actor = match old_proj.as_ref() {
+        Some(p) => verify_power(&state, &headers, "env", Some(p.id))?,
+        None => require_current_user(&state, &headers)?,
+    };
+
+    if let Some(ref p) = old_proj {
+        for key in LINKED_DB_ENV_KEYS {
+            let _ = state.projects.delete_env_var(p.id, key);
+        }
+        if p.project_kind == "service" {
+            let dotenv_path = service_dotenv_path(p);
+            if dotenv_path.exists() {
+                if let Ok(content) = tokio::fs::read_to_string(&dotenv_path).await {
+                    let lines = strip_linked_db_env_lines(&content);
+                    let out = if lines.is_empty() { String::new() } else { lines.join("\n") + "\n" };
+                    let _ = tokio::fs::write(&dotenv_path, out).await;
+                }
+            }
+        }
+        state.cache.invalidate_project(p.id);
+    }
+
     let target_noun = if old_proj.as_ref().map(|p| p.project_kind.as_str()) == Some("service") { "service" } else { "website" };
     let desc = format!("Unlinked database from {}", target_noun);
-    perform_database_action(&state, &headers, id, "database.unlink", &desc, async {
-        state.databases.set_linked_project(id, None)
-    }).await
+    state.databases.set_linked_project(id, None)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
+    log_audit(&state, &actor.username, "database.unlink", Some(&db.name), Some(&desc));
+
+    Ok(Json(serde_json::json!({ "ok": true, "message": desc })))
 }
 
 pub(crate) async fn get_database_logs_handler(

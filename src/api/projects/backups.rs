@@ -331,11 +331,13 @@ pub(crate) async fn delete_backup_handler(
         if let Some(ref p) = p_opt {
             let backups_root = std::path::Path::new(&p.deploy_dir).join("backups");
             let releases_root = std::path::Path::new(&p.deploy_dir).join("releases");
-            if let Ok(canon_path) = std::fs::canonicalize(path) {
-                let inside_backups = std::fs::canonicalize(&backups_root)
+            if let Ok(canon_path) = tokio::fs::canonicalize(path).await {
+                let inside_backups = tokio::fs::canonicalize(&backups_root)
+                    .await
                     .map(|r| canon_path.starts_with(&r) && canon_path != r)
                     .unwrap_or(false);
-                let inside_releases = std::fs::canonicalize(&releases_root)
+                let inside_releases = tokio::fs::canonicalize(&releases_root)
+                    .await
                     .map(|r| canon_path.starts_with(&r) && canon_path != r)
                     .unwrap_or(false);
                 if inside_backups || inside_releases {

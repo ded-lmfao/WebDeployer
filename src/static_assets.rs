@@ -62,7 +62,7 @@ fn get_mime(path: &str) -> &'static str {
 
 /// Locate a static asset directly on the local filesystem if available.
 /// Prevents directory traversal and symlink escape, supporting both cwd and exe directory.
-fn find_disk_file(clean_path: &str) -> Option<PathBuf> {
+async fn find_disk_file(clean_path: &str) -> Option<PathBuf> {
     if clean_path.contains("..")
         || clean_path.contains('\\')
         || clean_path.contains(':')
@@ -72,26 +72,26 @@ fn find_disk_file(clean_path: &str) -> Option<PathBuf> {
         return None;
     }
 
-    let check_base = |base: &Path| -> Option<PathBuf> {
+    async fn check_base(base: &Path, clean_path: &str) -> Option<PathBuf> {
         let candidate = base.join(clean_path);
-        let canon_base = std::fs::canonicalize(base).ok()?;
-        let canon_cand = std::fs::canonicalize(&candidate).ok()?;
-        if canon_cand.starts_with(&canon_base) && canon_cand.is_file() {
+        let canon_base = tokio::fs::canonicalize(base).await.ok()?;
+        let canon_cand = tokio::fs::canonicalize(&candidate).await.ok()?;
+        if canon_cand.starts_with(&canon_base) && tokio::fs::metadata(&canon_cand).await.map(|m| m.is_file()).unwrap_or(false) {
             Some(canon_cand)
         } else {
             None
         }
-    };
+    }
 
     // 1. Check local ./public/ folder in current working directory
-    if let Some(found) = check_base(Path::new("public")) {
+    if let Some(found) = check_base(Path::new("public"), clean_path).await {
         return Some(found);
     }
 
     // 2. Check ./public/ next to the executable binary
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(parent) = exe_path.parent() {
-            if let Some(found) = check_base(&parent.join("public")) {
+            if let Some(found) = check_base(&parent.join("public"), clean_path).await {
                 return Some(found);
             }
         }
@@ -183,14 +183,14 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
 
     // FAST-PATH: If the file exists directly on disk in ./public, serve with RAM-backed cache & 304 ETag verification!
     // This provides 0ms responses, automatic live hot-reload on save, and 0 bytes 304 Not Modified!
-    if let Some(disk_path) = find_disk_file(clean_path) {
+    if let Some(disk_path) = find_disk_file(clean_path).await {
         if let Ok(meta) = tokio::fs::metadata(&disk_path).await {
             let mut mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             if clean_path == "style.css" {
                 if let Some(parent) = disk_path.parent() {
-                    if let Ok(entries) = std::fs::read_dir(parent.join("css")) {
-                        for entry in entries.flatten() {
-                            if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
+                    if let Ok(mut entries) = tokio::fs::read_dir(parent.join("css")).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            if let Ok(m) = entry.metadata().await.and_then(|m| m.modified()) {
                                 if m > mtime {
                                     mtime = m;
                                 }

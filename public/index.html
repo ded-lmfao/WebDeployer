@@ -965,7 +965,7 @@
                 <div style="display: flex; align-items: center; gap: 10px;">
                   <div class="file-search-input-wrap">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="file-search-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                    <input type="text" id="files-filter-input" placeholder="Filter files..." class="file-filter-input" oninput="filesFilterList(this.value)">
+                    <input type="text" id="files-filter-input" placeholder="Filter files..." aria-label="Filter files" class="file-filter-input" oninput="filesFilterList(this.value)">
                     <button type="button" id="files-filter-clear" class="file-filter-clear" onclick="filesClearFilter()" style="display: none;">&times;</button>
                   </div>
                   <span id="files-count-badge" class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono); font-weight: 500;">
@@ -1032,7 +1032,7 @@
                 <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
                 <div class="file-editor-stage" id="files-editor-stage">
                   <pre id="files-editor-pre" class="file-editor-pre" aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
-                  <textarea id="files-editor" class="file-editor-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+                  <textarea id="files-editor" class="file-editor-textarea" aria-label="File content editor" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
                 </div>
               </div>
 
@@ -1855,7 +1855,7 @@
 
         <!-- Service Template Preset Selector -->
         <div style="margin-bottom: 14px;">
-          <label class="form-label" style="margin-bottom: 6px;">Service Template Preset</label>
+          <span class="form-label" style="display: block; margin-bottom: 6px;">Service Template Preset</span>
           <div class="preset-selector" id="service-preset-buttons">
             <div class="preset-chip active" data-service-preset="lavalink">Lavalink (Java)</div>
             <div class="preset-chip" data-service-preset="node-service">Node.js Service</div>
@@ -1867,7 +1867,7 @@
 
         <!-- Deployment Source Selector (Manual File Upload vs GitHub Repo) -->
         <div style="margin-bottom: 14px;">
-          <label class="form-label" style="margin-bottom: 6px;">Deployment Source</label>
+          <span class="form-label" style="display: block; margin-bottom: 6px;">Deployment Source</span>
           <div style="display: flex; gap: 8px;">
             <button type="button" class="btn btn-secondary btn-sm active" id="service-source-mode-manual" onclick="setServiceSourceMode('manual')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
               Manual File Upload (No Git)
@@ -2643,7 +2643,7 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label">Internal Connection URL (For websites on this VPS)</label>
+          <label class="form-label" for="db-detail-internal-url">Internal Connection URL (For websites on this VPS)</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="db-detail-internal-url" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12px;">
@@ -2651,7 +2651,7 @@
           </div>
         </div>
         <div class="form-group" id="db-detail-external-url-wrap">
-          <label class="form-label">External Connection URL (For remote VPS or external clients)</label>
+          <label class="form-label" for="db-detail-external-url">External Connection URL (For remote VPS or external clients)</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="db-detail-external-url" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12px;">
@@ -2662,30 +2662,30 @@
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;">
           <div class="form-group">
-            <span class="form-label">Database Name</span>
+            <label class="form-label" for="db-detail-dbname">Database Name</label>
             <input type="text" id="db-detail-dbname" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12.5px;">
           </div>
           <div class="form-group">
-            <span class="form-label">Username</span>
+            <label class="form-label" for="db-detail-user">Username</label>
             <input type="text" id="db-detail-user" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12.5px;">
           </div>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
           <div class="form-group">
-            <span class="form-label">Host</span>
+            <label class="form-label" for="db-detail-host">Host</label>
             <input type="text" id="db-detail-host" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12.5px;" value="127.0.0.1">
           </div>
           <div class="form-group">
-            <span class="form-label">Port</span>
+            <label class="form-label" for="db-detail-port">Port</label>
             <input type="text" id="db-detail-port" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12.5px;">
           </div>
         </div>
         <div class="form-group">
-          <span class="form-label">Password</span>
+          <label class="form-label" for="db-detail-password">Password</label>
           <div style="display: flex; gap: 8px;">
             <input type="password" id="db-detail-password" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12.5px;">
@@ -2695,7 +2695,7 @@
           </div>
         </div>
         <div class="form-group">
-          <span class="form-label">CLI Command (psql)</span>
+          <label class="form-label" for="db-detail-psql">CLI Command (psql)</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="db-detail-psql" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12px;">
@@ -2829,7 +2829,7 @@
         <!-- Live Build & Git Console Logs -->
         <div class="form-group" style="margin-bottom: 0;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <label class="form-label" style="margin: 0; font-size: 11.5px; color: var(--text-dim);">Build Output</label>
+            <span class="form-label" style="margin: 0; font-size: 11.5px; color: var(--text-dim);">Build Output</span>
             <button type="button" class="btn btn-secondary btn-sm" onclick="copyUpdateLogs()" style="padding: 1px 6px; font-size: 10.5px;">Copy</button>
           </div>
           <div id="update-console-logs" style="height: 180px; overflow-y: auto; background: #0c0e14; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: #cbd5e1; white-space: pre-wrap; word-break: break-all;">Waiting for update to start...</div>

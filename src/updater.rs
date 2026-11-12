@@ -547,15 +547,16 @@ pub fn restart_service_delayed(delay_ms: u64) {
         #[cfg(unix)]
         {
             // 1. Check if running under systemd
-            let is_systemd = Command::new("systemctl")
+            let is_systemd = tokio::process::Command::new("systemctl")
                 .args(["is-active", "--quiet", "webdep"])
                 .status()
+                .await
                 .map(|s| s.success())
                 .unwrap_or(false);
 
             if is_systemd {
                 info!("Restarting WebDep via systemd service 'webdep'...");
-                let _ = Command::new("sh")
+                let _ = tokio::process::Command::new("sh")
                     .args(["-c", "if [ -f /etc/systemd/system/webdep.service ] && ! grep -q KillMode=process /etc/systemd/system/webdep.service; then (sudo sed -i '/RestartSec=/a KillMode=process' /etc/systemd/system/webdep.service && sudo systemctl daemon-reload) >/dev/null 2>&1; fi; (sleep 0.5 && (sudo systemctl restart webdep || systemctl restart webdep)) >/dev/null 2>&1 &"])
                     .spawn();
                 return;
@@ -566,7 +567,7 @@ pub fn restart_service_delayed(delay_ms: u64) {
                 let bin = cwd.join("target").join("release").join("webdep");
                 if bin.exists() {
                     info!("Spawning fresh WebDep binary detached at: {}", bin.display());
-                    let _ = Command::new(bin)
+                    let _ = tokio::process::Command::new(bin)
                         .current_dir(&cwd)
                         .env("MALLOC_ARENA_MAX", "2")
                         .env("MALLOC_TRIM_THRESHOLD_", "65536")
@@ -583,13 +584,12 @@ pub fn restart_service_delayed(delay_ms: u64) {
         {
             if let Ok(cwd) = std::env::current_dir() {
                 let bin = cwd.join("target").join("release").join("webdep.exe");
-                if bin.exists() {
-                    let mut cmd = Command::new(bin);
+                if tokio::fs::try_exists(&bin).await.unwrap_or(false) {
+                    let mut cmd = tokio::process::Command::new(bin);
                     cmd.current_dir(&cwd)
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null());
-                    use std::os::windows::process::CommandExt;
                     cmd.creation_flags(0x00000008 | 0x00000200);
                     let _ = cmd.spawn();
                 }

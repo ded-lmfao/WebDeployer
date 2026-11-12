@@ -112,7 +112,7 @@ impl Deployer {
                 self.finish_deployment(dep_id, "failed", Some(&e));
                 return;
             }
-            let _ = std::fs::remove_dir_all(&release_dir);
+            let _ = tokio::fs::remove_dir_all(&release_dir).await;
             self.logs.add(
                 Some(p.id),
                 Some(dep_id),

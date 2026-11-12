@@ -643,7 +643,8 @@ impl Databases {
         let pid = match wait_for_pg_ready(port, &data_dir, 20000).await {
             Some(p) => p,
             None => {
-                let tail = std::fs::read_to_string(&log_file)
+                let tail = tokio::fs::read_to_string(&log_file)
+                    .await
                     .map(|s| {
                         let lines: Vec<&str> = s.lines().collect();
                         lines[lines.len().saturating_sub(8)..].join(" | ")
