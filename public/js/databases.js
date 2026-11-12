@@ -14,9 +14,13 @@ export async function loadDatabases() {
   try {
     const list = await api('/api/databases');
     state.databases = Array.isArray(list) ? list : [];
+    const badge = document.getElementById('badge-databases-count');
+    if (badge) badge.textContent = state.databases.length;
   } catch (err) {
     console.warn('Failed to load databases:', err);
     state.databases = [];
+    const badge = document.getElementById('badge-databases-count');
+    if (badge) badge.textContent = 0;
   }
 }
 
@@ -85,6 +89,10 @@ export function renderDatabasesList() {
   if (!container) return;
 
   const list = state.databases || [];
+  const badge = document.getElementById('badge-databases-count');
+  if (badge) {
+    badge.textContent = list.length;
+  }
   const countBadge = document.getElementById('databases-count-badge');
   if (countBadge) {
     countBadge.textContent = `${list.length} Instance${list.length === 1 ? '' : 's'}`;
@@ -135,53 +143,59 @@ export function renderDatabasesList() {
     }
 
     const hostOrDomain = d.domain ? d.domain : (d.host || '127.0.0.1');
+    const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === d.id || x.database_id === d.id));
+    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
 
     return `
-      <div class="project-card database-card" id="database-card-${d.id}">
-        <div class="database-card-header">
-          <div class="database-avatar-box">
-            ${icon('database', { size: 18 })}
-          </div>
-          <div class="database-title-col">
-            <div class="database-name-row">
-              <span class="status-dot ${isRunning ? 'online' : 'offline'}"></span>
-              <strong class="database-name">${escapeHtml(d.name)}</strong>
+      <div class="project-card database-card" id="database-card-${d.id}" style="display: flex; flex-direction: column; justify-content: space-between;">
+        <!-- Header -->
+        <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(56, 189, 248, 0.12); color: #38bdf8; display: flex; align-items: center; justify-content: center;">
+              ${icon('database', { size: 18 })}
             </div>
-            <div class="database-subtitle">
-              <span>PostgreSQL Cluster</span>
-              <span class="database-port-pill">• :${d.port || 5432}</span>
+            <div style="min-width: 0;">
+              <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <span class="status-dot ${isRunning ? 'online' : 'offline'}"></span>
+                <span>${escapeHtml(d.name)}</span>
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                PostgreSQL Cluster &bull; :${d.port || 5432}
+              </div>
             </div>
           </div>
-          <div class="database-header-status">
-            <span class="badge ${statusBadgeCls}" id="db-card-status-badge-${d.id}">${statusText}</span>
-          </div>
+          <span class="badge ${statusBadgeCls}" id="db-card-status-badge-${d.id}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${statusText}</span>
         </div>
 
-        <div class="database-connection-preview">
-          <code><span class="prompt-sig">&rarr;</span> postgresql://${escapeHtml(d.dbUser || d.db_user || 'app_user')}:••••@${escapeHtml(hostOrDomain)}:${d.port || 5432}/${escapeHtml(d.dbName || d.db_name || '')}</code>
-          ${d.pid ? `<span class="pid-badge">PID ${d.pid}</span>` : ''}
+        <!-- Connection Preview -->
+        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
+          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="postgresql://${escapeHtml(d.dbUser || d.db_user || 'app_user')}:••••@${escapeHtml(hostOrDomain)}:${d.port || 5432}/${escapeHtml(d.dbName || d.db_name || '')}">
+            &rarr; postgresql://${escapeHtml(d.dbUser || d.db_user || 'app_user')}:••••@${escapeHtml(hostOrDomain)}:${d.port || 5432}/${escapeHtml(d.dbName || d.db_name || '')}
+          </span>
+          ${d.pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px; flex-shrink: 0;">PID ${d.pid}</span>` : ''}
         </div>
 
-        <div class="database-meta-chips">
-          <span class="meta-chip meta-chip-access ${accessBadgeCls}">${accessLabel}</span>
-          <span class="meta-chip">DB: ${escapeHtml(d.dbName || d.db_name || 'app')}</span>
-          <span class="meta-chip">USER: ${escapeHtml(d.dbUser || d.db_user || 'app_user')}</span>
-          ${d.domain ? `<span class="meta-chip meta-chip-sha">${escapeHtml(d.domain)}</span>` : ''}
+        <!-- Badges & Telemetry Row -->
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 0; min-height: 24px;">
+          <span class="badge ${accessBadgeCls}" style="font-size: 10px;">${icon('lock', { size: 10 })} ${accessLabel}</span>
+          <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">DB: ${escapeHtml(d.dbName || d.db_name || 'app')}</span>
+          <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">USER: ${escapeHtml(d.dbUser || d.db_user || 'app_user')}</span>
+          ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
+          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
         </div>
 
-        <div id="db-pipeline-container-${d.id}" style="display:none; margin: 12px 0 6px 0;"></div>
-
-        <div class="database-actions-row">
-          <div class="database-left-actions">
-            <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" title="${isRunning ? 'Stop Database' : 'Start Database'}">
+        <!-- Actions Footer -->
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto;">
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
               <span>${isRunning ? 'Stop' : 'Start'}</span>
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" title="Connection Strings & Password">Connection</button>
-            <button class="btn btn-secondary btn-sm" onclick="showDatabaseLogs(${d.id})" title="View PostgreSQL Server Logs">Logs</button>
-            <button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" title="Network Access & Domain">Access</button>
+            <button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings & Password">Connection</button>
+            <button class="btn btn-secondary btn-sm" onclick="showDatabaseLogs(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="View PostgreSQL Server Logs">Logs</button>
+            <button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Network Access & Domain">Access</button>
           </div>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDatabase(${d.id}, '${escapeHtml(d.name)}')" title="Delete Database">
-            ${icon('trash', { size: 14 })}
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDatabase(${d.id}, '${escapeHtml(d.name)}')" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Delete Database">
+            ${icon('trash', { size: 12 })}
           </button>
         </div>
       </div>

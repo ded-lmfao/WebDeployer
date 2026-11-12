@@ -184,8 +184,10 @@ async function loadOverview() {
     const badgeSvcEl = document.getElementById('badge-services-count');
     if (badgeSvcEl) badgeSvcEl.textContent = ovSvc.length;
     const badgeDbEl = document.getElementById('badge-databases-count');
-    if (badgeDbEl && Array.isArray(data.resources)) {
-      badgeDbEl.textContent = data.resources.filter((r) => r.kind === 'database').length;
+    if (badgeDbEl) {
+      const dbCountFromResources = Array.isArray(data.resources) ? data.resources.filter((r) => r.kind === 'database').length : 0;
+      const dbCountFromState = Array.isArray(state.databases) ? state.databases.length : 0;
+      badgeDbEl.textContent = Math.max(dbCountFromResources, dbCountFromState);
     }
 
     const svcOnline = ovSvc.filter((x) => x.app?.running).length;
