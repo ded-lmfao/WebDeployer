@@ -239,7 +239,9 @@ pub(crate) async fn overview_handler(
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     let panel_pid = std::process::id();
-    let mut pids_to_query = vec![panel_pid];
+    // Isolate panel daemon metrics to the WebDep process itself so child workloads are never double-counted into the panel
+    let (panel_raw_cpu, panel_mem) = state.monitor.get_process_metrics(panel_pid);
+    let mut pids_to_query = Vec::new();
 
     for p in &projs {
         if p.app_status == "running" {
@@ -274,7 +276,6 @@ pub(crate) async fn overview_handler(
     let mut resources = Vec::new();
 
     // 1. WebDep Panel daemon self metrics
-    let (panel_raw_cpu, panel_mem) = proc_metrics.get(&panel_pid).copied().unwrap_or((0.0, 0));
     let panel_cpu = ((panel_raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0;
     let panel_mem_pct = ((panel_mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 

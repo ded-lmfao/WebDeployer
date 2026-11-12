@@ -256,6 +256,10 @@ impl Monitor {
                 }
                 if let Some(kids) = children_map.get(&curr) {
                     for &k in kids {
+                        // Do not cross into another monitored root workload to avoid double-counting
+                        if k != root && root_pids.contains(&k) {
+                            continue;
+                        }
                         if visited.insert(k) {
                             queue.push_back(k);
                         }
@@ -267,6 +271,19 @@ impl Monitor {
         }
 
         results
+    }
+
+    /// Returns (cpu_usage, resident_memory_bytes) strictly for a single process
+    /// without traversing into descendant or child processes.
+    pub fn get_process_metrics(&self, pid: u32) -> (f32, u64) {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+        let sys = self.sys.lock().unwrap();
+        let pid_obj = sysinfo::Pid::from_u32(pid);
+        if let Some(p) = sys.process(pid_obj) {
+            (p.cpu_usage(), p.memory())
+        } else {
+            (0.0, 0)
+        }
     }
 
     /// Instantaneous (< 1 microsecond) lock-free/read-lock read of the cached telemetry snapshot.

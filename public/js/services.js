@@ -91,7 +91,7 @@ function renderSingleServicePipeline(serviceId, currentStage, currentStatus, det
         openWebsiteWorkspace(serviceId, 'logs');
       };
     } else if (currentStatus === 'success') {
-      badge.textContent = detailText ? detailText.toUpperCase() : 'ONLINE (READY)';
+      badge.textContent = detailText ? detailText.toUpperCase() : 'READY';
       badge.className = 'badge badge-success';
       badge.onclick = null;
       badge.style.cursor = 'default';
@@ -131,8 +131,7 @@ function syncServiceCardPipeline(p) {
   } else if (p.app_status === 'stopping') {
     renderSingleServicePipeline(p.id, 'daemon', 'running', 'STOPPING...');
   } else if (p.app_status === 'running') {
-    const pidText = p.app_pid ? `ONLINE (PID ${p.app_pid})` : 'ONLINE (READY)';
-    renderSingleServicePipeline(p.id, 'online', 'success', pidText);
+    renderSingleServicePipeline(p.id, 'online', 'success', 'READY');
   } else if (p.app_status === 'error' || p.app_status === 'failed') {
     renderSingleServicePipeline(p.id, 'daemon', 'failed', 'FAILED — VIEW LOGS');
   } else {
@@ -193,7 +192,7 @@ function renderServicesList() {
 
   setHtmlIfChanged(container, filtered.map((p) => {
     const isOnline = p.app_status === 'running';
-    const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
+    const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
 
     let typeIconName = 'bot';
     let typeName = 'Backend Service';
@@ -280,7 +279,7 @@ function renderServicesList() {
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);">Lifecycle Pipeline</span>
             <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" id="service-pipeline-badge-${p.id}" style="font-size: 9.5px; padding: 2px 7px;">
-              ${isOnline ? (p.app_pid ? `ONLINE (PID ${p.app_pid})` : 'ONLINE (READY)') : 'STOPPED'}
+              ${isOnline ? 'READY' : 'STOPPED'}
             </span>
           </div>
           <div class="pipeline-track card-pipeline-track" id="service-pipeline-track-${p.id}">
@@ -292,13 +291,13 @@ function renderServicesList() {
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 0; min-height: 24px;">
           ${isLocal
             ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px;">${icon('folder', { size: 10 })} Manual Files</span>`
-            : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px;">${icon('git-branch', { size: 10 })} ${sha}</span>`
+            : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">${icon('git-branch', { size: 10 })} ${escapeHtml(shaText)}</span>`
           }
           ${portBadge}
           ${domainBadge}
           ${accessBadge}
+          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
           <span id="service-uptime-${p.id}" style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-left: auto;">${uptimeText}</span>
-          ${diskStr ? `<span style="font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono);">${diskStr}</span>` : ''}
         </div>
 
         <!-- Actions Footer -->

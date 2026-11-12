@@ -549,7 +549,7 @@ async function startProject(projectId) {
     if (proj) {
       proj.app_status = 'running';
       if (proj.project_kind === 'service') {
-        renderSingleServicePipeline(projectId, 'online', 'success', proj.app_pid ? `ONLINE (PID ${proj.app_pid})` : 'ONLINE (READY)');
+        renderSingleServicePipeline(projectId, 'online', 'success', 'READY');
       }
     }
     toast('Process started successfully.', 'success');
@@ -596,7 +596,7 @@ async function stopProject(projectId) {
     if (proj) {
       proj.app_status = 'running';
       if (proj.project_kind === 'service') {
-        renderSingleServicePipeline(projectId, 'online', 'success', 'ONLINE (READY)');
+        renderSingleServicePipeline(projectId, 'online', 'success', 'READY');
       }
     }
     toast(`Stop failed: ${err.message}`, 'error');
