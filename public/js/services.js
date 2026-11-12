@@ -248,9 +248,10 @@ function renderServicesList() {
 
     return `
       <div class="project-card service-card" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
-        <div class="project-card-header" style="min-height: 38px; display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-            <div style="width: 36px; height: 36px; min-width: 36px; border-radius: 8px; background: rgba(99, 102, 241, 0.12); color: #818cf8; display: flex; align-items: center; justify-content: center;">
+        <!-- Header -->
+        <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.12); color: #818cf8; display: flex; align-items: center; justify-content: center;">
               ${icon(typeIconName, { size: 18 })}
             </div>
             <div style="min-width: 0;">
@@ -266,43 +267,55 @@ function renderServicesList() {
           <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
         </div>
 
-        <div style="background: var(--bg-alt); padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); height: 32px; min-height: 32px; display: flex; justify-content: space-between; align-items: center; overflow: hidden; box-sizing: border-box;">
+        <!-- Command Line -->
+        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
           <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(p.start_cmd || '')}">
             $ ${escapeHtml(p.start_cmd || 'node index.js')}
           </span>
-          ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 5px; flex-shrink: 0;">PID ${p.app_pid}</span>` : ''}
+          ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px; flex-shrink: 0;">PID ${p.app_pid}</span>` : ''}
         </div>
 
-        <div style="display: flex; align-items: center; gap: 6px; height: 22px; min-height: 22px; overflow: hidden; font-size: 11px;">
+        <!-- Lifecycle Pipeline Track -->
+        <div style="margin: 8px 0; padding: 10px 12px; background: var(--bg-alt); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);" onclick="event.stopPropagation()">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);">Lifecycle Pipeline</span>
+            <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" id="service-pipeline-badge-${p.id}" style="font-size: 9.5px; padding: 2px 7px;">
+              ${isOnline ? (p.app_pid ? `ONLINE (PID ${p.app_pid})` : 'ONLINE (READY)') : 'STOPPED'}
+            </span>
+          </div>
+          <div class="pipeline-track card-pipeline-track" id="service-pipeline-track-${p.id}">
+            <!-- Rendered with fluid animated vials and pipes -->
+          </div>
+        </div>
+
+        <!-- Badges & Telemetry Row -->
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 0; min-height: 24px;">
           ${isLocal
-        ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('folder', { size: 10 })} Manual</span>`
-        : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('git-branch', { size: 10 })} ${sha}</span>`
-      }
+            ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px;">${icon('folder', { size: 10 })} Manual Files</span>`
+            : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px;">${icon('git-branch', { size: 10 })} ${sha}</span>`
+          }
           ${portBadge}
           ${domainBadge}
           ${accessBadge}
-          ${diskStr ? `<span style="font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono); margin-left: auto;">${diskStr}</span>` : ''}
+          <span id="service-uptime-${p.id}" style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-left: auto;">${uptimeText}</span>
+          ${diskStr ? `<span style="font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono);">${diskStr}</span>` : ''}
         </div>
 
-        <!-- Hidden DOM hooks for runtime telemetry & pipeline updates (no function broken) -->
-        <div id="service-pipeline-track-${p.id}" style="display: none;"></div>
-        <span id="service-pipeline-badge-${p.id}" style="display: none;"></span>
-        <span id="service-uptime-${p.id}" style="display: none;">${uptimeText}</span>
-
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 10px; margin-top: auto; height: 38px; box-sizing: border-box;">
-          <div style="display: flex; gap: 5px; align-items: center;">
+        <!-- Actions Footer -->
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto;">
+          <div style="display: flex; gap: 6px; align-items: center;">
             ${isOnline
-        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Stop</button>`
-        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Start</button>`
-      }
-            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Deploy</button>` : ''}
-            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 3px 9px; font-size: 11.5px;" title="Upload and manage service files">Files</button>
-            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 3px 9px; font-size: 11.5px;" title="View live logs">Logs</button>
-            <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" style="padding: 3px 7px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Settings">
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Start</button>`
+            }
+            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Deploy</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 4px 10px; font-size: 11.5px;" title="Upload and manage service files">Files</button>
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 4px 10px; font-size: 11.5px;" title="View live logs">Logs</button>
+            <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Settings">
               ${icon('settings', { size: 12 })}
             </button>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')" style="padding: 3px 10px; font-size: 11.5px; font-weight: 500;">
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')" style="padding: 4px 12px; font-size: 11.5px; font-weight: 500;">
             Manage &rarr;
           </button>
         </div>

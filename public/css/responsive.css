@@ -38,16 +38,17 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Clean Bottom Navigation Bar (Overview, Websites, Add Site, Settings, Log Out) */
+  /* Clean Bottom Navigation Bar (Services, Create Service, Home [Middle], Settings, Log Out) */
   .mobile-bottom-nav {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: center;
     background: var(--bg-card);
     border-top: 1px solid var(--border-subtle);
-    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
     z-index: 25;
     flex-shrink: 0;
+    overflow: hidden;
   }
   .mobile-nav-item {
     background: transparent;
@@ -58,31 +59,51 @@
     align-items: center;
     justify-content: center;
     gap: 3px;
-    padding: 5px 2px;
+    padding: 4px 2px;
     font-family: inherit;
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 500;
     cursor: pointer;
     border-radius: var(--radius-md);
     user-select: none;
+    min-width: 0;
+    width: 100%;
     -webkit-tap-highlight-color: transparent;
+    transition: color 0.15s ease, transform 0.1s ease;
   }
-  .mobile-nav-item svg { width: 17px; height: 17px; }
-  .mobile-nav-item.active { color: var(--accent-light); font-weight: 600; }
-  .mobile-nav-logout { color: var(--danger-light); opacity: 0.85; }
-  .mobile-nav-logout:hover { opacity: 1; }
-  .mobile-nav-add-circle {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .mobile-nav-item:active {
+    transform: scale(0.94);
   }
-  .mobile-nav-add-circle svg { width: 14px; height: 14px; }
-  .mobile-nav-add { color: var(--text-normal); }
+  .mobile-nav-item svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .mobile-nav-item span {
+    font-size: 10px;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    letter-spacing: -0.2px;
+  }
+  .mobile-nav-item.active {
+    color: var(--accent-light);
+    font-weight: 600;
+  }
+  .mobile-nav-home svg {
+    width: 19px;
+    height: 19px;
+  }
+  .mobile-nav-logout {
+    color: var(--danger-light);
+    opacity: 0.85;
+  }
+  .mobile-nav-logout:hover,
+  .mobile-nav-logout:active {
+    opacity: 1;
+  }
 }
 
 @media (max-width: 680px) {
