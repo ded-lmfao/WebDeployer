@@ -70,8 +70,16 @@ pub(crate) async fn logs_sse_handler(
     Query(q): Query<LogsQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let backlog_limit = q.backlog.unwrap_or(200);
-    let initial_logs = state.logs.list(q.project, None, None, None, backlog_limit);
+    let initial_logs = state.logs.list(
+        q.project,
+        None,
+        q.channel.as_deref(),
+        q.level.as_deref(),
+        backlog_limit,
+    );
     let project_filter = q.project;
+    let channel_filter = q.channel;
+    let level_filter = q.level;
 
     let initial_event = if !initial_logs.is_empty() {
         serde_json::to_string(&initial_logs)
@@ -84,8 +92,20 @@ pub(crate) async fn logs_sse_handler(
     let rx = state.logs.subscribe();
     let live_stream = BroadcastStream::new(rx).filter_map(move |msg| {
         if let Ok(entry) = msg {
+            // Strict project isolation: If this SSE stream is subscribed to a specific project,
+            // strictly drop all logs that do not belong to this project (including unassigned system logs).
             if let Some(pid) = project_filter {
-                if entry.project_id.is_some() && entry.project_id != Some(pid) {
+                if entry.project_id != Some(pid) {
+                    return None;
+                }
+            }
+            if let Some(ref ch) = channel_filter {
+                if !ch.is_empty() && &entry.channel != ch {
+                    return None;
+                }
+            }
+            if let Some(ref lvl) = level_filter {
+                if !lvl.is_empty() && &entry.level != lvl {
                     return None;
                 }
             }
@@ -100,10 +120,16 @@ pub(crate) async fn logs_sse_handler(
     Sse::new(combined).keep_alive(KeepAlive::default())
 }
 
+#[derive(Deserialize)]
+pub(crate) struct DownloadLogsQuery {
+    project: Option<i64>,
+}
+
 pub(crate) async fn logs_download_handler(
     State(state): State<AppState>,
+    Query(q): Query<DownloadLogsQuery>,
 ) -> Result<Response, StatusCode> {
-    let logs = state.logs.list(None, None, None, None, 5000);
+    let logs = state.logs.list(q.project, None, None, None, 5000);
     let mut out = String::new();
     for l in logs {
         out.push_str(&format!(

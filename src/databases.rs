@@ -195,11 +195,16 @@ impl Databases {
         if log_file.is_file() {
             match std::fs::read_to_string(&log_file) {
                 Ok(content) => {
-                    let lines: Vec<&str> = content.lines().collect();
-                    if lines.len() > 300 {
-                        Ok(lines[lines.len() - 300..].join("\n"))
+                    let trimmed = content.trim();
+                    if trimmed.is_empty() {
+                        Ok(format!("PostgreSQL engine for '{}' is running on port {}. No errors or warnings recorded.", db_rec.name, db_rec.port))
                     } else {
-                        Ok(content)
+                        let lines: Vec<&str> = trimmed.lines().collect();
+                        if lines.len() > 300 {
+                            Ok(lines[lines.len() - 300..].join("\n"))
+                        } else {
+                            Ok(trimmed.to_string())
+                        }
                     }
                 }
                 Err(e) => Ok(format!("Failed to read log file: {}", e)),

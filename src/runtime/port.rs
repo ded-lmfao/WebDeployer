@@ -19,7 +19,8 @@ impl Runtime {
 
         #[cfg(unix)]
         {
-            let logs = self.logs.clone();
+            let _ = &self.logs;
+            let _ = project_id;
             std::thread::spawn(move || {
                 let cmd = format!(
                     "(sudo -n ufw allow {p}/tcp >/dev/null 2>&1 || ufw allow {p}/tcp >/dev/null 2>&1 || true) && \
@@ -28,14 +29,8 @@ impl Runtime {
                     p = port
                 );
                 if let Ok(out) = std::process::Command::new("sh").arg("-c").arg(&cmd).output() {
-                    if out.status.success() && project_id.is_some() {
-                        logs.add(
-                            project_id,
-                            None,
-                            "system",
-                            "info",
-                            &format!("Automatically allowed TCP port {}/tcp in UFW & iptables firewall", port),
-                        );
+                    if out.status.success() {
+                        tracing::info!("Automatically allowed TCP port {}/tcp in UFW & iptables firewall", port);
                     }
                 }
             });

@@ -18,8 +18,8 @@ function getWorkloadIconInfo(r) {
   }
 
   const pId = r.projectId ?? r.project_id;
-  const p = (state.projects || []).find((x) => x.id === pId)
-    || (state.overview?.projects || []).map((x) => x.project).find((x) => x && x.id === pId)
+  const p = (state.projects || []).find((x) => String(x.id) === String(pId))
+    || (state.overview?.projects || []).map((x) => x.project).find((x) => x && String(x.id) === String(pId))
     || {};
 
   const pt = ((r.projectType || r.project_type || p.project_type || '')).toLowerCase();
@@ -31,7 +31,7 @@ function getWorkloadIconInfo(r) {
     if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java') || name.includes('lavalink')) {
       return { name: 'java', color: '#f97316', typeName: 'Java Daemon' };
     }
-    if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
+    if (pt.includes('python') || sc.includes('python') || sc.includes('.py') || sc.startsWith('py ') || name.includes('python')) {
       return { name: 'python', color: '#38bdf8', typeName: 'Python Daemon' };
     }
     if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
@@ -52,11 +52,14 @@ function getWorkloadIconInfo(r) {
     if (pt.includes('docker') || sc.includes('docker')) {
       return { name: 'docker', color: '#2496ed', typeName: 'Docker Daemon' };
     }
-    if (pt.includes('discord') || sc.includes('discord')) {
+    if (pt.includes('discord') || sc.includes('discord') || name.includes('discord')) {
       return { name: 'discord', color: '#5865f2', typeName: 'Discord Bot' };
     }
-    if (pt.includes('telegram') || sc.includes('telegram')) {
+    if (pt.includes('telegram') || sc.includes('telegram') || name.includes('telegram')) {
       return { name: 'telegram', color: '#229ed9', typeName: 'Telegram Bot' };
+    }
+    if (name.includes('bot')) {
+      return { name: 'discord', color: '#5865f2', typeName: 'Backend Bot' };
     }
     return { name: 'terminal', color: 'var(--accent-light)', typeName: 'Backend Service' };
   }
@@ -145,9 +148,15 @@ function renderResourceBreakdown(resources) {
       subtitle = `${dom}${sha}`;
     }
 
+    const pId = r.projectId ?? r.project_id;
+    const p = (state.projects || []).find((x) => x.id === pId)
+      || (state.overview?.projects || []).map((x) => x.project).find((x) => x && x.id === pId)
+      || {};
+    const effectivePid = r.pid || p.app_pid || p.status?.pid;
+
     const portPid = [
       r.port ? `:${r.port}` : null,
-      r.pid ? `<span class="res-pid-chip">PID ${r.pid}</span>` : null,
+      effectivePid ? `<span class="res-pid-chip">PID ${effectivePid}</span>` : null,
     ].filter(Boolean).join(' ') || '<span style="color:var(--text-dim)">--</span>';
 
     const cpuVal = (r.cpuPct || 0).toFixed(1);
@@ -159,7 +168,6 @@ function renderResourceBreakdown(resources) {
     const diskPctVal = (r.diskPct || 0).toFixed(1);
     const diskWarm = (r.diskPct || 0) > 20 ? 'hot' : (r.diskPct || 0) > 5 ? 'warm' : '';
 
-    const pId = r.projectId ?? r.project_id;
     let actionBtn = '';
     if (r.kind === 'panel') {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'settings\')">Settings &rarr;</button>';

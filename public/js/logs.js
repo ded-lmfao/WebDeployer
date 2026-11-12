@@ -11,9 +11,17 @@ import { navigateTo } from './workspace.js';
 // View 7: Real-Time Live Logs
 // ============================================================================
 async function loadLogsView() {
+  const p = getSelectedProject();
+  // Clear any previous logs so project terminals never show cross-project or stale logs
+  state.logLines = [];
+  const terminal = document.getElementById('log-terminal-output');
+  if (terminal) {
+    const kind = p?.project_kind === 'service' ? 'Service' : 'Website';
+    terminal.innerHTML = `<div class="log-line"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-chan">[app]</span><span class="log-lvl-info">Connecting to live console stream for ${escapeHtml(p?.name || kind)}...</span></div>`;
+  }
+
   startLogStream();
   try {
-    const p = getSelectedProject();
     let url = '/api/logs?limit=300';
     if (p) url += `&project=${p.id}`;
     const history = await api(url);
@@ -38,8 +46,15 @@ function startLogStream() {
     try {
       const data = JSON.parse(e.data);
       if (Array.isArray(data)) {
+        const curP = getSelectedProject();
         const existingIds = new Set(state.logLines.map((x) => x.id));
-        const fresh = data.filter((x) => !x.id || !existingIds.has(x.id));
+        // Strict isolation: only allow logs matching this specific project
+        const fresh = data.filter((x) => {
+          if (curP) {
+            if (x.project_id !== curP.id) return false;
+          }
+          return !x.id || !existingIds.has(x.id);
+        });
         if (fresh.length) {
           state.logLines.push(...fresh);
           if (state.logLines.length > 2000) state.logLines.splice(0, state.logLines.length - 2000);
@@ -58,6 +73,7 @@ function renderTerminalLogs() {
   const terminal = document.getElementById('log-terminal-output');
   if (!terminal) return;
 
+  const p = getSelectedProject();
   const chanFilter = document.getElementById('log-channel-filter')?.value || '';
   const lvlFilter = document.getElementById('log-level-filter')?.value || '';
   const q = (document.getElementById('log-search-input')?.value || '').toLowerCase();
@@ -72,8 +88,8 @@ function renderTerminalLogs() {
   if (!filtered.length) {
     const filterNote = (chanFilter || lvlFilter || q)
       ? `No log entries match filter (${[chanFilter, lvlFilter, q].filter(Boolean).join(', ')}). Switch filters to "All Channels" / "All Levels" to view all ${state.logLines.length} logs.`
-      : 'WebDep real-time log stream connected. Waiting for log events...';
-    terminal.innerHTML = `<div class="log-line"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-chan">[system]</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
+      : `Live log stream connected. Waiting for console output from ${p?.name || 'workload'}...`;
+    terminal.innerHTML = `<div class="log-line"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-chan">[app]</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
     return;
   }
 

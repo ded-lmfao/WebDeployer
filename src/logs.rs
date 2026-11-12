@@ -1,6 +1,6 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::db::{now, DbPool};
@@ -20,6 +20,7 @@ pub struct LogEntry {
 pub struct Logs {
     db: DbPool,
     sender: Arc<broadcast::Sender<LogEntry>>,
+    last_entry: Arc<Mutex<Option<(Option<i64>, String, String, i64)>>>,
 }
 
 impl Logs {
@@ -28,6 +29,7 @@ impl Logs {
         Self {
             db,
             sender: Arc::new(sender),
+            last_entry: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -44,6 +46,22 @@ impl Logs {
         message: &str,
     ) -> i64 {
         let ts = now();
+        let trimmed_msg = message.trim();
+        if trimmed_msg.is_empty() {
+            return 0;
+        }
+
+        // Deduplicate identical consecutive messages for the same project & channel within 3 seconds
+        {
+            if let Ok(mut guard) = self.last_entry.lock() {
+                if let Some((prev_pid, ref prev_ch, ref prev_msg, prev_ts)) = *guard {
+                    if prev_pid == project_id && prev_ch == channel && prev_msg == trimmed_msg && (ts - prev_ts) < 3000 {
+                        return 0;
+                    }
+                }
+                *guard = Some((project_id, channel.to_string(), trimmed_msg.to_string(), ts));
+            }
+        }
         let id = {
             let conn = self.db.lock().unwrap();
             conn.execute(
@@ -83,7 +101,7 @@ impl Logs {
         let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
 
         if let Some(pid) = project_id {
-            sql.push_str(" AND (project_id = ? OR project_id IS NULL)");
+            sql.push_str(" AND project_id = ?");
             params_vec.push(pid.into());
         }
         if let Some(did) = deployment_id {

@@ -127,7 +127,8 @@ function renderWebsiteWorkspaceHeader() {
   }
 
   banner.style.display = 'block';
-  const isOnline = p.app_status === 'running';
+  const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+  const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
   const isMaintenance = p.app_status === 'maintenance';
   const isService = p.project_kind === 'service';
 
@@ -169,7 +170,7 @@ function renderWebsiteWorkspaceHeader() {
     }
   }
 
-  const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+  const effectivePid = p.app_pid || p.status?.pid || resItem?.pid;
   const diskStr = resItem?.diskFormatted || resItem?.disk_formatted || '';
 
   const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}:${diskStr}`;
@@ -237,9 +238,9 @@ function renderWebsiteWorkspaceHeader() {
           ` : ''}
           <span class="ws-meta-sep">&bull;</span>
           <span class="ws-meta-item" title="Click to configure Network Access Policy" style="font-size:11px; cursor:pointer;" onclick="openEditServiceModal(${p.id})">${accessText}</span>
-          ${p.app_pid ? `
+          ${(isOnline && effectivePid) ? `
             <span class="ws-meta-sep">&bull;</span>
-            <span class="ws-meta-item" title="Process PID">PID <strong style="color:var(--text-main); font-weight:600;">${p.app_pid}</strong></span>
+            <span class="ws-meta-item" title="Process PID">PID <strong style="color:var(--text-main); font-weight:600;">${effectivePid}</strong></span>
           ` : ''}
         `;
       } else {
@@ -281,6 +282,10 @@ function renderWebsiteWorkspaceHeader() {
           ` : ''}
           <span class="ws-meta-sep">&bull;</span>
           <span class="ws-meta-item" title="Click to configure Network Access Policy" style="font-size:11px; cursor:pointer;" onclick="openEditWebsiteModal(${p.id})">${accessText}</span>
+          ${(isOnline && effectivePid) ? `
+            <span class="ws-meta-sep">&bull;</span>
+            <span class="ws-meta-item" title="Process PID">PID <strong style="color:var(--text-main); font-weight:600;">${effectivePid}</strong></span>
+          ` : ''}
         `;
       }
     }

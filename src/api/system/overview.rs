@@ -188,9 +188,19 @@ pub(crate) async fn overview_handler(
     let (panel_raw_cpu, panel_mem) = state.monitor.get_process_metrics(panel_pid);
     let mut pids_to_query = Vec::new();
 
+    let mut proj_effective_pids = std::collections::HashMap::new();
     for p in &projs {
-        if p.app_status == "running" {
-            if let Some(pid) = p.app_pid {
+        let mut eff_pid = p.app_pid;
+        if eff_pid.is_none() || eff_pid.map(|pid| !crate::runtime::process::is_pid_alive(pid)).unwrap_or(true) {
+            if let Some(port) = p.port {
+                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
+                    eff_pid = Some(port_pid);
+                }
+            }
+        }
+        if let Some(pid) = eff_pid {
+            if crate::runtime::process::is_pid_alive(pid) {
+                proj_effective_pids.insert(p.id, pid);
                 pids_to_query.push(pid);
             }
         }
@@ -255,9 +265,11 @@ pub(crate) async fn overview_handler(
     let mut items = Vec::new();
 
     for p in projs {
-        let is_running = p.app_status == "running";
+        let active_pid = proj_effective_pids.get(&p.id).copied().or(p.app_pid);
+        let is_running = (p.app_status == "running" && active_pid.is_some())
+            || (active_pid.map(crate::runtime::process::is_pid_alive).unwrap_or(false));
         let (raw_cpu, mem) = if is_running {
-            if let Some(pid) = p.app_pid {
+            if let Some(pid) = active_pid {
                 proc_metrics.get(&pid).copied().unwrap_or((0.0, 0))
             } else {
                 (0.0, 0)
@@ -306,7 +318,7 @@ pub(crate) async fn overview_handler(
         items.push(OverviewProjectItem {
             app: OverviewAppStatus {
                 running: is_running,
-                pid: p.app_pid,
+                pid: active_pid,
                 started_at: p.app_started_at,
                 cpu_pct: if is_running { Some(cpu) } else { None },
                 memory_bytes: if is_running { Some(mem) } else { None },
@@ -326,8 +338,8 @@ pub(crate) async fn overview_handler(
             id: format!("{}-{}", kind, p.id),
             name: p.name.clone(),
             kind: kind.to_string(),
-            status: p.app_status.clone(),
-            pid: p.app_pid,
+            status: if is_running { "running".to_string() } else { p.app_status.clone() },
+            pid: active_pid,
             port: p.port,
             cpu_pct: cpu,
             memory_bytes: mem,

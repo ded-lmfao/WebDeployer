@@ -155,22 +155,16 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
 
     let is_html = clean_path.ends_with(".html");
     let is_vendor = clean_path.starts_with("vendor/");
-    let is_static_asset = clean_path.ends_with(".woff2")
-        || clean_path.ends_with(".woff")
-        || clean_path.ends_with(".ttf")
-        || clean_path.ends_with(".png")
-        || clean_path.ends_with(".ico")
-        || clean_path.ends_with(".svg");
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
 
     let cache_control = if is_html {
         "no-cache, must-revalidate, private"
     } else if has_version_query {
         "public, max-age=31536000, immutable"
-    } else if is_vendor || is_static_asset {
+    } else if is_vendor {
         "public, max-age=604800, stale-while-revalidate=86400"
     } else {
-        "public, max-age=3600, stale-while-revalidate=86400"
+        "no-cache, must-revalidate, private"
     };
 
     // FAST-PATH: If the file exists directly on disk in ./public, serve with RAM-backed cache & 304 ETag verification!
@@ -263,21 +257,15 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     // FALLBACK: When running as a standalone binary where ./public is not present on disk
     let is_html = clean_path.ends_with(".html");
     let is_vendor = clean_path.starts_with("vendor/");
-    let is_static_asset = clean_path.ends_with(".woff2")
-        || clean_path.ends_with(".woff")
-        || clean_path.ends_with(".ttf")
-        || clean_path.ends_with(".png")
-        || clean_path.ends_with(".ico")
-        || clean_path.ends_with(".svg");
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
     let cache_control = if is_html {
         "no-store, no-cache, must-revalidate, private"
     } else if has_version_query {
         "public, max-age=31536000, immutable"
-    } else if is_vendor || is_static_asset {
+    } else if is_vendor {
         "public, max-age=604800, stale-while-revalidate=86400"
     } else {
-        "public, max-age=3600, stale-while-revalidate=86400"
+        "no-cache, must-revalidate, private"
     };
 
     let etag_map = get_etag_map();

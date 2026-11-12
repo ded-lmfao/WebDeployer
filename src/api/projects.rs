@@ -33,6 +33,24 @@ pub(crate) async fn list_projects_handler(
         list.retain(|p| u.can_access_project(p.id));
     }
 
+    // Enrich projects with real-time process & port listener status
+    for p in &mut list {
+        let mut eff_pid = p.app_pid;
+        if eff_pid.is_none() || eff_pid.map(|pid| !crate::runtime::process::is_pid_alive(pid)).unwrap_or(true) {
+            if let Some(port) = p.port {
+                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
+                    eff_pid = Some(port_pid);
+                }
+            }
+        }
+        if let Some(pid) = eff_pid {
+            if crate::runtime::process::is_pid_alive(pid) {
+                p.app_pid = Some(pid);
+                p.app_status = "running".to_string();
+            }
+        }
+    }
+
     cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
 }
 
@@ -46,11 +64,27 @@ pub(crate) async fn get_project_handler(
             return Err(StatusCode::FORBIDDEN);
         }
     }
-    let p = state
+    let mut p = state
         .projects
         .get(id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    let mut eff_pid = p.app_pid;
+    if eff_pid.is_none() || eff_pid.map(|pid| !crate::runtime::process::is_pid_alive(pid)).unwrap_or(true) {
+        if let Some(port) = p.port {
+            if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
+                eff_pid = Some(port_pid);
+            }
+        }
+    }
+    if let Some(pid) = eff_pid {
+        if crate::runtime::process::is_pid_alive(pid) {
+            p.app_pid = Some(pid);
+            p.app_status = "running".to_string();
+        }
+    }
+
     Ok(Json(p))
 }
 

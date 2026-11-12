@@ -264,7 +264,8 @@ impl Runtime {
     }
 
     /// Comprehensively shut down all processes, child trees, port listeners, and containers for a website or service.
-    pub(crate) async fn kill_project_everything(&self, p: &Project) {
+    /// Returns true if any active processes or listening ports were terminated.
+    pub(crate) async fn kill_project_everything(&self, p: &Project) -> bool {
         // First stop any maintenance responder bound to this project's port
         self.stop_maintenance_server(p.id);
         tokio::time::sleep(Duration::from_millis(40)).await;
@@ -277,6 +278,7 @@ impl Runtime {
             let mut map = self.processes.lock().unwrap();
             map.remove(&p.id)
         };
+        let had_child = old_child.is_some();
         if let Some(ref child) = old_child {
             if let Some(pid) = child.id() {
                 pids_to_kill.insert(pid);
@@ -362,6 +364,7 @@ impl Runtime {
         }
 
         self.clear_container_pids(&container);
+        !pids_to_kill.is_empty() || had_child
     }
 }
 

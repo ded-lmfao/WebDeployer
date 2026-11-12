@@ -96,7 +96,8 @@ function renderProjectsList() {
 
   const search = (document.getElementById('projects-search-input')?.value || '').toLowerCase();
   const filtered = websites.filter((p) => {
-    const isOnline = p.app_status === 'running';
+    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
     if (state.projectStatusFilter === 'running' && !isOnline) return false;
     if (state.projectStatusFilter === 'stopped' && isOnline) return false;
     return p.name.toLowerCase().includes(search) ||
@@ -116,8 +117,9 @@ function renderProjectsList() {
   }
 
   setHtmlIfChanged(container, filtered.map((p) => {
-    const isOnline = p.app_status === 'running';
-    const isMaintenance = p.app_status === 'maintenance';
+    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
+    const isMaintenance = p.app_status === 'maintenance' || resItem?.status === 'maintenance';
     const domains = p.domains && p.domains.length ? p.domains : [];
     
     let primaryDomainUrl = '';
@@ -133,7 +135,6 @@ function renderProjectsList() {
     const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7).toUpperCase() : (p.deployedSha ? p.deployedSha.slice(0, 7).toUpperCase() : '');
     const branchText = (p.branch || 'main').toUpperCase();
 
-    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
     const pidVal = (isOnline && (p.app_pid || p.status?.pid || resItem?.pid)) ? (p.app_pid || p.status?.pid || resItem?.pid) : null;
 

@@ -70,8 +70,21 @@ impl Runtime {
                     for (proj_id, pid) in external_running {
                         let is_in_memory = rt.processes.lock().map(|m| m.contains_key(&proj_id)).unwrap_or(false);
                         if !is_in_memory && !is_pid_alive(pid) {
-                            rt.mark_project_stopped(proj_id);
-                            rt.logs.add(Some(proj_id), None, "app", "warn", "Process terminated");
+                            let still_listening = {
+                                if let Ok(conn) = rt.db.lock() {
+                                    conn.query_row("SELECT port FROM projects WHERE id = ?", rusqlite::params![proj_id], |r| r.get::<_, Option<u16>>(0))
+                                        .ok()
+                                        .flatten()
+                                        .map(|port| !Runtime::find_pids_on_port(port).is_empty())
+                                        .unwrap_or(false)
+                                } else {
+                                    false
+                                }
+                            };
+                            if !still_listening {
+                                rt.mark_project_stopped(proj_id);
+                                rt.logs.add(Some(proj_id), None, "app", "warn", "Process terminated");
+                            }
                         }
                     }
                 }

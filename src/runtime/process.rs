@@ -293,9 +293,16 @@ impl Runtime {
             return Err(err_msg);
         }
 
+        let mut final_pid = pid;
         if p.port.is_some() {
-            for port_pid in Self::find_pids_on_port(container.port) {
+            let port_pids = Self::find_pids_on_port(container.port);
+            for &port_pid in &port_pids {
                 self.record_container_pid(&container, port_pid);
+            }
+            if let Some(&first_port_pid) = port_pids.first() {
+                if first_port_pid > 0 {
+                    final_pid = first_port_pid;
+                }
             }
         }
 
@@ -305,7 +312,7 @@ impl Runtime {
             let conn = self.db.lock().unwrap();
             conn.execute(
                 "UPDATE projects SET app_status='running', app_pid=?, app_started_at=? WHERE id=?",
-                rusqlite::params![pid, ts, p.id],
+                rusqlite::params![final_pid, ts, p.id],
             )
             .ok();
         }
@@ -356,6 +363,20 @@ impl Runtime {
 
 
     pub async fn stop_project(&self, p: &Project) -> Result<(), String> {
+        let was_active = {
+            if let Ok(conn) = self.db.lock() {
+                conn.query_row(
+                    "SELECT app_status FROM projects WHERE id = ?",
+                    rusqlite::params![p.id],
+                    |r| r.get::<_, String>(0),
+                )
+                .map(|s| s == "running")
+                .unwrap_or(p.app_status == "running")
+            } else {
+                p.app_status == "running"
+            }
+        };
+
         // Bump stop_seq first so any in-progress deployment knows Stop was requested
         self.bump_stop_seq(p.id);
 
@@ -365,26 +386,28 @@ impl Runtime {
         // Acquire per-project lock and synchronously terminate all processes + port listeners for this website
         let proj_lock = self.get_project_lock(p.id);
         let _guard = proj_lock.lock().await;
-        self.kill_project_everything(p).await;
+        let killed_any = self.kill_project_everything(p).await;
 
         // Re-ensure SQLite status is stopped in case a concurrent start finished just before the lock
         self.mark_project_stopped(p.id);
 
-        self.logs.add(
-            Some(p.id),
-            None,
-            "app",
-            "info",
-            &if p.project_kind == "service" {
-                format!("Stopped service '{}' (all processes terminated)", p.name)
-            } else {
-                format!(
-                    "Stopped website container '{}' (Port {} released and all processes terminated)",
-                    p.name,
-                    p.port.unwrap_or(3000)
-                )
-            },
-        );
+        if was_active || killed_any {
+            self.logs.add(
+                Some(p.id),
+                None,
+                "app",
+                "info",
+                &if p.project_kind == "service" {
+                    format!("Stopped service '{}' (all processes terminated)", p.name)
+                } else {
+                    format!(
+                        "Stopped website container '{}' (Port {} released and all processes terminated)",
+                        p.name,
+                        p.port.unwrap_or(3000)
+                    )
+                },
+            );
+        }
 
         Ok(())
     }

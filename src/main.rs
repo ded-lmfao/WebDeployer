@@ -64,13 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let auth = Arc::new(Auth::new(db.clone(), config.session_ttl_s));
     let projects = Arc::new(Projects::new(db.clone(), vault.clone(), config.data_dir.clone()));
     let logs = Arc::new(Logs::new(db.clone()));
-    logs.add(
-        None,
-        None,
-        "system",
-        "info",
-        "WebDep engine initialized (SQLite database connected and live log stream active)",
-    );
+    tracing::info!("WebDep engine initialized (SQLite database connected and live log stream active)");
     let monitor = Arc::new(Monitor::new());
     monitor.start_background_sampler();
     let cache = Arc::new(AppCache::new());
@@ -143,45 +137,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         };
 
                         if is_already_running {
-                            resume_logs.add(
-                                Some(p.id),
-                                None,
-                                "system",
-                                "info",
-                                &format!(
-                                    "Preserved running workload '{}' (PID: {}) across panel update with zero downtime",
-                                    p.name,
-                                    p.app_pid.unwrap_or(0)
-                                ),
+                            tracing::info!(
+                                "Workload '{}' (PID: {:?}) is already running; preserving zero downtime",
+                                p.name,
+                                p.app_pid
                             );
                             continue;
                         }
 
                         let env = resume_projects.get_env_map(p.id);
-                        match resume_runtime.start_project(&p, env, None).await {
-                            Ok(pid) => {
-                                resume_logs.add(
-                                    Some(p.id),
-                                    None,
-                                    "system",
-                                    "info",
-                                    &format!("Auto-resumed website '{}' in isolated container (PID: {})", p.name, pid),
-                                );
-                            }
-                            Err(e) => {
-                                resume_logs.add(
-                                    Some(p.id),
-                                    None,
-                                    "system",
-                                    "warn",
-                                    &format!("Could not auto-resume '{}': {}", p.name, e),
-                                );
-                            }
+                        if let Err(e) = resume_runtime.start_project(&p, env, None).await {
+                            resume_logs.add(
+                                Some(p.id),
+                                None,
+                                "app",
+                                "warn",
+                                &format!("Could not auto-resume '{}': {}", p.name, e),
+                            );
                         }
                     } else if p.app_status == "maintenance" {
                         let _ = resume_runtime.set_maintenance_mode(&p, true).await;
                     } else {
-                        let _ = resume_runtime.stop_project(&p).await;
+                        // Project is marked stopped. Clean up any orphan listeners found on its port without polluting user project logs.
+                        if let Some(port) = p.port {
+                            if !crate::runtime::Runtime::find_pids_on_port(port).is_empty() {
+                                let killed = resume_runtime.kill_project_everything(&p).await;
+                                if killed {
+                                    tracing::info!("Cleaned up orphan processes for stopped project '{}' on port {}", p.name, port);
+                                }
+                            }
+                        }
                     }
                 }
             }
