@@ -465,25 +465,6 @@ function renderCurrentView() {
     item.classList.toggle('active', item.getAttribute('data-mobile-view') === activeSidebarView);
   });
 
-  // Adapt global header action button to the active section (website vs backend service)
-  const globalAddBtn = document.getElementById('global-add-website-btn');
-  if (globalAddBtn) {
-    const ctxKind = getGlobalAddKind();
-    if (!ctxKind || !hasPower('projects_manage')) {
-      globalAddBtn.style.display = 'none';
-    } else {
-      globalAddBtn.style.display = '';
-      const label = ctxKind === 'service' ? 'Add Service' : 'Add Website';
-      globalAddBtn.innerHTML = `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        <span>${label}</span>
-      `;
-    }
-  }
-
   // Switch view section visibility
   document.querySelectorAll('.view-section').forEach((sec) => {
     sec.classList.remove('active');

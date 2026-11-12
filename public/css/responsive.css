@@ -13,8 +13,7 @@
   /* Remove top-left hamburger menu and sidebar drawer completely on mobile */
   .mobile-menu-btn,
   .sidebar,
-  .sidebar-backdrop,
-  #global-add-website-btn {
+  .sidebar-backdrop {
     display: none !important;
   }
 

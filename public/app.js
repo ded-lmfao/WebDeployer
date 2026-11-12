@@ -108,7 +108,6 @@ document.querySelectorAll('.nav-item').forEach((item) => {
 });
 
 document.getElementById('overview-refresh-btn')?.addEventListener('click', loadOverview);
-document.getElementById('global-add-website-btn')?.addEventListener('click', globalAddAction);
 document.getElementById('add-website-btn')?.addEventListener('click', openAddWebsiteModal);
 
 

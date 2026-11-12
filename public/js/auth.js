@@ -177,9 +177,6 @@ export async function onAuthenticated(isFreshLogin = false) {
   const curAvatarEl = document.getElementById('current-user-avatar');
   if (curAvatarEl) curAvatarEl.textContent = (state.user.username || 'AD').slice(0, 2).toUpperCase();
 
-  const addSiteBtn = document.getElementById('global-add-website-btn');
-  if (addSiteBtn) addSiteBtn.style.display = hasPower('projects_manage') ? '' : 'none';
-
   const navPowerMap = {
     env: 'env',
     domains: 'domains',

@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.13.3">
+  <link rel="stylesheet" href="/style.css?v=3.13.9">
 </head>
 
 <body>
@@ -266,13 +266,6 @@
             <span class="status-dot online" id="server-status-dot"></span>
             <span id="server-status-text">Server Online</span>
           </div>
-          <button class="btn btn-primary btn-sm" id="global-add-website-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>Add Website</span>
-          </button>
         </div>
       </header>
 
@@ -520,6 +513,13 @@
               <input type="text" id="projects-search-input" class="form-control"
                 placeholder="Search websites or domains..." style="width: 220px;"
                 aria-label="Search websites or domains">
+              <button class="btn btn-primary" onclick="openAddWebsiteModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Website</span>
+              </button>
             </div>
           </div>
 
@@ -549,7 +549,7 @@
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
-                <span>New Service / Bot</span>
+                <span>New Service</span>
               </button>
             </div>
           </div>
@@ -567,6 +567,14 @@
               <p>Deploy isolated PostgreSQL instances, manage remote IP allowlists, and inject credentials into hosted websites</p>
             </div>
             <div class="view-actions">
+              <div class="filter-pills" id="databases-status-filters">
+                <button class="pill active" data-filter="all">All (<span id="databases-filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span id="databases-filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span id="databases-filter-count-stopped">0</span>)</button>
+              </div>
+              <input type="text" id="databases-search-input" class="form-control"
+                placeholder="Search databases..." style="width: 220px;"
+                aria-label="Search databases">
               <button class="btn btn-primary" onclick="openCreateDatabaseModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -2778,7 +2786,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.13.6"></script>
+  <script type="module" src="/app.js?v=3.13.9"></script>
 </body>
 
 </html>

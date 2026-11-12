@@ -68,27 +68,62 @@ export function renderDatabasesList() {
   if (!container) return;
 
   const list = state.databases || [];
+  if (!state.databaseStatusFilter) state.databaseStatusFilter = 'all';
+
+  const countAll = list.length;
+  const countRunning = list.filter((d) => d.status === 'running').length;
+  const countStopped = countAll - countRunning;
+
   const badge = document.getElementById('badge-databases-count');
   if (badge) {
-    badge.textContent = list.length;
+    badge.textContent = countAll;
   }
   const countBadge = document.getElementById('databases-count-badge');
   if (countBadge) {
-    countBadge.textContent = `${list.length} Instance${list.length === 1 ? '' : 's'}`;
+    countBadge.textContent = `${countAll} Instance${countAll === 1 ? '' : 's'}`;
   }
 
-  if (!list.length) {
+  const elAll = document.getElementById('databases-filter-count-all');
+  const elRunning = document.getElementById('databases-filter-count-running');
+  const elStopped = document.getElementById('databases-filter-count-stopped');
+  if (elAll) elAll.textContent = countAll;
+  if (elRunning) elRunning.textContent = countRunning;
+  if (elStopped) elStopped.textContent = countStopped;
+
+  document.querySelectorAll('#databases-status-filters .pill').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-filter') === state.databaseStatusFilter);
+  });
+
+  const q = (document.getElementById('databases-search-input')?.value || '').toLowerCase().trim();
+  const filter = state.databaseStatusFilter || 'all';
+
+  const filtered = list.filter((d) => {
+    const isOnline = d.status === 'running';
+    if (filter === 'running' && !isOnline) return false;
+    if (filter === 'stopped' && isOnline) return false;
+    if (!q) return true;
+    return (d.name || '').toLowerCase().includes(q) ||
+      (d.domain || '').toLowerCase().includes(q) ||
+      (d.host || '').toLowerCase().includes(q) ||
+      String(d.port || '').includes(q) ||
+      (d.db_name || '').toLowerCase().includes(q) ||
+      (d.db_user || '').toLowerCase().includes(q);
+  });
+
+  if (!filtered.length) {
     container.innerHTML = `
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
         <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No databases found</p>
-        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">Deploy an isolated PostgreSQL database directly on your VM.</p>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">
+          ${q || filter !== 'all' ? 'No databases match your search or status filter.' : 'Deploy an isolated PostgreSQL database directly on your VM.'}
+        </p>
         <button class="btn btn-primary" onclick="openCreateDatabaseModal()">Add New Database</button>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = list.map((d) => {
+  container.innerHTML = filtered.map((d) => {
     const isRunning = d.status === 'running';
     const isStarting = d.status === 'starting';
     const isStopping = d.status === 'stopping';
@@ -180,7 +215,7 @@ export function renderDatabasesList() {
   }).join('');
 
   // Synchronize pipelines for all rendered database cards
-  list.forEach((d) => {
+  filtered.forEach((d) => {
     const isRunning = d.status === 'running';
     const isStarting = d.status === 'starting';
     const isStopping = d.status === 'stopping';
@@ -349,6 +384,15 @@ export async function toggleDatabaseState(id) {
 
   await loadDatabases();
 }
+
+// Bind search and status filters
+document.getElementById('databases-search-input')?.addEventListener('input', renderDatabasesList);
+document.querySelectorAll('#databases-status-filters .pill').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.databaseStatusFilter = btn.getAttribute('data-filter') || 'all';
+    renderDatabasesList();
+  });
+});
 
 window.loadDatabases = loadDatabases;
 window.loadDatabasesView = loadDatabasesView;
