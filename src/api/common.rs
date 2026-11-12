@@ -217,13 +217,47 @@ pub(crate) fn verify_power(
     Ok(u)
 }
 
+pub(crate) fn verify_any_power(
+    state: &AppState,
+    headers: &HeaderMap,
+    powers: &[&str],
+    project_id: Option<i64>,
+) -> Result<User, (StatusCode, String)> {
+    let u = current_user(state, headers)
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized session".to_string()))?;
+    if let Some(pid) = project_id {
+        if !u.can_access_project(pid) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Access denied: You are not assigned to this website.".to_string(),
+            ));
+        }
+    }
+    if !u.has_any_power(powers) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!("Permission denied: Requires one of [{}].", powers.join(", ")),
+        ));
+    }
+    Ok(u)
+}
+
 pub(crate) fn get_authorized_project(
     state: &AppState,
     headers: &HeaderMap,
     power: &str,
     project_id: i64,
 ) -> Result<(User, crate::projects::Project), (StatusCode, String)> {
-    let actor = verify_power(state, headers, power, Some(project_id))?;
+    get_authorized_project_any(state, headers, &[power], project_id)
+}
+
+pub(crate) fn get_authorized_project_any(
+    state: &AppState,
+    headers: &HeaderMap,
+    powers: &[&str],
+    project_id: i64,
+) -> Result<(User, crate::projects::Project), (StatusCode, String)> {
+    let actor = verify_any_power(state, headers, powers, Some(project_id))?;
     let p = state
         .projects
         .get(project_id)

@@ -128,13 +128,33 @@ async fn ensure_ancestor_within_root(
     Err((StatusCode::FORBIDDEN, "Invalid target path".to_string()))
 }
 
+pub(crate) fn touches_dotenv_file(rel: &str) -> bool {
+    rel.split(|c| c == '/' || c == '\\').any(|part| {
+        let lower = part.trim().to_ascii_lowercase();
+        lower == ".env" || lower.starts_with(".env.")
+    })
+}
+
+fn ensure_file_env_access(actor: &User, paths: &[&str]) -> Result<(), (StatusCode, String)> {
+    if actor.has_power("env") {
+        return Ok(());
+    }
+    if paths.iter().any(|p| touches_dotenv_file(p)) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Permission denied: Missing 'env' privilege to access .env files.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) async fn files_list_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
     Query(q): Query<FilesQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (_actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
     let root = service_root(&p)?;
     let dir = safe_join(&root, &q.path)?;
     let canon_root = ensure_existing_within_root(&root, &dir).await?;
@@ -182,7 +202,8 @@ pub(crate) async fn files_read_handler(
     AxPath(id): AxPath<i64>,
     Query(q): Query<FilesQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
+    ensure_file_env_access(&actor, &[&q.path])?;
     let root = service_root(&p)?;
     let file = safe_join(&root, &q.path)?;
     ensure_existing_within_root(&root, &file).await?;
@@ -209,7 +230,8 @@ pub(crate) async fn files_write_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<FileWritePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    ensure_file_env_access(&actor, &[&payload.path])?;
     let root = service_root(&p)?;
     let file = safe_join(&root, &payload.path)?;
     if file == root {
@@ -239,7 +261,8 @@ pub(crate) async fn files_mkdir_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<FileMkdirPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    ensure_file_env_access(&actor, &[&payload.path])?;
     let root = service_root(&p)?;
     let dir = safe_join(&root, &payload.path)?;
     ensure_ancestor_within_root(&root, &dir).await?;
@@ -255,7 +278,8 @@ pub(crate) async fn files_delete_handler(
     AxPath(id): AxPath<i64>,
     Query(q): Query<FilesQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    ensure_file_env_access(&actor, &[&q.path])?;
     let root = service_root(&p)?;
     let target = safe_join(&root, &q.path)?;
     if target == root {
@@ -295,7 +319,8 @@ pub(crate) async fn files_upload_handler(
     Query(q): Query<FilesQuery>,
     mut multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    ensure_file_env_access(&actor, &[&q.path])?;
     let root = service_root(&p)?;
     let target_dir = safe_join(&root, &q.path)?;
     ensure_ancestor_within_root(&root, &target_dir).await?;
@@ -312,6 +337,7 @@ pub(crate) async fn files_upload_handler(
         };
         // Normalize any Windows/Unix slashes for directory uploads
         let normalized = file_name.replace('\\', "/");
+        ensure_file_env_access(&actor, &[&normalized])?;
         let target_file = safe_join(&target_dir, &normalized)?;
         ensure_ancestor_within_root(&root, &target_file).await?;
 
@@ -345,7 +371,8 @@ pub(crate) async fn files_download_handler(
     AxPath(id): AxPath<i64>,
     Query(q): Query<FilesQuery>,
 ) -> Result<Response, (StatusCode, String)> {
-    let (_actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
+    ensure_file_env_access(&actor, &[&q.path])?;
     let root = service_root(&p)?;
     let file = safe_join(&root, &q.path)?;
     ensure_existing_within_root(&root, &file).await?;
@@ -379,7 +406,8 @@ pub(crate) async fn files_rename_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<FileRenamePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "env", id)?;
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    ensure_file_env_access(&actor, &[&payload.old_path, &payload.new_path])?;
     let root = service_root(&p)?;
     let old_target = safe_join(&root, &payload.old_path)?;
     let new_target = safe_join(&root, &payload.new_path)?;
@@ -405,4 +433,30 @@ pub(crate) async fn files_rename_handler(
         Some(&format!("Renamed '{}' to '{}'", payload.old_path, payload.new_path)),
     );
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ensure_file_env_access, touches_dotenv_file};
+    use crate::auth::User;
+
+    fn make_user(perms: &str) -> User {
+        User::from_db(2, "dev".into(), 0, perms.into(), "[\"*\"]".into(), 0, 1_700_000_000)
+    }
+
+    #[test]
+    fn test_dotenv_path_detection_and_env_power_guard() {
+        assert!(touches_dotenv_file(".env"));
+        assert!(touches_dotenv_file("sub/.env.production"));
+        assert!(touches_dotenv_file("sub\\.ENV"));
+        assert!(!touches_dotenv_file("src/config.env.example"));
+
+        let file_only = make_user(r#"["files","files_write"]"#);
+        assert!(ensure_file_env_access(&file_only, &["src/main.rs"]).is_ok());
+        assert!(ensure_file_env_access(&file_only, &[".env"]).is_err());
+        assert!(ensure_file_env_access(&file_only, &["config/.env.local"]).is_err());
+
+        let with_env = make_user(r#"["files_write","env"]"#);
+        assert!(ensure_file_env_access(&with_env, &[".env"]).is_ok());
+    }
 }

@@ -202,14 +202,13 @@ pub(crate) async fn audit_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<AuditQuery>,
-) -> Result<Response, StatusCode> {
-    let u = current_user(&state, &headers);
-    let uid = u.as_ref().map(|user| user.id).unwrap_or(0);
+) -> Result<Response, (StatusCode, String)> {
+    let u = verify_power(&state, &headers, "audit", q.project_id)?;
     let max_limit = q.limit.unwrap_or(500).min(1000);
     let cache_key = format!(
         "audit:p{}:u{}:l{}",
         q.project_id.unwrap_or(0),
-        uid,
+        u.id,
         max_limit
     );
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
@@ -220,11 +219,6 @@ pub(crate) async fn audit_handler(
 
     let mut list = Vec::new();
     if let Some(pid) = q.project_id {
-        if let Some(ref user) = u {
-            if !user.can_access_project(pid) {
-                return Err(StatusCode::FORBIDDEN);
-            }
-        }
         let p_info: Option<(String, String)> = conn
             .query_row("SELECT name, slug FROM projects WHERE id = ?", rusqlite::params![pid], |r| {
                 Ok((r.get(0)?, r.get(1)?))
@@ -242,12 +236,14 @@ pub(crate) async fn audit_handler(
              ORDER BY ts DESC, id DESC LIMIT {}",
             max_limit
         );
-        let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         let rows = stmt
             .query_map(rusqlite::params![pid, p_name, p_slug], |r| {
                 row_to_audit_item(r, Some(p_name.clone()))
             })
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         for r in rows.flatten() {
             list.push(r);
         }
@@ -375,17 +371,18 @@ pub(crate) async fn audit_handler(
             "SELECT id, project_id, ts, actor, action, target, detail, ip FROM audit ORDER BY id DESC LIMIT {}",
             max_limit
         );
-        let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         let rows = stmt
             .query_map([], |r| row_to_audit_item(r, None))
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let can_global = u.is_main_admin || u.has_power("settings_manage");
         for r in rows.flatten() {
-            if let Some(ref user) = u {
-                if let Some(pid) = r.project_id {
-                    if !user.can_access_project(pid) {
-                        continue;
-                    }
-                }
+            match r.project_id {
+                Some(pid) if !u.can_access_project(pid) => continue,
+                None if !can_global => continue,
+                _ => {}
             }
             list.push(r);
         }
@@ -393,4 +390,5 @@ pub(crate) async fn audit_handler(
     drop(conn);
 
     cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(5))
+        .map_err(|c| (c, "Serialization error".to_string()))
 }

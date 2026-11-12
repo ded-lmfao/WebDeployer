@@ -233,7 +233,11 @@ pub(crate) async fn get_deployment_handler(
             "Access denied: You are not assigned to this website.".to_string(),
         ));
     }
-    let logs = state.logs.list(None, Some(id), None, None, 1000);
+    let logs = if user.has_power("logs") {
+        state.logs.list(None, Some(id), None, None, 1000)
+    } else {
+        Vec::new()
+    };
     Ok(Json(DeploymentDetailResponse {
         deployment: dep,
         logs,
@@ -245,17 +249,11 @@ pub(crate) async fn get_deployment_logs_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<Vec<crate::logs::LogEntry>>, (StatusCode, String)> {
-    let user = require_current_user(&state, &headers)?;
     let dep = state
         .deployer
         .get_deployment(id)
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
-    if !user.can_access_project(dep.project_id) {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Access denied: You are not assigned to this website.".to_string(),
-        ));
-    }
+    let _user = verify_power(&state, &headers, "logs", Some(dep.project_id))?;
     let logs = state.logs.list(None, Some(id), None, None, 1000);
     Ok(Json(logs))
 }

@@ -513,7 +513,7 @@
               <input type="text" id="projects-search-input" class="form-control"
                 placeholder="Search websites or domains..." style="width: 220px;"
                 aria-label="Search websites or domains">
-              <button class="btn btn-primary" onclick="openAddWebsiteModal()">
+              <button class="btn btn-primary" id="add-website-header-btn" onclick="openAddWebsiteModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -544,7 +544,7 @@
               <input type="text" id="services-search-input" class="form-control"
                 placeholder="Search backend services..." style="width: 220px;"
                 aria-label="Search backend services">
-              <button class="btn btn-primary" onclick="openAddServiceModal()">
+              <button class="btn btn-primary" id="add-service-header-btn" onclick="openAddServiceModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -575,7 +575,7 @@
               <input type="text" id="databases-search-input" class="form-control"
                 placeholder="Search databases..." style="width: 220px;"
                 aria-label="Search databases">
-              <button class="btn btn-primary" onclick="openCreateDatabaseModal()">
+              <button class="btn btn-primary" id="add-database-header-btn" onclick="openCreateDatabaseModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -882,7 +882,7 @@
               <input type="file" id="service-folder-upload-input" webkitdirectory directory multiple style="display: none;"
                 onchange="handleFilesUpload(event)" aria-label="Upload directory to service directory">
 
-              <button class="btn btn-primary btn-sm"
+              <button class="btn btn-primary btn-sm files-write-only"
                 onclick="document.getElementById('service-file-upload-input').click()"
                 title="Upload files (.jar, .py, configs, assets) directly into this directory">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
@@ -893,7 +893,7 @@
                 Upload File(s)
               </button>
 
-              <button class="btn btn-secondary btn-sm"
+              <button class="btn btn-secondary btn-sm files-write-only"
                 onclick="document.getElementById('service-folder-upload-input').click()"
                 title="Upload an entire directory folder">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
@@ -904,7 +904,7 @@
                 Upload Folder
               </button>
 
-              <button class="btn btn-secondary btn-sm" onclick="filesNewFile()" title="Create a new blank file in this folder">
+              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFile()" title="Create a new blank file in this folder">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                   <polyline points="14 2 14 8 20 8"></polyline>
@@ -914,7 +914,7 @@
                 + New File
               </button>
 
-              <button class="btn btn-secondary btn-sm" onclick="filesNewFolder()" title="Create a new subfolder">
+              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFolder()" title="Create a new subfolder">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                   <line x1="12" y1="11" x2="12" y2="17"></line>
@@ -2163,41 +2163,91 @@
           </div>
 
           <div class="form-group">
-            <span class="form-label">Granular Powers (Permissions)</span>
-            <div class="modal-grid-2"
-              style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="deploy" checked>
-                <span>Deploy, Fetch & Rollback</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="process" checked>
-                <span>Start / Stop / Restart</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="logs" checked>
-                <span>View & Download Logs</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="env">
-                <span>Manage Env Variables (.env)</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="domains">
-                <span>Domains & SSL (Caddy)</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="backups" checked>
-                <span>Create & Restore Backups</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="projects_manage">
-                <span>Add / Edit / Delete Websites</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" class="user-power-check" value="settings_manage">
-                <span>Manage Settings & Users</span>
-              </label>
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
+              <span class="form-label" style="margin-bottom: 0;">Granular Powers (Permissions)</span>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('all')">Select All</button>
+                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('defaults')">Defaults</button>
+                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('readonly')">Read-Only</button>
+                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('none')">Clear</button>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim);">Workloads &amp; Deploy</div>
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="deploy" checked>
+                  <span>Deploy, Fetch &amp; Rollback</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="process" checked>
+                  <span>Start / Stop / Restart</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="projects_manage">
+                  <span>Add / Edit / Delete Websites</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="services_manage">
+                  <span>Add / Edit / Delete Services</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="domains">
+                  <span>Domains &amp; SSL (Caddy)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="backups" checked>
+                  <span>Create &amp; Restore Backups</span>
+                </label>
+              </div>
+
+              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px;">Storage, Env &amp; Databases</div>
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="files" checked>
+                  <span>Browse &amp; Download Files</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="files_write">
+                  <span>Edit, Upload &amp; Delete Files</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="env">
+                  <span>Manage Env Variables (.env)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="databases">
+                  <span>Control Databases &amp; Logs</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="databases_manage">
+                  <span>Create, Expose &amp; Delete DBs</span>
+                </label>
+              </div>
+
+              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px;">Observability &amp; Platform</div>
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="logs" checked>
+                  <span>View &amp; Download Logs</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="audit">
+                  <span>View Activity &amp; Audit Logs</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="monitor">
+                  <span>Server Telemetry &amp; Monitor</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="settings_manage">
+                  <span>Platform Settings &amp; Cache</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="system_manage">
+                  <span>Panel Restart &amp; Updates</span>
+                </label>
+              </div>
             </div>
           </div>
 

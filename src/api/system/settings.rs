@@ -11,8 +11,7 @@ pub(crate) async fn restart_panel_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let actor = verify_power(&state, &headers, "system_manage", None)?;
     log_audit(
         &state,
         &actor.username,
@@ -31,8 +30,7 @@ pub(crate) async fn system_version_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::updater::GitVersionInfo>, (StatusCode, String)> {
-    let _actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let _actor = verify_power(&state, &headers, "system_manage", None)?;
     Ok(Json(state.updater.get_version_info()))
 }
 
@@ -40,8 +38,7 @@ pub(crate) async fn system_update_status_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::updater::UpdateStatus>, (StatusCode, String)> {
-    let _actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let _actor = verify_power(&state, &headers, "system_manage", None)?;
     Ok(Json(state.updater.get_status()))
 }
 
@@ -50,8 +47,7 @@ pub(crate) async fn system_update_handler(
     headers: HeaderMap,
     payload: Option<Json<crate::updater::TriggerUpdatePayload>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let actor = verify_power(&state, &headers, "system_manage", None)?;
     log_audit(
         &state,
         &actor.username,
@@ -73,8 +69,7 @@ pub(crate) async fn system_update_repo_handler(
     headers: HeaderMap,
     Json(payload): Json<crate::updater::SetUpdateRepoPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let actor = verify_power(&state, &headers, "system_manage", None)?;
     let remote_url = state.updater.set_remote_repo(&payload.repo)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
@@ -100,7 +95,7 @@ pub(crate) async fn cache_stats_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::cache::CacheStats>, (StatusCode, String)> {
-    let _user = require_current_user(&state, &headers)?;
+    let _user = verify_power(&state, &headers, "settings_manage", None)?;
     Ok(Json(state.cache.stats()))
 }
 
@@ -108,8 +103,7 @@ pub(crate) async fn cache_clear_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
     {
         let conn = state.db.lock().unwrap();
         crate::db::purge_orphaned_project_data(&conn);
@@ -132,8 +126,7 @@ pub(crate) async fn get_settings_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<HashMap<String, String>>, (StatusCode, String)> {
-    let _actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let _actor = verify_power(&state, &headers, "settings_manage", None)?;
     let (mut map, current_tok) = {
         let conn = state.db.lock().unwrap();
         let mut stmt = conn
@@ -215,8 +208,7 @@ pub(crate) async fn update_settings_handler(
     headers: HeaderMap,
     Json(payload): Json<HashMap<String, serde_json::Value>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let actor = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let actor = verify_power(&state, &headers, "settings_manage", None)?;
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
         if k == "github_tokens" {

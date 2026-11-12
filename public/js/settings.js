@@ -152,59 +152,71 @@ export async function loadSettingsView() {
   if (window.loadPasskeysList) window.loadPasskeysList().catch(() => {});
 
   const isMain = Boolean(state.user && state.user.isMainAdmin);
+  const canSettings = hasPower('settings_manage');
+  const canSystem = hasPower('system_manage');
+
   const globalCard = document.getElementById('settings-global-config-card');
   const usersCard = document.getElementById('settings-users-card');
   const panelCard = document.getElementById('settings-panel-card');
   const updateCard = document.getElementById('settings-update-card');
-  if (globalCard) globalCard.style.display = '';
-  if (panelCard) panelCard.style.display = '';
-  if (updateCard) updateCard.style.display = '';
+  const restartBtn = document.getElementById('restart-panel-btn');
+  const clearCacheBtn = document.getElementById('clear-cache-btn');
+
+  if (globalCard) globalCard.style.display = canSettings ? '' : 'none';
+  if (panelCard) panelCard.style.display = (canSettings || canSystem) ? '' : 'none';
+  if (restartBtn) restartBtn.style.display = canSystem ? '' : 'none';
+  if (clearCacheBtn) clearCacheBtn.style.display = canSettings ? '' : 'none';
+  if (updateCard) updateCard.style.display = canSystem ? '' : 'none';
   if (usersCard) usersCard.style.display = isMain ? '' : 'none';
-  loadSystemVersionInfo(true).catch(() => {});
+  if (canSystem) loadSystemVersionInfo(true).catch(() => {});
+
+  if (!canSettings && !isMain) return;
 
   try {
-    const s = await api('/api/settings');
-    const freeMb = document.getElementById('setting-min-free-mb');
-    if (freeMb) freeMb.value = s.min_free_mb || 500;
-    const defRet = document.getElementById('setting-default-retention');
-    if (defRet) defRet.value = s.default_retention || 10;
-    const stepTo = document.getElementById('setting-step-timeout');
-    if (stepTo) stepTo.value = s.step_timeout_s || 900;
-    const depTo = document.getElementById('setting-deploy-timeout');
-    if (depTo) depTo.value = s.deploy_timeout_s || 1800;
+    if (canSettings) {
+      const s = await api('/api/settings');
+      const freeMb = document.getElementById('setting-min-free-mb');
+      if (freeMb) freeMb.value = s.min_free_mb || 500;
+      const defRet = document.getElementById('setting-default-retention');
+      if (defRet) defRet.value = s.default_retention || 10;
+      const stepTo = document.getElementById('setting-step-timeout');
+      if (stepTo) stepTo.value = s.step_timeout_s || 900;
+      const depTo = document.getElementById('setting-deploy-timeout');
+      if (depTo) depTo.value = s.deploy_timeout_s || 1800;
 
-    const tokBadge = document.getElementById('github-token-status-badge');
-    let parsedTokens = [];
-    if (s.github_tokens) {
-      try {
-        parsedTokens = JSON.parse(s.github_tokens);
-      } catch (_) {}
-    }
-    if ((!Array.isArray(parsedTokens) || !parsedTokens.length) && s.github_token) {
-      parsedTokens = String(s.github_token)
-        .split(/[\n,;]+/)
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .map((token, idx) => ({ label: `Account #${idx + 1}`, token }));
-    }
-    state.githubTokensDraft = Array.isArray(parsedTokens) && parsedTokens.length
-      ? parsedTokens.map((t, i) => ({
-          label: t.label || `Account #${i + 1}`,
-          token: t.token || '',
-          revealed: false,
-        }))
-      : [{ label: 'Primary Account', token: '', revealed: false }];
-
-    const activeCount = state.githubTokensDraft.filter((t) => (t.token || '').trim().length > 0).length;
-    if (activeCount > 0) {
-      if (tokBadge) {
-        const maskedTip = s.github_token_masked ? ` title="${escapeHtml(s.github_token_masked)}"` : '';
-        tokBadge.innerHTML = `<span class="badge badge-success"${maskedTip}>${activeCount} ACTIVE</span>`;
+      const tokBadge = document.getElementById('github-token-status-badge');
+      let parsedTokens = [];
+      if (s.github_tokens) {
+        try {
+          parsedTokens = JSON.parse(s.github_tokens);
+        } catch (_) {}
       }
-    } else {
-      if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">NOT SET</span>';
+      if ((!Array.isArray(parsedTokens) || !parsedTokens.length) && s.github_token) {
+        parsedTokens = String(s.github_token)
+          .split(/[\n,;]+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .map((token, idx) => ({ label: `Account #${idx + 1}`, token }));
+      }
+      state.githubTokensDraft = Array.isArray(parsedTokens) && parsedTokens.length
+        ? parsedTokens.map((t, i) => ({
+            label: t.label || `Account #${i + 1}`,
+            token: t.token || '',
+            revealed: false,
+          }))
+        : [{ label: 'Primary Account', token: '', revealed: false }];
+
+      const activeCount = state.githubTokensDraft.filter((t) => (t.token || '').trim().length > 0).length;
+      if (activeCount > 0) {
+        if (tokBadge) {
+          const maskedTip = s.github_token_masked ? ` title="${escapeHtml(s.github_token_masked)}"` : '';
+          tokBadge.innerHTML = `<span class="badge badge-success"${maskedTip}>${activeCount} ACTIVE</span>`;
+        }
+      } else {
+        if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">NOT SET</span>';
+      }
+      renderGithubTokensRows();
     }
-    renderGithubTokensRows();
 
     // Users list
     if (isMain) {

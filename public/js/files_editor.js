@@ -198,7 +198,12 @@ export async function filesOpen(path) {
       const dirPath = parts.length ? parts.join('/') + '/' : '';
       nameEl.innerHTML = `<span style="color:var(--text-dim);font-weight:400;">${escapeHtml(dirPath)}</span>${escapeHtml(fileName)}`;
     }
-    if (textarea) textarea.value = res.content || '';
+    if (textarea) {
+      textarea.value = res.content || '';
+      textarea.readOnly = !hasPower('files_write');
+    }
+    const saveBtn = document.getElementById('files-save-btn');
+    if (saveBtn) saveBtn.style.display = hasPower('files_write') ? '' : 'none';
     if (dirtyBadge) dirtyBadge.style.display = 'none';
 
     const fmtBytes = window.formatFileBytes || ((b) => `${b} B`);
@@ -304,6 +309,7 @@ export function filesCloseEditor(force = false) {
 }
 
 export async function filesSaveCurrent(andClose = true) {
+  if (!hasPower('files_write')) return;
   const p = window.getSelectedProject ? window.getSelectedProject() : null;
   if (!p || !state.filesOpenPath) return;
 

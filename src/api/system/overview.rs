@@ -206,8 +206,18 @@ pub(crate) async fn overview_handler(
         }
     }
 
-    let mut dbs = state.databases.list().unwrap_or_default();
-    dbs.retain(|db| db.linked_project_id.map(|pid| user.can_access_project(pid)).unwrap_or(true));
+    let dbs = if user.has_any_power(&["databases", "databases_manage"]) {
+        let mut raw = state.databases.list().unwrap_or_default();
+        let can_unlinked = user.all_projects || user.has_power("databases_manage");
+        raw.retain(|db| {
+            db.linked_project_id
+                .map(|pid| user.can_access_project(pid))
+                .unwrap_or(can_unlinked)
+        });
+        raw
+    } else {
+        Vec::new()
+    };
     let mut db_pids = Vec::with_capacity(dbs.len());
     for db in &dbs {
         let mut d_pid = None;
@@ -499,8 +509,8 @@ pub(crate) async fn overview_handler(
 pub(crate) async fn monitor_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Response, StatusCode> {
-    let user = current_user(&state, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+) -> Result<Response, (StatusCode, String)> {
+    let user = verify_power(&state, &headers, "monitor", None)?;
     let cache_key = format!("monitor:u{}", user.id);
 
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
@@ -567,5 +577,6 @@ pub(crate) async fn monitor_handler(
     });
 
     cached_json_response(&state.cache, cache_key, &val, std::time::Duration::from_secs(2))
+        .map_err(|c| (c, "Serialization error".to_string()))
 }
 

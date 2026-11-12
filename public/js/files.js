@@ -149,6 +149,11 @@ export async function loadFilesView() {
     dropPathLabel.textContent = `Uploading to /app${state.filesPath ? '/' + state.filesPath : ''}`;
   }
 
+  const canWriteFiles = hasPower('files_write');
+  document.querySelectorAll('.files-write-only').forEach((el) => {
+    el.style.display = canWriteFiles ? '' : 'none';
+  });
+
   try {
     const res = await api(`/api/projects/${p.id}/files?path=${encodeURIComponent(state.filesPath)}`, { noCache: true });
     state.filesCachedEntries = res.entries || [];
@@ -242,9 +247,9 @@ export function renderFilesTable() {
         <td style="padding: 8px 16px; text-align: right;">
           <div class="file-actions-cell">
             ${meta.isEditable ? `
-              <button class="file-btn-action" onclick="filesOpen('${safeFull}')" title="Edit in code editor">
-                ${icon('edit', { size: 13 })}
-                <span>Edit</span>
+              <button class="file-btn-action" onclick="filesOpen('${safeFull}')" title="${hasPower('files_write') ? 'Edit in code editor' : 'View in code viewer'}">
+                ${icon(hasPower('files_write') ? 'edit' : 'eye', { size: 13 })}
+                <span>${hasPower('files_write') ? 'Edit' : 'View'}</span>
               </button>
             ` : ''}
             ${!e.is_dir ? `
@@ -253,12 +258,14 @@ export function renderFilesTable() {
                 <span>Download</span>
               </button>
             ` : ''}
-            <button class="file-btn-action" onclick="filesRename('${safeFull}')" title="Rename item">
-              ${icon('pencil', { size: 13 })}
-            </button>
-            <button class="file-btn-action danger" onclick="filesDelete('${safeFull}')" title="Delete file or folder">
-              ${icon('trash', { size: 13 })}
-            </button>
+            ${hasPower('files_write') ? `
+              <button class="file-btn-action" onclick="filesRename('${safeFull}')" title="Rename item">
+                ${icon('pencil', { size: 13 })}
+              </button>
+              <button class="file-btn-action danger" onclick="filesDelete('${safeFull}')" title="Delete file or folder">
+                ${icon('trash', { size: 13 })}
+              </button>
+            ` : ''}
           </div>
         </td>
       </tr>
@@ -460,6 +467,10 @@ export async function uploadFileList(files) {
 }
 
 export async function handleFilesUpload(e) {
+  if (!hasPower('files_write')) {
+    if (e.target) e.target.value = '';
+    return;
+  }
   const files = e.target?.files;
   if (files && files.length) {
     await uploadFileList(files);
@@ -468,6 +479,10 @@ export async function handleFilesUpload(e) {
 }
 
 export async function handleFolderUpload(e) {
+  if (!hasPower('files_write')) {
+    if (e.target) e.target.value = '';
+    return;
+  }
   const files = e.target?.files;
   if (files && files.length) {
     await uploadFileList(files);
@@ -484,7 +499,7 @@ export function setupFileDropzone() {
   let dragCounter = 0;
 
   dropzone.addEventListener('dragenter', (e) => {
-    if (state.filesOpenPath) return;
+    if (state.filesOpenPath || !hasPower('files_write')) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter++;
@@ -493,14 +508,14 @@ export function setupFileDropzone() {
   });
 
   dropzone.addEventListener('dragover', (e) => {
-    if (state.filesOpenPath) return;
+    if (state.filesOpenPath || !hasPower('files_write')) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
   });
 
   dropzone.addEventListener('dragleave', (e) => {
-    if (state.filesOpenPath) return;
+    if (state.filesOpenPath || !hasPower('files_write')) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter--;
@@ -517,6 +532,7 @@ export function setupFileDropzone() {
     dragCounter = 0;
     if (overlay) overlay.style.display = 'none';
     dropzone.classList.remove('drag-active');
+    if (!hasPower('files_write')) return;
 
     const dt = e.dataTransfer;
     if (dt && dt.files && dt.files.length) {

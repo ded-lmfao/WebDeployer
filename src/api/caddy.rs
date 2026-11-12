@@ -133,7 +133,7 @@ pub(crate) async fn github_repos_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<GithubRepoItem>>, (StatusCode, String)> {
-    let _actor = verify_power(&state, &headers, "projects_manage", None)?;
+    let _actor = verify_any_power(&state, &headers, &["projects_manage", "services_manage"], None)?;
     let tokens = crate::git::Git::get_sqlite_github_tokens();
 
     if !tokens.is_empty() {

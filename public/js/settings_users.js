@@ -18,12 +18,34 @@ export const POWER_LABELS = {
   deploy: 'Deploy',
   process: 'Start/Stop',
   logs: 'Logs',
+  files: 'Files (Read)',
+  files_write: 'Files (Write)',
   env: 'Env (.env)',
   domains: 'Domains/SSL',
   backups: 'Backups',
   projects_manage: 'Manage Sites',
-  settings_manage: 'Settings/Users',
+  services_manage: 'Manage Services',
+  databases: 'Databases (Ctrl)',
+  databases_manage: 'Manage DBs',
+  audit: 'Audit Logs',
+  monitor: 'Telemetry',
+  settings_manage: 'Settings/Cache',
+  system_manage: 'System/Update',
 };
+
+const POWER_PRESETS = {
+  all: null,
+  defaults: ['deploy', 'process', 'logs', 'files', 'backups'],
+  readonly: ['logs', 'files', 'audit', 'monitor', 'databases'],
+  none: [],
+};
+
+export function setUserPowerPreset(preset) {
+  const list = POWER_PRESETS[preset];
+  document.querySelectorAll('.user-power-check').forEach((cb) => {
+    cb.checked = list === null ? true : list.includes(cb.value);
+  });
+}
 
 // ============================================================================
 // GitHub Deployment Tokens Multi-Account Management
@@ -267,6 +289,7 @@ document.getElementById('user-all-projects-check')?.addEventListener('change', (
 
 document.getElementById('create-user-modal-btn')?.addEventListener('click', () => {
   document.getElementById('create-user-form')?.reset();
+  setUserPowerPreset('defaults');
   const idEl = document.getElementById('user-edit-id');
   if (idEl) idEl.value = '';
   const titleEl = document.getElementById('user-modal-title');
@@ -328,6 +351,7 @@ window.addGithubTokenRow = addGithubTokenRow;
 window.removeGithubTokenRow = removeGithubTokenRow;
 window.toggleGithubTokenRowReveal = toggleGithubTokenRowReveal;
 window.openEditUserModal = openEditUserModal;
+window.setUserPowerPreset = setUserPowerPreset;
 window.toggleUserDisabled = toggleUserDisabled;
 window.deleteUser = deleteUser;
 

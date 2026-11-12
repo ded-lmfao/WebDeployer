@@ -17,7 +17,13 @@ import {
 } from './state.js';
 import { api, toast } from './api.js';
 
+export function syncReleasesHeaderControls() {
+  const createBtn = document.getElementById('create-release-btn');
+  if (createBtn) createBtn.style.display = hasPower('deploy') ? '' : 'none';
+}
+
 async function loadReleasesView() {
+  syncReleasesHeaderControls();
   const p = getSelectedProject();
   const tbody = document.getElementById('releases-table-body');
   if (!p) return;
@@ -46,9 +52,9 @@ async function loadReleasesView() {
             <td>${isLive ? '<span class="badge badge-success">LIVE</span>' : '<span class="badge badge-neutral">Retained</span>'}</td>
             <td>
               <div style="display: flex; gap: 6px;">
-                ${!isLive && r.status === 'succeeded' ? `<button class="btn btn-primary btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Rollback</button>` : ''}
-                ${r.deployment_id ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${r.deployment_id})">Logs</button>` : ''}
-                ${!isLive ? `<button class="btn btn-danger btn-sm" onclick="deleteRelease(${p.id}, ${r.id})">Delete</button>` : ''}
+                ${hasPower('deploy') && !isLive && r.status === 'succeeded' ? `<button class="btn btn-primary btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Rollback</button>` : ''}
+                ${hasPower('logs') && r.deployment_id ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${r.deployment_id})">Logs</button>` : ''}
+                ${hasPower('deploy') && !isLive ? `<button class="btn btn-danger btn-sm" onclick="deleteRelease(${p.id}, ${r.id})">Delete</button>` : ''}
               </div>
             </td>
           </tr>
@@ -96,7 +102,7 @@ async function loadRollbacksView() {
           <td>${formatDate(r.deployed_at || r.created_at)}</td>
           <td><span class="badge badge-success">Files Verified</span></td>
           <td>
-            <button class="btn btn-danger btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Instant Rollback</button>
+            ${hasPower('deploy') ? `<button class="btn btn-danger btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Instant Rollback</button>` : '<span style="color:var(--text-dim); font-size:12px;">Read-only</span>'}
           </td>
         </tr>
       `).join(''));

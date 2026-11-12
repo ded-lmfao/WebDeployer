@@ -20,6 +20,12 @@ export const DB_PIPELINE_STAGES = [
 ];
 
 export async function loadDatabases() {
+  if (typeof window.hasAnyPower === 'function' && !window.hasAnyPower(['databases', 'databases_manage'])) {
+    state.databases = [];
+    const badge = document.getElementById('badge-databases-count');
+    if (badge) badge.textContent = 0;
+    return;
+  }
   try {
     const list = await api('/api/databases');
     state.databases = Array.isArray(list) ? list : [];
@@ -117,7 +123,7 @@ export function renderDatabasesList() {
         <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">
           ${q || filter !== 'all' ? 'No databases match your search or status filter.' : 'Deploy an isolated PostgreSQL database directly on your VM.'}
         </p>
-        <button class="btn btn-primary" onclick="openCreateDatabaseModal()">Add New Database</button>
+        ${hasPower('databases_manage') ? '<button class="btn btn-primary" onclick="openCreateDatabaseModal()">Add New Database</button>' : ''}
       </div>
     `;
     return;
@@ -199,16 +205,20 @@ export function renderDatabasesList() {
         <!-- Actions Footer -->
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: auto;">
           <div style="display: flex; gap: 6px; align-items: center;">
-            <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
-              <span>${isRunning ? 'Stop' : 'Start'}</span>
-            </button>
-            <button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings & Password">Connection</button>
-            <button class="btn btn-secondary btn-sm" onclick="showDatabaseLogs(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="View PostgreSQL Server Logs">Logs</button>
-            <button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Network Access & Domain">Access</button>
+            ${hasAnyPower(['databases', 'databases_manage']) ? `
+              <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
+                <span>${isRunning ? 'Stop' : 'Start'}</span>
+              </button>
+            ` : ''}
+            ${hasAnyPower(['databases_manage', 'env']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings & Password">Connection</button>` : ''}
+            ${hasAnyPower(['databases', 'databases_manage']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseLogs(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="View PostgreSQL Server Logs">Logs</button>` : ''}
+            ${hasPower('databases_manage') ? `<button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Network Access & Domain">Access</button>` : ''}
           </div>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDatabase(${d.id}, '${escapeHtml(d.name)}')" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Delete Database">
-            ${icon('trash', { size: 12 })}
-          </button>
+          ${hasPower('databases_manage') ? `
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDatabase(${d.id}, '${escapeHtml(d.name)}')" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Delete Database">
+              ${icon('trash', { size: 12 })}
+            </button>
+          ` : ''}
         </div>
       </div>
     `;

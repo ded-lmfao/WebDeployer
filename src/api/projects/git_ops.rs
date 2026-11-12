@@ -203,7 +203,12 @@ pub(crate) async fn detect_project_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<DetectProjectResponse>, (StatusCode, String)> {
-    let _actor = verify_project_access(&state, &headers, id)?;
+    let _actor = verify_any_power(
+        &state,
+        &headers,
+        &["deploy", "projects_manage", "services_manage"],
+        Some(id),
+    )?;
     let p = fetch_project(&state.projects, id)?;
 
     let repo_dir = std::path::Path::new(&p.deploy_dir).join("repo");

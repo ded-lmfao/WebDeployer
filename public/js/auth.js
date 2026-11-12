@@ -251,6 +251,10 @@ export function hasPower(power) {
   return perms.includes('*') || perms.includes(power);
 }
 
+export function hasAnyPower(powers) {
+  return Array.isArray(powers) && powers.some((p) => hasPower(p));
+}
+
 export async function onAuthenticated(isFreshLogin = false) {
   if (!state.user || !state.csrf || state.pendingMfaToken) {
     showLogin();
@@ -265,18 +269,29 @@ export async function onAuthenticated(isFreshLogin = false) {
   if (curAvatarEl) curAvatarEl.textContent = (state.user.username || 'AD').slice(0, 2).toUpperCase();
 
   const navPowerMap = {
-    env: 'env',
-    domains: 'domains',
-    backups: 'backups',
+    env: ['env'],
+    domains: ['domains'],
+    backups: ['backups'],
+    databases: ['databases', 'databases_manage'],
   };
-  Object.entries(navPowerMap).forEach(([view, pwr]) => {
+  Object.entries(navPowerMap).forEach(([view, pwrs]) => {
     const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
-    if (navEl) navEl.style.display = hasPower(pwr) ? '' : 'none';
+    if (navEl) navEl.style.display = hasAnyPower(pwrs) ? '' : 'none';
   });
 
+  const addSiteBtn = document.getElementById('add-website-header-btn');
+  if (addSiteBtn) addSiteBtn.style.display = hasPower('projects_manage') ? '' : 'none';
+  const addSvcBtn = document.getElementById('add-service-header-btn');
+  if (addSvcBtn) addSvcBtn.style.display = hasPower('services_manage') ? '' : 'none';
+  const addDbBtn = document.getElementById('add-database-header-btn');
+  if (addDbBtn) addDbBtn.style.display = hasPower('databases_manage') ? '' : 'none';
+
+  const shouldLoadDbs = hasAnyPower(['databases', 'databases_manage']);
   await Promise.all([
     typeof loadProjects === 'function' ? loadProjects() : (window.loadProjects ? window.loadProjects() : Promise.resolve()),
-    typeof loadDatabases === 'function' ? loadDatabases() : (window.loadDatabases ? window.loadDatabases() : Promise.resolve()),
+    shouldLoadDbs
+      ? (typeof loadDatabases === 'function' ? loadDatabases() : (window.loadDatabases ? window.loadDatabases() : Promise.resolve()))
+      : Promise.resolve(),
   ]).catch((err) => {
     console.warn('Initial project/db load warning:', err);
   });
@@ -692,6 +707,7 @@ window.stopLoginCanvasAnimation = stopLoginCanvasAnimation;
 window.togglePasswordField = togglePasswordField;
 window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
 window.hasPower = hasPower;
+window.hasAnyPower = hasAnyPower;
 window.openSecurityModal = openSecurityModal;
 window.switchSecurityTab = switchSecurityTab;
 window.start2faSetup = start2faSetup;

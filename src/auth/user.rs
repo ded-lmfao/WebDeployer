@@ -94,11 +94,60 @@ impl User {
         self.permissions.iter().any(|p| p == "*" || p == power)
     }
 
+    pub fn has_any_power(&self, powers: &[&str]) -> bool {
+        if self.is_main_admin {
+            return true;
+        }
+        powers.iter().any(|p| self.has_power(p))
+    }
+
     pub fn can_access_project(&self, project_id: i64) -> bool {
         if self.is_main_admin || self.all_projects {
             return true;
         }
         self.allowed_projects.contains(&project_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::User;
+
+    fn sample_user(id: i64, username: &str, perms_json: &str, proj_json: &str) -> User {
+        User::from_db(
+            id,
+            username.to_string(),
+            0,
+            perms_json.to_string(),
+            proj_json.to_string(),
+            0,
+            1_700_000_000,
+        )
+    }
+
+    #[test]
+    fn test_main_admin_has_all_powers_and_projects() {
+        let admin = sample_user(1, "admin", "[]", "[]");
+        assert!(admin.is_main_admin);
+        assert!(admin.has_power("settings_manage"));
+        assert!(admin.has_any_power(&["databases", "databases_manage"]));
+        assert!(admin.can_access_project(99));
+    }
+
+    #[test]
+    fn test_granular_powers_and_project_scoping() {
+        let dev = sample_user(2, "dev", r#"["deploy","files","services_manage"]"#, r#"[10, 20]"#);
+        assert!(!dev.is_main_admin);
+        assert!(dev.has_power("deploy"));
+        assert!(dev.has_power("files"));
+        assert!(dev.has_power("services_manage"));
+        assert!(!dev.has_power("projects_manage"));
+        assert!(!dev.has_power("env"));
+        assert!(!dev.has_power("files_write"));
+        assert!(dev.has_any_power(&["files", "files_write"]));
+        assert!(!dev.has_any_power(&["databases", "databases_manage"]));
+        assert!(dev.can_access_project(10));
+        assert!(!dev.can_access_project(30));
     }
 }
 

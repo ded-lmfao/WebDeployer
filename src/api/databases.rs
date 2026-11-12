@@ -11,19 +11,69 @@ use super::common::*;
 // ---------------------------------------------------------------------------
 // Managed Databases (PostgreSQL)
 // ---------------------------------------------------------------------------
+fn can_access_db(user: &crate::auth::user::User, db: &crate::databases::ManagedDatabase) -> bool {
+    let can_unlinked = user.all_projects || user.has_power("databases_manage");
+    db.linked_project_id
+        .map(|pid| user.can_access_project(pid))
+        .unwrap_or(can_unlinked)
+}
+
+fn verify_db_access(
+    state: &AppState,
+    headers: &HeaderMap,
+    powers: &[&str],
+    db: &crate::databases::ManagedDatabase,
+) -> Result<crate::auth::user::User, (StatusCode, String)> {
+    let user = verify_any_power(state, headers, powers, db.linked_project_id)?;
+    if !can_access_db(&user, db) {
+        return Err((StatusCode::FORBIDDEN, "Access to unlinked database is restricted".to_string()));
+    }
+    Ok(user)
+}
+
+fn redact_pg_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("postgresql://") {
+        if let Some((userinfo, hostpart)) = rest.split_once('@') {
+            if let Some((user, _pass)) = userinfo.split_once(':') {
+                return format!("postgresql://{}:****@{}", user, hostpart);
+            }
+        }
+    }
+    String::new()
+}
+
+pub(crate) fn redact_db_if_unprivileged(
+    mut db: crate::databases::ManagedDatabase,
+    can_creds: bool,
+) -> crate::databases::ManagedDatabase {
+    if !can_creds {
+        db.db_password = None;
+        db.internal_url = redact_pg_url(&db.internal_url);
+        db.external_url = redact_pg_url(&db.external_url);
+    }
+    db
+}
+
 pub(crate) async fn list_databases_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
-    let _user = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let user = verify_any_power(&state, &headers, &["databases", "databases_manage"], None)?;
+    let can_creds = user.has_any_power(&["databases_manage", "env"]);
 
-    let cache_key = "databases:all".to_string();
+    let cache_key = format!("databases:u{}:c{}", user.id, u8::from(can_creds));
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
         return Ok(res);
     }
 
-    let list = state.databases.list().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let list: Vec<crate::databases::ManagedDatabase> = state
+        .databases
+        .list()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .into_iter()
+        .filter(|db| can_access_db(&user, db))
+        .map(|db| redact_db_if_unprivileged(db, can_creds))
+        .collect();
 
     cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
         .map_err(|code| (code, "Serialization error".to_string()))
@@ -34,12 +84,12 @@ pub(crate) async fn get_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
-    let _user = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    Ok(Json(db))
+    let user = verify_db_access(&state, &headers, &["databases", "databases_manage"], &db)?;
+    let can_creds = user.has_any_power(&["databases_manage", "env"]);
+    Ok(Json(redact_db_if_unprivileged(db, can_creds)))
 }
 
 pub(crate) async fn create_database_handler(
@@ -47,8 +97,7 @@ pub(crate) async fn create_database_handler(
     headers: HeaderMap,
     Json(payload): Json<crate::databases::CreateDatabaseInput>,
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
-    let user = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
+    let user = verify_power(&state, &headers, "databases_manage", payload.linked_project_id)?;
     let db = state.databases.create(payload)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
@@ -58,23 +107,29 @@ pub(crate) async fn create_database_handler(
     Ok(Json(db))
 }
 
-pub(crate) async fn perform_database_action<F>(
+async fn run_database_lifecycle<F>(
     state: &AppState,
     headers: &HeaderMap,
     id: i64,
     action_name: &str,
     audit_desc: &str,
     f: F,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)>
+) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)>
 where
     F: std::future::Future<Output = Result<(), String>>,
 {
-    let user = require_current_user(state, headers)?;
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let user = verify_db_access(state, headers, &["databases", "databases_manage"], &db)?;
+    let can_creds = user.has_any_power(&["databases_manage", "env"]);
     f.await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     state.cache.invalidate_prefix("databases:");
     state.cache.invalidate_prefix("overview:");
     log_audit(state, &user.username, action_name, Some(&format!("DB #{}", id)), Some(audit_desc));
-    Ok(Json(serde_json::json!({ "ok": true })))
+    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    Ok(Json(redact_db_if_unprivileged(updated, can_creds)))
 }
 
 pub(crate) async fn start_database_handler(
@@ -82,14 +137,7 @@ pub(crate) async fn start_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
-    let user = require_current_user(&state, &headers)?;
-    state.databases.start(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    state.cache.invalidate_prefix("databases:");
-    state.cache.invalidate_prefix("overview:");
-    log_audit(&state, &user.username, "database.start", Some(&format!("DB #{}", id)), Some("Started database container"));
-    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    Ok(Json(updated))
+    run_database_lifecycle(&state, &headers, id, "database.start", "Started database container", state.databases.start(id)).await
 }
 
 pub(crate) async fn stop_database_handler(
@@ -97,14 +145,7 @@ pub(crate) async fn stop_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
-    let user = require_current_user(&state, &headers)?;
-    state.databases.stop(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    state.cache.invalidate_prefix("databases:");
-    state.cache.invalidate_prefix("overview:");
-    log_audit(&state, &user.username, "database.stop", Some(&format!("DB #{}", id)), Some("Stopped database container"));
-    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    Ok(Json(updated))
+    run_database_lifecycle(&state, &headers, id, "database.stop", "Stopped database container", state.databases.stop(id)).await
 }
 
 pub(crate) async fn restart_database_handler(
@@ -112,14 +153,7 @@ pub(crate) async fn restart_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
-    let user = require_current_user(&state, &headers)?;
-    state.databases.restart(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    state.cache.invalidate_prefix("databases:");
-    state.cache.invalidate_prefix("overview:");
-    log_audit(&state, &user.username, "database.restart", Some(&format!("DB #{}", id)), Some("Restarted database container"));
-    let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    Ok(Json(updated))
+    run_database_lifecycle(&state, &headers, id, "database.restart", "Restarted database container", state.databases.restart(id)).await
 }
 
 pub(crate) async fn update_database_access_handler(
@@ -128,7 +162,10 @@ pub(crate) async fn update_database_access_handler(
     AxPath(id): AxPath<i64>,
     Json(payload): Json<crate::databases::UpdateDatabaseAccessInput>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let user = require_current_user(&state, &headers)?;
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let user = verify_db_access(&state, &headers, &["databases_manage"], &db)?;
     state.databases.update_access(id, payload).await.map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     state.cache.invalidate_prefix("databases:");
     state.cache.invalidate_prefix("overview:");
@@ -141,7 +178,15 @@ pub(crate) async fn delete_database_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    perform_database_action(&state, &headers, id, "database.delete", "Deleted database container", state.databases.delete(id)).await
+    let db = state.databases.get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let user = verify_db_access(&state, &headers, &["databases_manage"], &db)?;
+    state.databases.delete(id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.cache.invalidate_prefix("databases:");
+    state.cache.invalidate_prefix("overview:");
+    log_audit(&state, &user.username, "database.delete", Some(&format!("DB #{}", id)), Some("Deleted database container"));
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
@@ -189,10 +234,11 @@ pub(crate) async fn link_database_handler(
     Json(payload): Json<LinkDbPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let p = fetch_project(&state.projects, payload.project_id)?;
-    let user = verify_power(&state, &headers, "env", Some(p.id))?;
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let _ = verify_db_access(&state, &headers, &["databases_manage"], &db)?;
+    let user = verify_power(&state, &headers, "env", Some(p.id))?;
 
     let raw_pass = db.db_password.unwrap_or_default();
     let port_str = db.port.to_string();
@@ -247,11 +293,11 @@ pub(crate) async fn unlink_database_handler(
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let actor = verify_db_access(&state, &headers, &["databases_manage"], &db)?;
     let old_proj = db.linked_project_id.and_then(|pid| state.projects.get(pid).ok().flatten());
-    let actor = match old_proj.as_ref() {
-        Some(p) => verify_power(&state, &headers, "env", Some(p.id))?,
-        None => require_current_user(&state, &headers)?,
-    };
+    if let Some(ref p) = old_proj {
+        let _ = verify_power(&state, &headers, "env", Some(p.id))?;
+    }
 
     if let Some(ref p) = old_proj {
         for key in LINKED_DB_ENV_KEYS {
@@ -286,11 +332,10 @@ pub(crate) async fn get_database_logs_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let _user = current_user(&state, &headers)
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()))?;
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let _user = verify_db_access(&state, &headers, &["databases", "databases_manage"], &db)?;
 
     let log_content = state.databases.get_logs(id)
         .unwrap_or_else(|e| format!("Error reading log file: {}", e));
@@ -302,4 +347,49 @@ pub(crate) async fn get_database_logs_handler(
         "port": db.port,
         "logs": log_content
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_db_if_unprivileged;
+    use crate::databases::ManagedDatabase;
+
+    fn sample_db() -> ManagedDatabase {
+        ManagedDatabase {
+            id: 1,
+            name: "appdb".to_string(),
+            engine: "postgres".to_string(),
+            db_name: "app".to_string(),
+            db_user: "webdep".to_string(),
+            db_password: Some("super-secret-pass".to_string()),
+            port: 5432,
+            is_superuser: false,
+            access_mode: "local".to_string(),
+            allowed_ips: "".to_string(),
+            domain: "db.example.com".to_string(),
+            status: "running".to_string(),
+            container_id: None,
+            data_dir: "/tmp/db".to_string(),
+            linked_project_id: Some(7),
+            linked_project_name: Some("web".to_string()),
+            internal_url: "postgresql://webdep:super-secret-pass@127.0.0.1:5432/app".to_string(),
+            external_url: "postgresql://webdep:super-secret-pass@db.example.com:5432/app?sslmode=prefer".to_string(),
+            psql_command: "psql -h db.example.com -p 5432 -U webdep -d app".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_redact_db_if_unprivileged() {
+        let redacted = redact_db_if_unprivileged(sample_db(), false);
+        assert!(redacted.db_password.is_none());
+        assert_eq!(redacted.internal_url, "postgresql://webdep:****@127.0.0.1:5432/app");
+        assert_eq!(redacted.external_url, "postgresql://webdep:****@db.example.com:5432/app?sslmode=prefer");
+        assert_eq!(redacted.psql_command, "psql -h db.example.com -p 5432 -U webdep -d app");
+
+        let full = redact_db_if_unprivileged(sample_db(), true);
+        assert_eq!(full.db_password.as_deref(), Some("super-secret-pass"));
+        assert!(full.internal_url.contains("super-secret-pass"));
+    }
 }

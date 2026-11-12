@@ -36,6 +36,9 @@ async function loadGithubView() {
   const p = getSelectedProject();
   if (!p) return;
 
+  const fetchBtn = document.getElementById('github-fetch-btn');
+  if (fetchBtn) fetchBtn.style.display = hasPower('deploy') ? '' : 'none';
+
   const branchBadge = document.getElementById('github-branch-badge');
   if (branchBadge) branchBadge.textContent = p.branch;
 
@@ -68,9 +71,11 @@ async function loadGithubView() {
               ${isLive ? '<span class="badge badge-success">LIVE</span>' : c.deployedBefore ? '<span class="badge badge-neutral">Previously Deployed</span>' : '<span style="color:var(--text-dim)">-</span>'}
             </td>
             <td>
-              <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id}, '${c.sha}')" ${isLive ? 'disabled' : ''}>
-                Deploy Commit
-              </button>
+              ${hasPower('deploy') ? `
+                <button class="btn btn-primary btn-sm" onclick="deployProject(${p.id}, '${c.sha}')" ${isLive ? 'disabled' : ''}>
+                  Deploy Commit
+                </button>
+              ` : '<span style="color:var(--text-dim); font-size:12px;">Read-only</span>'}
             </td>
           </tr>
         `;
@@ -293,7 +298,7 @@ function renderDeploymentRow(d, isOverview = false) {
       <td><span class="badge ${badgeClass}">${escapeHtml((d.status || '').toUpperCase())}</span></td>
       <td><span style="font-size:12px; color:var(--text-muted);">${formatRelativeTime(d.started_at)}</span></td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${d.id})">Logs</button>
+        ${hasPower('logs') ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${d.id})">Logs</button>` : '<span style="color:var(--text-dim); font-size:11.5px;">--</span>'}
       </td>
     </tr>
   `;

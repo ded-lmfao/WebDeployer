@@ -80,12 +80,20 @@ pub(crate) async fn get_project_handler(
     Ok(Json(p))
 }
 
+fn manage_power_for_kind(kind: &str) -> &'static str {
+    if kind == "service" {
+        "services_manage"
+    } else {
+        "projects_manage"
+    }
+}
+
 pub(crate) async fn create_project_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(mut p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "projects_manage", None)?;
+    let actor = verify_power(&state, &headers, manage_power_for_kind(&p.project_kind), None)?;
     let is_service = p.project_kind == "service";
     if p.name.trim().is_empty() || p.slug.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Name and slug are required".into()));
@@ -203,10 +211,16 @@ pub(crate) async fn update_project_handler(
     AxPath(id): AxPath<i64>,
     Json(mut p): Json<Project>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
-    p.domains = sanitize_domains(p.domains);
-
     let prev = state.projects.get(id).ok().flatten();
+    let existing_kind = prev
+        .as_ref()
+        .map(|old| old.project_kind.as_str())
+        .unwrap_or(p.project_kind.as_str());
+    let actor = verify_power(&state, &headers, manage_power_for_kind(existing_kind), Some(id))?;
+    if p.project_kind != existing_kind {
+        let _ = verify_power(&state, &headers, manage_power_for_kind(&p.project_kind), Some(id))?;
+    }
+    p.domains = sanitize_domains(p.domains);
 
     // Ensure non-conflicting, valid port allocation across all workloads
     if let Some(port) = p.port {
@@ -293,8 +307,12 @@ pub(crate) async fn delete_project_handler(
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let actor = verify_power(&state, &headers, "projects_manage", Some(id))?;
     let deleted_proj = state.projects.get(id).ok().flatten();
+    let kind = deleted_proj
+        .as_ref()
+        .map(|p| p.project_kind.as_str())
+        .unwrap_or("website");
+    let actor = verify_power(&state, &headers, manage_power_for_kind(kind), Some(id))?;
     if let Some(ref p) = deleted_proj {
         log_audit_project(
             &state,
