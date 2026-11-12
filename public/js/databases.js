@@ -14,6 +14,7 @@ import {
   closeModal,
   showConfirmDialog,
   copyTextToClipboard,
+  setHtmlIfChanged,
   PIPELINE_STAGES,
 } from './state.js';
 import { api, toast } from './api.js';
@@ -91,7 +92,7 @@ function renderDatabasesList() {
   if (!container) return;
 
   if (!state.databases || state.databases.length === 0) {
-    container.innerHTML = `
+    setHtmlIfChanged(container, `
       <div class="empty-state" style="grid-column: 1 / -1; padding: 48px 24px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius-lg);">
         <div style="margin-bottom: 12px; color: var(--text-dim);">${icon('database', { size: 40, stroke: 1.5 })}</div>
         <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">No PostgreSQL Databases Yet</h3>
@@ -103,11 +104,11 @@ function renderDatabasesList() {
           <span>Create First Database</span>
         </button>
       </div>
-    `;
+    `);
     return;
   }
 
-  container.innerHTML = state.databases.map((db) => {
+  setHtmlIfChanged(container, state.databases.map((db) => {
     const isRunning = db.status === 'running';
     const isError = db.status === 'error';
     const statusClass = isRunning ? 'badge-success' : (isError ? 'badge-danger' : 'badge-neutral');
@@ -195,7 +196,7 @@ function renderDatabasesList() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join(''));
 
   // Hydrate each card's dedicated water pipeline
   (state.databases || []).forEach((db) => {

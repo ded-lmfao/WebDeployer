@@ -4,7 +4,7 @@
  */
 
 import { icon } from './icons.js';
-import { state, PAGE_SIZE, paginateAndRender, escapeHtml, formatDate } from './state.js';
+import { state, PAGE_SIZE, paginateAndRender, setHtmlIfChanged, escapeHtml, formatDate } from './state.js';
 import { api, toast } from './api.js';
 import { loadDatabases } from './databases.js';
 import { renderPipelineStages } from './deployments.js';
@@ -35,11 +35,11 @@ function renderResourceBreakdown(resources) {
       emptyMsg = 'No workloads created yet. Deploy websites, backend services or databases to monitor their live resource usage.';
       emptyAction = '<div style="margin-top: 12px; display: flex; gap: 8px; justify-content: center;"><button class="btn btn-primary btn-sm" onclick="openAddWebsiteModal()">+ Add Website</button><button class="btn btn-secondary btn-sm" onclick="openAddServiceModal()">+ Add Service</button><button class="btn btn-secondary btn-sm" onclick="navigateTo(\'databases\')">Go to Databases &rarr;</button></div>';
     }
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 32px 16px; color: var(--text-dim);"><div style="font-size: 13.5px;">${emptyMsg}</div>${emptyAction}</td></tr>`;
+    setHtmlIfChanged(tbody, `<tr><td colspan="8" style="text-align: center; padding: 32px 16px; color: var(--text-dim);"><div style="font-size: 13.5px;">${emptyMsg}</div>${emptyAction}</td></tr>`);
     return;
   }
 
-  tbody.innerHTML = filtered.map((r) => {
+  setHtmlIfChanged(tbody, filtered.map((r) => {
     const isRunning = r.status === 'running';
     const isMaintenance = r.status === 'maintenance';
     const kindUpper = r.kind.toUpperCase();
@@ -148,7 +148,7 @@ function renderResourceBreakdown(resources) {
         </td>
       </tr>
     `;
-  }).join('');
+  }).join(''));
 }
 
 function filterResourceBreakdown(filter) {
@@ -164,6 +164,12 @@ async function loadOverview() {
   try {
     const data = await api('/api/overview');
     state.overview = data;
+    if (Array.isArray(data.projects)) {
+      state.projects = data.projects.map((x) => x.project);
+      if (state.projects.length > 0 && !state.selectedProjectId) {
+        state.selectedProjectId = state.projects[0].id;
+      }
+    }
 
     // Server Stats
     const m = data.monitor || {};
@@ -172,12 +178,15 @@ async function loadOverview() {
     document.getElementById('stat-total-projects').textContent = ovWeb.length;
     document.getElementById('stat-total-services').textContent = ovSvc.length;
 
-    // Keep navigation sidebar counts updated immediately
+    // Keep navigation sidebar counts updated immediately without extra network calls
     const badgeWebEl = document.getElementById('badge-projects-count');
     if (badgeWebEl) badgeWebEl.textContent = ovWeb.length;
     const badgeSvcEl = document.getElementById('badge-services-count');
     if (badgeSvcEl) badgeSvcEl.textContent = ovSvc.length;
-    loadDatabases().catch(() => {});
+    const badgeDbEl = document.getElementById('badge-databases-count');
+    if (badgeDbEl && Array.isArray(data.resources)) {
+      badgeDbEl.textContent = data.resources.filter((r) => r.kind === 'database').length;
+    }
 
     const svcOnline = ovSvc.filter((x) => x.app?.running).length;
     document.getElementById('stat-services-online').textContent = svcOnline;

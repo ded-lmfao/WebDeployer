@@ -201,26 +201,43 @@ try {
   }
 } catch (_) {}
 
+let persistTimer = null;
 function persistCacheToSession() {
-  try {
-    const entries = Array.from(clientCache.entries())
-      .filter(([k]) => !k.startsWith('/api/auth/'))
-      .slice(-60);
-    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(entries));
-  } catch (_) {}
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      // Bound in-memory cache size to prevent unbounded growth in long-running tabs
+      if (clientCache.size > 80) {
+        const dropCount = clientCache.size - 60;
+        let i = 0;
+        for (const k of clientCache.keys()) {
+          clientCache.delete(k);
+          if (++i >= dropCount) break;
+        }
+      }
+      const entries = [];
+      for (const [k, v] of clientCache.entries()) {
+        if (!k.startsWith('/api/auth/') && !k.includes('/files/content') && !k.startsWith('/api/logs')) {
+          entries.push([k, v]);
+        }
+      }
+      sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(entries.slice(-45)));
+    } catch (_) {}
+  }, 800);
 }
 
 function getCacheTtlMs(path) {
   if (path.startsWith('/api/auth/')) return 0; // Always verify live authentication state with server
-  if (path.startsWith('/api/logs')) return 0; // Live logs use SSE stream
-  if (path.startsWith('/api/databases')) return 2500; // Live database status
-  if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 2500;
+  if (path.startsWith('/api/logs') || path.includes('/files/content')) return 0; // Live logs / raw file contents
+  if (path.startsWith('/api/databases')) return 3500; // Live database status
+  if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 3000;
   if (path.startsWith('/api/deployments')) return 4000;
   if (path.startsWith('/api/audit')) return 8000;
   if (path.includes('/commits')) return 45000;
   if (path.includes('/releases') || path.includes('/backups') || path.includes('/env')) return 20000;
   if (path.includes('/caddy') || path.includes('/nginx')) return 60000;
-  if (path.startsWith('/api/projects') || path.startsWith('/api/settings') || path.startsWith('/api/users')) return 12000;
+  if (path.startsWith('/api/projects') || path.startsWith('/api/settings') || path.startsWith('/api/users')) return 4000;
   return 8000;
 }
 

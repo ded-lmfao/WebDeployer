@@ -347,14 +347,12 @@ pub(crate) async fn overview_handler(
         let disk_fmt = format_resource_bytes(disk_bytes);
         let disk_pct = ((disk_bytes as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 
-        let last_success = {
+        let (last_success, active) = {
             let conn = state.db.lock().unwrap();
-            fetch_overview_deployment(&conn, "status = 'success'", p.id, &p.name)
-        };
-
-        let active = {
-            let conn = state.db.lock().unwrap();
-            fetch_overview_deployment(&conn, "status IN ('running', 'pending')", p.id, &p.name)
+            (
+                fetch_overview_deployment(&conn, "status = 'success'", p.id, &p.name),
+                fetch_overview_deployment(&conn, "status IN ('running', 'pending')", p.id, &p.name),
+            )
         };
 
         items.push(OverviewProjectItem {

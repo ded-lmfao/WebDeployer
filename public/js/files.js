@@ -472,6 +472,8 @@ async function updateEditorHighlight(immediate = false) {
   }
 }
 
+let lastGutterLineCount = 0;
+
 function updateEditorGutter() {
   const textarea = document.getElementById('files-editor');
   const gutter = document.getElementById('files-editor-gutter');
@@ -481,14 +483,17 @@ function updateEditorGutter() {
 
   const content = textarea.value;
   const lineCount = content.split('\n').length;
-  let nums = '';
-  for (let i = 1; i <= lineCount; i++) {
-    nums += i + '\n';
+  if (lineCount !== lastGutterLineCount || !gutter.textContent) {
+    lastGutterLineCount = lineCount;
+    let nums = '';
+    for (let i = 1; i <= lineCount; i++) {
+      nums += i + '\n';
+    }
+    gutter.textContent = nums;
+    if (linesSpan) linesSpan.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
   }
-  gutter.textContent = nums;
 
-  if (linesSpan) linesSpan.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
-  if (sizeSpan) sizeSpan.textContent = formatFileBytes(new Blob([content]).size);
+  if (sizeSpan) sizeSpan.textContent = formatFileBytes(content.length);
 }
 
 function updateEditorPos() {
@@ -517,7 +522,7 @@ function bindEditorEvents() {
       pre.scrollTop = textarea.scrollTop;
       pre.scrollLeft = textarea.scrollLeft;
     }
-  });
+  }, { passive: true });
 
   // Track cursor position
   textarea.addEventListener('keyup', updateEditorPos);
@@ -579,6 +584,7 @@ function filesCloseEditor(force = false) {
   }
   state.filesOpenPath = null;
   state.filesEditorDirty = false;
+  lastGutterLineCount = 0;
 
   const card = document.getElementById('files-editor-card');
   const browserView = document.getElementById('files-browser-view');

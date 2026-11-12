@@ -7,6 +7,11 @@
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
+/* Browser Layout & Style Containment for Fast Repaints */
+.project-card, .stat-card, .log-line {
+  contain: layout style;
+}
+
 .table-row-hover:hover {
   background: rgba(255, 255, 255, 0.035);
 }

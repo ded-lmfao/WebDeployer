@@ -28,21 +28,21 @@ import './js/logs.js';
 let pollInFlight = false;
 
 async function pollTick() {
-  if (pollInFlight || document.hidden) return;
+  if (pollInFlight || document.hidden || state.filesOpenPath) return;
   pollInFlight = true;
   try {
-    // Keep sidebar badges (databases & projects & services) constantly up-to-date across all tabs
+    if (state.currentView === 'overview') {
+      await loadOverview();
+      return;
+    }
+
+    // Keep sidebar badges (databases & projects & services) up-to-date on non-overview tabs
     await Promise.all([
       loadProjects().catch(() => {}),
       loadDatabases().catch(() => {})
     ]);
 
-    // When actively in in-browser code editor, do not trigger background workspace DOM repaints
-    if (state.filesOpenPath) return;
-
-    if (state.currentView === 'overview') {
-      await loadOverview();
-    } else if (state.currentView === 'services') {
+    if (state.currentView === 'services') {
       renderServicesList();
     } else if (state.currentView === 'projects') {
       renderProjectsList();

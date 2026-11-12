@@ -22,6 +22,7 @@ import {
   closeModal,
   showConfirmDialog,
   invalidateClientCache,
+  setHtmlIfChanged,
   PRESETS,
 } from './state.js';
 import { api, toast } from './api.js';
@@ -108,6 +109,14 @@ window.renderSingleServicePipeline = renderSingleServicePipeline;
 
 function syncServiceCardPipeline(p) {
   if (!p) return;
+  const uptimeEl = document.getElementById(`service-uptime-${p.id}`);
+  if (uptimeEl) {
+    const isOnline = p.app_status === 'running';
+    uptimeEl.textContent = isOnline && p.app_started_at
+      ? `Started ${formatRelativeTime(p.app_started_at)}`
+      : (isOnline ? 'Active process' : 'Process inactive');
+  }
+
   const ovItem = (state.overview?.projects || []).find((x) => x.project?.id === p.id);
   const activeDep = ovItem?.active || (state.activeDeployment && state.activeDeployment.project_id === p.id ? state.activeDeployment : null);
 
@@ -166,7 +175,7 @@ function renderServicesList() {
   });
 
   if (!filtered.length) {
-    container.innerHTML = `
+    setHtmlIfChanged(container, `
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
         <div style="margin-bottom: 12px; color: var(--text-dim);">${icon('bot', { size: 40, stroke: 1.5 })}</div>
         <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No backend services or bots yet</p>
@@ -178,11 +187,11 @@ function renderServicesList() {
           <span>New Service / Bot</span>
         </button>
       </div>
-    `;
+    `);
     return;
   }
 
-  container.innerHTML = filtered.map((p) => {
+  setHtmlIfChanged(container, filtered.map((p) => {
     const isOnline = p.app_status === 'running';
     const sha = p.deployed_sha ? `<span class="sha-pill">${p.deployed_sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">Not deployed</span>';
 
@@ -209,9 +218,7 @@ function renderServicesList() {
       typeName = 'Queue Worker';
     }
 
-    const uptimeText = isOnline && p.app_started_at
-      ? `Started ${formatRelativeTime(p.app_started_at)}`
-      : (isOnline ? 'Active process' : 'Process inactive');
+    const uptimeText = isOnline ? 'Active process' : 'Process inactive';
 
     const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
     const defaultTab = isLocal ? 'files' : 'deployments';
@@ -284,7 +291,7 @@ function renderServicesList() {
           </div>
           ${diskStr ? `<div class="project-meta-item"><span>Disk <strong style="color:var(--text-main);">${diskStr}</strong></span></div>` : ''}
           <div class="project-meta-item">
-            <span style="font-size: 11.5px; color: var(--text-muted);">${uptimeText}</span>
+            <span id="service-uptime-${p.id}" style="font-size: 11.5px; color: var(--text-muted);">${uptimeText}</span>
           </div>
         </div>
 
@@ -305,7 +312,7 @@ function renderServicesList() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join(''));
 
   // Hydrate each service card's dedicated water pipeline
   filtered.forEach((p) => {

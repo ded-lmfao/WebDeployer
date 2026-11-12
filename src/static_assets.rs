@@ -1,5 +1,5 @@
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -17,7 +17,7 @@ static ETAG_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 struct DiskCacheEntry {
     mtime: std::time::SystemTime,
     etag: String,
-    data: Vec<u8>,
+    data: Bytes,
 }
 
 static DISK_ASSET_CACHE: OnceLock<std::sync::RwLock<HashMap<String, DiskCacheEntry>>> = OnceLock::new();
@@ -86,6 +86,66 @@ fn find_disk_file(clean_path: &str) -> Option<PathBuf> {
     None
 }
 
+/// Resolves `@import './css/...'` directives in `style.css` into a single combined stylesheet
+/// to eliminate a 12-request CSS waterfall on initial page load while preserving modular source files.
+fn bundle_css_imports_from_disk(style_path: &Path, raw: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(raw) else {
+        return raw.to_vec();
+    };
+    let parent = style_path.parent().unwrap_or_else(|| Path::new("public"));
+    let mut out = String::with_capacity(72 * 1024);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("@import ") {
+            let rel = rest
+                .trim_end_matches(';')
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"')
+                .trim_start_matches("./");
+            if !rel.contains("..") {
+                let target = parent.join(rel);
+                if let Ok(sub) = std::fs::read_to_string(&target) {
+                    out.push_str(&sub);
+                    out.push('\n');
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.into_bytes()
+}
+
+fn bundle_css_imports_embedded(raw: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(raw) else {
+        return raw.to_vec();
+    };
+    let mut out = String::with_capacity(72 * 1024);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("@import ") {
+            let rel = rest
+                .trim_end_matches(';')
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"')
+                .trim_start_matches("./");
+            if let Some(sub) = Assets::get(rel) {
+                if let Ok(sub_str) = std::str::from_utf8(&sub.data) {
+                    out.push_str(sub_str);
+                    out.push('\n');
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.into_bytes()
+}
+
 pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&str>) -> Response {
     let clean_path = if path.is_empty() || path == "/" {
         "index.html"
@@ -117,7 +177,20 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     // This provides 0ms responses, automatic live hot-reload on save, and 0 bytes 304 Not Modified!
     if let Some(disk_path) = find_disk_file(clean_path) {
         if let Ok(meta) = tokio::fs::metadata(&disk_path).await {
-            let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let mut mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if clean_path == "style.css" {
+                if let Some(parent) = disk_path.parent() {
+                    if let Ok(entries) = std::fs::read_dir(parent.join("css")) {
+                        for entry in entries.flatten() {
+                            if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
+                                if m > mtime {
+                                    mtime = m;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             let cache_lock = get_disk_cache();
 
             let cached = {
@@ -134,7 +207,13 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
 
             let (etag, data, is_ram_hit) = if let Some((etag, data)) = cached {
                 (etag, data, true)
-            } else if let Ok(data) = tokio::fs::read(&disk_path).await {
+            } else if let Ok(raw_data) = tokio::fs::read(&disk_path).await {
+                let final_vec = if clean_path == "style.css" {
+                    bundle_css_imports_from_disk(&disk_path, &raw_data)
+                } else {
+                    raw_data
+                };
+                let data = Bytes::from(final_vec);
                 let mtime_secs = mtime
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis())
@@ -228,6 +307,11 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
                     let hash = hex::encode(content.metadata.sha256_hash());
                     format!("W/\"{}\"", &hash[..16])
                 });
+            let body = if clean_path == "style.css" {
+                Body::from(bundle_css_imports_embedded(&content.data))
+            } else {
+                Body::from(content.data)
+            };
 
             Response::builder()
                 .status(StatusCode::OK)
@@ -235,7 +319,7 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
                 .header(header::ETAG, HeaderValue::from_str(&etag).unwrap())
                 .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
                 .header("x-cache", HeaderValue::from_static("MEMORY-EMBED"))
-                .body(Body::from(content.data))
+                .body(body)
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
         None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),

@@ -8,6 +8,7 @@ import {
   state,
   PAGE_SIZE,
   paginateAndRender,
+  setHtmlIfChanged,
   escapeHtml,
   formatRelativeTime,
   openModal,
@@ -23,9 +24,9 @@ import { renderPipelineStages } from './deployments.js';
 // ============================================================================
 // Projects Management
 // ============================================================================
-async function loadProjects() {
+async function loadProjects(force = false) {
   try {
-    state.projects = await api('/api/projects', { noCache: true });
+    state.projects = await api('/api/projects', force ? { noCache: true } : {});
     const websites = (state.projects || []).filter((p) => p.project_kind !== 'service');
     const services = (state.projects || []).filter((p) => p.project_kind === 'service');
 
@@ -97,17 +98,17 @@ function renderProjectsList() {
   });
 
   if (!filtered.length) {
-    container.innerHTML = `
+    setHtmlIfChanged(container, `
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
         <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No hosted websites found</p>
         <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">Add your first website to deploy it directly to your VM.</p>
         <button class="btn btn-primary" onclick="openAddWebsiteModal()">Add New Website</button>
       </div>
-    `;
+    `);
     return;
   }
 
-  container.innerHTML = filtered.map((p) => {
+  setHtmlIfChanged(container, filtered.map((p) => {
     const isOnline = p.app_status === 'running';
     const isMaintenance = p.app_status === 'maintenance';
     const domains = p.domains && p.domains.length ? p.domains : [];
@@ -169,7 +170,7 @@ function renderProjectsList() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join(''));
 }
 
 // Search filter binding

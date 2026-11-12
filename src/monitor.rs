@@ -1,10 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::{
     CpuRefreshKind, Disks, MemoryRefreshKind, ProcessRefreshKind, RefreshKind, System,
 };
+
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CpuMetrics {
@@ -49,6 +57,7 @@ pub struct Monitor {
     sys: Mutex<System>,
     disks: Mutex<Disks>,
     snapshot: RwLock<SystemMetrics>,
+    last_queried_ms: AtomicU64,
 }
 
 impl Monitor {
@@ -67,6 +76,7 @@ impl Monitor {
             sys: Mutex::new(sys),
             disks: Mutex::new(disks),
             snapshot: RwLock::new(initial),
+            last_queried_ms: AtomicU64::new(epoch_ms()),
         }
     }
 
@@ -105,19 +115,25 @@ impl Monitor {
             }
         });
 
-        let mut procs: Vec<ProcessMetrics> = sys
+        // Sort lightweight references first so String allocations only happen for the top 8 processes
+        let mut raw_procs: Vec<(u32, f32, u64, &std::ffi::OsStr)> = sys
             .processes()
             .iter()
             .filter(|(_, p)| p.thread_kind().is_none())
-            .map(|(pid, p)| ProcessMetrics {
-                pid: pid.as_u32(),
-                name: p.name().to_string_lossy().to_string(),
-                cpu: p.cpu_usage(),
-                memory: p.memory(),
+            .map(|(pid, p)| (pid.as_u32(), p.cpu_usage(), p.memory(), p.name()))
+            .collect();
+        raw_procs.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        raw_procs.truncate(8);
+
+        let procs: Vec<ProcessMetrics> = raw_procs
+            .into_iter()
+            .map(|(pid, cpu, memory, name)| ProcessMetrics {
+                pid,
+                name: name.to_string_lossy().to_string(),
+                cpu,
+                memory,
             })
             .collect();
-        procs.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal));
-        procs.truncate(8);
 
         SystemMetrics {
             cpu: CpuMetrics {
@@ -136,7 +152,7 @@ impl Monitor {
         }
     }
 
-    pub fn refresh_now(&self, include_processes: bool) {
+    pub fn refresh_now(&self, include_processes: bool, refresh_disks: bool) {
         let mut sys = self.sys.lock().unwrap();
         sys.refresh_cpu_all();
         sys.refresh_memory();
@@ -147,7 +163,9 @@ impl Monitor {
             sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true, p_kind);
         }
         let mut disks = self.disks.lock().unwrap();
-        disks.refresh();
+        if refresh_disks {
+            disks.refresh();
+        }
         let next = Self::compute_snapshot(&mut sys, &disks);
         drop(disks);
         drop(sys);
@@ -160,16 +178,27 @@ impl Monitor {
         let mon = self.clone();
         tokio::spawn(async move {
             let mut tick_count: u64 = 0;
-            let mut interval = tokio::time::interval(Duration::from_secs(3));
+            let mut interval = tokio::time::interval(Duration::from_secs(4));
             loop {
                 interval.tick().await;
-                let m = mon.clone();
                 tick_count = tick_count.wrapping_add(1);
+
+                // Demand-driven telemetry: only scan OS process table when a dashboard client was active in the last 18s
+                let idle_ms = epoch_ms().saturating_sub(mon.last_queried_ms.load(Ordering::Relaxed));
+                let is_active = idle_ms < 18_000;
+
+                if !is_active && tick_count % 15 != 0 {
+                    continue;
+                }
+
+                let m = mon.clone();
+                let refresh_disks = tick_count % 8 == 0;
                 let _ = tokio::task::spawn_blocking(move || {
-                    m.refresh_now(true);
+                    m.refresh_now(is_active, refresh_disks);
                 })
                 .await;
-                if tick_count % 20 == 0 {
+
+                if tick_count % 15 == 0 {
                     #[cfg(target_os = "linux")]
                     unsafe {
                         extern "C" {
@@ -187,6 +216,7 @@ impl Monitor {
     /// Filters out OS threads so thread pools never multiply CPU or memory metrics.
     /// Performs lock-read on in-memory sysinfo cache, zero OS syscalls or disk I/O.
     pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
         let sys = self.sys.lock().unwrap();
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
         // Stores (cpu_usage, resident_memory_bytes) for true OS processes
@@ -241,6 +271,7 @@ impl Monitor {
 
     /// Instantaneous (< 1 microsecond) lock-free/read-lock read of the cached telemetry snapshot.
     pub fn sample(&self) -> SystemMetrics {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
         self.snapshot.read().unwrap().clone()
     }
 }
@@ -250,32 +281,46 @@ static DISK_USAGE_CACHE: RwLock<Option<HashMap<std::path::PathBuf, (u64, std::ti
 
 /// Returns on-disk storage size in bytes for a directory or file.
 /// Traverses filesystem safely without following symlinks to prevent loops.
-/// Employs an ultra-fast in-memory cache (30s TTL) for sub-millisecond API responses.
+/// Employs a non-blocking in-memory cache (120s TTL) with background refresh so HTTP threads never stall on I/O.
 pub fn get_path_disk_size(path: &std::path::Path) -> u64 {
-    if !path.exists() {
-        return 0;
-    }
+    let key = path.to_path_buf();
 
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-
-    // Check fast in-memory cache first (TTL = 30 seconds)
+    // 1. Fast read-lock check (zero OS syscalls on cache hit!)
     if let Ok(guard) = DISK_USAGE_CACHE.read() {
         if let Some(map) = guard.as_ref() {
-            if let Some(&(bytes, last_updated)) = map.get(&canonical) {
-                if last_updated.elapsed() < Duration::from_secs(30) {
+            if let Some(&(bytes, last_updated)) = map.get(&key) {
+                if last_updated.elapsed() < Duration::from_secs(120) {
                     return bytes;
                 }
+                // Stale cache hit: mark refreshed timestamp and recompute asynchronously in background
+                drop(guard);
+                if let Ok(mut wguard) = DISK_USAGE_CACHE.write() {
+                    if let Some(wmap) = wguard.as_mut() {
+                        wmap.insert(key.clone(), (bytes, std::time::Instant::now()));
+                    }
+                }
+                let bg_key = key;
+                tokio::task::spawn_blocking(move || {
+                    let fresh_bytes = compute_disk_size(&bg_key);
+                    if let Ok(mut wguard) = DISK_USAGE_CACHE.write() {
+                        let map = wguard.get_or_insert_with(HashMap::new);
+                        map.insert(bg_key, (fresh_bytes, std::time::Instant::now()));
+                    }
+                });
+                return bytes;
             }
         }
     }
 
-    // Compute disk size
-    let bytes = compute_disk_size(&canonical);
+    if !path.exists() {
+        return 0;
+    }
 
-    // Update cache
+    // Cold cache miss on first run: compute and store
+    let bytes = compute_disk_size(&key);
     if let Ok(mut guard) = DISK_USAGE_CACHE.write() {
         let map = guard.get_or_insert_with(HashMap::new);
-        map.insert(canonical, (bytes, std::time::Instant::now()));
+        map.insert(key, (bytes, std::time::Instant::now()));
     }
 
     bytes
