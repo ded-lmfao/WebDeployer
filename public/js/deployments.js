@@ -365,4 +365,5 @@ export {
   renderDeploymentRow,
   deployProject,
   openDeploymentDetails,
+  renderPipelineStages,
 };

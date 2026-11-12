@@ -1692,13 +1692,12 @@
             style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <label class="form-label" for="website-repo">GitHub Repository URL *</label>
+                <label class="form-label" for="website-repo">GitHub Repository URL <span style="color:var(--text-dim); font-weight:400;">(or blank for manual)</span></label>
                 <a href="javascript:void(0)" id="browse-github-repos-btn"
                   style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse
                   Repos &nearr;</a>
               </div>
-              <input type="text" id="website-repo" class="form-control" placeholder="https://github.com/owner/repo.git"
-                required>
+              <input type="text" id="website-repo" class="form-control" placeholder="https://github.com/owner/repo.git (optional)">
               <select id="github-repos-select" class="form-control"
                 style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
             </div>

@@ -64,10 +64,7 @@ pub(crate) async fn create_project_handler(
     if p.name.trim().is_empty() || p.slug.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Name and slug are required".into()));
     }
-    if !is_service && p.repo_url.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "GitHub repo_url is required for websites".into()));
-    }
-    if is_service && p.repo_url.trim().is_empty() {
+    if p.repo_url.trim().is_empty() {
         p.repo_url = "local".to_string();
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));

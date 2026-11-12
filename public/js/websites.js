@@ -17,10 +17,19 @@ import {
   showConfirmDialog,
   showPromptDialog,
   invalidateClientCache,
+  WEBSITE_WORKSPACE_TABS,
 } from './state.js';
 import { api, toast, prefetchWebsiteWorkspace } from './api.js';
 import { cleanDomainList } from './settings.js';
-import { renderPipelineStages } from './deployments.js';
+import { toggleDatabaseAccessIpFields } from './databases_modal.js';
+import { renderWebsiteWorkspaceHeader, navigateTo, openWebsiteWorkspace } from './workspace.js';
+import { renderServicesList } from './services.js';
+import { startProject, stopProject, restartProject } from './workspace_actions.js';
+import { deployProject } from './deployments.js';
+import { toggleDatabaseAccessIpFields } from './databases_modal.js';
+import { renderWebsiteWorkspaceHeader, navigateTo, openWebsiteWorkspace } from './workspace.js';
+import { renderServicesList } from './services.js';
+import { startProject, stopProject, restartProject, deployProject } from './workspace_actions.js';
 
 // ============================================================================
 // Projects Management
@@ -40,7 +49,9 @@ async function loadProjects(force = false) {
     if (state.projects.length > 0 && !state.selectedProjectId) {
       state.selectedProjectId = state.projects[0].id;
     }
-    renderWebsiteWorkspaceHeader();
+    if (typeof renderWebsiteWorkspaceHeader === 'function') {
+      renderWebsiteWorkspaceHeader();
+    }
   } catch (err) {
     toast(`Failed to load projects: ${err.message}`, 'error');
   }
@@ -211,12 +222,23 @@ document.querySelectorAll('#projects-status-filters .pill').forEach((btn) => {
 // ============================================================================
 function openAddWebsiteModal() {
   const form = document.getElementById('website-form');
-  form.reset();
-  document.getElementById('website-branch').dataset.touched = '';
-  document.getElementById('website-form-id').value = '';
-  document.getElementById('modal-website-title').textContent = 'Add New Website';
-  document.getElementById('save-website-submit-btn').textContent = 'Create Website';
-  document.getElementById('website-slug').readOnly = false;
+  if (form) form.reset();
+  const branchInput = document.getElementById('website-branch');
+  if (branchInput) {
+    branchInput.value = 'main';
+    branchInput.dataset.touched = '';
+  }
+  const idInput = document.getElementById('website-form-id');
+  if (idInput) idInput.value = '';
+  const titleEl = document.getElementById('modal-website-title');
+  if (titleEl) titleEl.textContent = 'Add New Website';
+  const submitBtn = document.getElementById('save-website-submit-btn');
+  if (submitBtn) submitBtn.textContent = 'Create Website';
+  const slugInput = document.getElementById('website-slug');
+  if (slugInput) {
+    slugInput.value = '';
+    slugInput.readOnly = false;
+  }
   const detectBtn = document.getElementById('website-detect-btn');
   if (detectBtn) detectBtn.style.display = 'none';
 
@@ -224,7 +246,11 @@ function openAddWebsiteModal() {
   if (accessInput) accessInput.value = 'local';
   const ipsInput = document.getElementById('website-allowed-ips');
   if (ipsInput) ipsInput.value = '';
-  toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+  if (typeof toggleDatabaseAccessIpFields === 'function') {
+    toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+  } else if (window.toggleDatabaseAccessIpFields) {
+    window.toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+  }
 
   // Apply default preset (node)
   applyPreset('node');
@@ -241,7 +267,7 @@ async function openEditWebsiteModal(projectId) {
   if (!p) return;
 
   const form = document.getElementById('website-form');
-  form.reset();
+  if (form) form.reset();
   document.getElementById('website-form-id').value = String(p.id);
   document.getElementById('modal-website-title').textContent = `Edit Website: ${p.name}`;
   document.getElementById('save-website-submit-btn').textContent = 'Update Website';
@@ -257,7 +283,11 @@ async function openEditWebsiteModal(projectId) {
   if (accessInput) accessInput.value = p.access_mode || 'local';
   const ipsInput = document.getElementById('website-allowed-ips');
   if (ipsInput) ipsInput.value = p.allowed_ips || '';
-  toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+  if (typeof toggleDatabaseAccessIpFields === 'function') {
+    toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+  } else if (window.toggleDatabaseAccessIpFields) {
+    window.toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap');
+  }
 
   const cleanDeployDir = (!p.deploy_dir || p.deploy_dir.includes('/var/www/') || p.deploy_dir.includes('\\var\\www\\'))
     ? `./data/sites/${p.slug}`
@@ -401,50 +431,86 @@ document.getElementById('website-name')?.addEventListener('input', (e) => {
 document.getElementById('save-website-submit-btn')?.addEventListener('click', async (e) => {
   e.preventDefault();
   const form = document.getElementById('website-form');
-  if (!form.reportValidity()) return;
+  if (form && !form.reportValidity()) return;
 
-  const id = document.getElementById('website-form-id').value;
-  const domainsStr = document.getElementById('website-domains').value;
+  const id = document.getElementById('website-form-id')?.value;
+  const name = document.getElementById('website-name')?.value.trim() || '';
+  if (!name) {
+    toast('Website name is required', 'warning');
+    document.getElementById('website-name')?.focus();
+    return;
+  }
+
+  let slug = document.getElementById('website-slug')?.value.trim();
+  if (!slug) {
+    slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'site-' + Date.now();
+  }
+
+  let deployDir = document.getElementById('website-deploy-dir')?.value.trim();
+  if (!deployDir) {
+    deployDir = `./data/sites/${slug}`;
+  }
+
+  let repoUrl = document.getElementById('website-repo')?.value.trim() || '';
+  if (!repoUrl) {
+    repoUrl = 'local';
+  }
+
+  const domainsStr = document.getElementById('website-domains')?.value || '';
   const domains = cleanDomainList(domainsStr);
   const accessMode = document.getElementById('website-access-mode')?.value || 'local';
   const allowedIps = document.getElementById('website-allowed-ips')?.value.trim() || '';
 
   const payload = {
-    name: document.getElementById('website-name').value.trim(),
-    slug: document.getElementById('website-slug').value.trim(),
-    repo_url: document.getElementById('website-repo').value.trim(),
-    branch: document.getElementById('website-branch').value.trim() || 'main',
+    name,
+    slug,
+    repo_url: repoUrl,
+    branch: document.getElementById('website-branch')?.value.trim() || 'main',
     domains,
-    port: document.getElementById('website-port').value ? Number(document.getElementById('website-port').value) : getNextAvailablePort(3000),
+    port: document.getElementById('website-port')?.value ? Number(document.getElementById('website-port').value) : getNextAvailablePort(3000),
     access_mode: accessMode,
     allowed_ips: allowedIps,
-    deploy_dir: document.getElementById('website-deploy-dir').value.trim(),
-    deploy_method: document.getElementById('website-deploy-method').value,
-    health_url: document.getElementById('website-health-url').value.trim(),
-    install_cmd: document.getElementById('website-install-cmd').value.trim(),
-    build_cmd: document.getElementById('website-build-cmd').value.trim(),
-    start_cmd: document.getElementById('website-start-cmd').value.trim(),
-    auto_deploy: Boolean(document.getElementById('website-auto-deploy').checked),
-    auto_backup: Boolean(document.getElementById('website-auto-backup').checked),
+    deploy_dir: deployDir,
+    deploy_method: document.getElementById('website-deploy-method')?.value || 'managed',
+    health_url: document.getElementById('website-health-url')?.value.trim() || '',
+    install_cmd: document.getElementById('website-install-cmd')?.value.trim() || '',
+    build_cmd: document.getElementById('website-build-cmd')?.value.trim() || '',
+    start_cmd: document.getElementById('website-start-cmd')?.value.trim() || 'node server.js',
+    auto_deploy: Boolean(document.getElementById('website-auto-deploy')?.checked),
+    auto_backup: Boolean(document.getElementById('website-auto-backup')?.checked),
   };
+
+  const submitBtn = document.getElementById('save-website-submit-btn');
+  const oldText = submitBtn ? submitBtn.textContent : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="btn-spinner"></span> Saving...';
+  }
 
   try {
     if (id) {
       await api(`/api/projects/${id}`, { method: 'PUT', body: payload });
-      toast('Website updated in SQLite', 'success');
+      toast('Website updated successfully', 'success');
     } else {
       const res = await api('/api/projects', { method: 'POST', body: payload });
-      toast(`Website "${payload.name}" saved in SQLite!`, 'success');
+      toast(`Website "${payload.name}" created successfully!`, 'success');
       state.selectedProjectId = res.project ? res.project.id : res.id;
     }
     closeModal('modal-website');
     await loadProjects();
     renderProjectsList();
-    if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
-      renderWebsiteWorkspaceHeader();
+    if (typeof WEBSITE_WORKSPACE_TABS !== 'undefined' && WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
+      if (typeof renderWebsiteWorkspaceHeader === 'function') {
+        renderWebsiteWorkspaceHeader();
+      }
     }
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = oldText;
+    }
   }
 });
 
