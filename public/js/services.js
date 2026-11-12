@@ -206,7 +206,7 @@ function renderServicesList() {
       typeName = 'Telegram Bot';
     } else if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) {
       typeIconName = 'coffee';
-      typeName = 'Lavalink';
+      typeName = 'Audio Daemon';
     } else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) {
       typeIconName = 'terminal';
       typeName = 'Python Daemon';
@@ -275,9 +275,9 @@ function renderServicesList() {
 
         <div style="display: flex; align-items: center; gap: 6px; height: 22px; min-height: 22px; overflow: hidden; font-size: 11px;">
           ${isLocal
-            ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('folder', { size: 10 })} Manual</span>`
-            : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('git-branch', { size: 10 })} ${sha}</span>`
-          }
+        ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('folder', { size: 10 })} Manual</span>`
+        : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('git-branch', { size: 10 })} ${sha}</span>`
+      }
           ${portBadge}
           ${domainBadge}
           ${accessBadge}
@@ -292,9 +292,9 @@ function renderServicesList() {
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 10px; margin-top: auto; height: 38px; box-sizing: border-box;">
           <div style="display: flex; gap: 5px; align-items: center;">
             ${isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Start</button>`
-            }
+        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Stop</button>`
+        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Start</button>`
+      }
             ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Deploy</button>` : ''}
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 3px 9px; font-size: 11.5px;" title="Upload and manage service files">Files</button>
             <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 3px 9px; font-size: 11.5px;" title="View live logs">Logs</button>

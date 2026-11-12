@@ -432,7 +432,7 @@ pub(crate) async fn overview_handler(
 
         resources.push(ResourceItem {
             id: format!("database-{}", db.id),
-            name: format!("PostgreSQL ({})", db.name),
+            name: db.name.clone(),
             kind: "database".to_string(),
             status: db.status.clone(),
             pid: d_pid,
