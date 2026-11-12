@@ -180,14 +180,20 @@ function renderWebsiteWorkspaceHeader() {
     if (links) {
       const sha = p.deployed_sha ? p.deployed_sha.slice(0, 7) : 'Not deployed';
       if (isService) {
-        let typeLabel = `${icon('bot', { size: 12 })} Service`;
+        let typeLabel = `${icon('bot', { size: 14 })} Service`;
         const pt = (p.project_type || '').toLowerCase();
-        if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) typeLabel = `${icon('coffee', { size: 12 })} Lavalink Audio Server`;
-        else if (pt.includes('discord')) typeLabel = `${icon('bot', { size: 12 })} Discord Bot`;
-        else if (pt.includes('telegram')) typeLabel = `${icon('send', { size: 12 })} Telegram Bot`;
-        else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) typeLabel = `${icon('terminal', { size: 12 })} Python Daemon`;
-        else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) typeLabel = `${icon('zap', { size: 12 })} Node.js Worker`;
-        else if (pt.includes('worker')) typeLabel = `${icon('settings', { size: 12 })} Queue Worker`;
+        const sc = (p.start_cmd || '').toLowerCase();
+        if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java')) typeLabel = `${icon('java', { size: 14 })} Java Audio Server`;
+        else if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) typeLabel = `${icon('python', { size: 14 })} Python Daemon`;
+        else if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) typeLabel = `${icon('rust', { size: 14 })} Rust Daemon`;
+        else if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) typeLabel = `${icon('go', { size: 14 })} Go Daemon`;
+        else if (pt.includes('node') || sc.includes('node') || sc.includes('npm')) typeLabel = `${icon('nodejs', { size: 14 })} Node.js Worker`;
+        else if (pt.includes('php') || sc.includes('php')) typeLabel = `${icon('php', { size: 14 })} PHP Service`;
+        else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) typeLabel = `${icon('ruby', { size: 14 })} Ruby Daemon`;
+        else if (pt.includes('docker') || sc.includes('docker')) typeLabel = `${icon('docker', { size: 14 })} Docker Container`;
+        else if (pt.includes('discord')) typeLabel = `${icon('message-square', { size: 14 })} Discord Bot`;
+        else if (pt.includes('telegram')) typeLabel = `${icon('send', { size: 14 })} Telegram Bot`;
+        else if (pt.includes('worker')) typeLabel = `${icon('cpu', { size: 14 })} Queue Worker`;
 
         const isLocal = !p.repo_url || p.repo_url === 'local' || pt.includes('lavalink');
         const serviceDomainLink = (p.domains && p.domains.length > 0)

@@ -148,26 +148,67 @@ export function renderServicesList() {
     const statusBadgeClass = isBuilding ? 'badge-warning' : (isOnline ? 'badge-success' : 'badge-neutral');
 
     const pt = (p.project_type || '').toLowerCase();
+    const sc = (p.start_cmd || '').toLowerCase();
     let typeIconName = 'terminal';
     let typeName = 'Backend Service';
-    if (pt.includes('lavalink') || (p.start_cmd && p.start_cmd.toLowerCase().includes('lavalink'))) {
-      typeIconName = 'coffee';
-      typeName = 'Audio Daemon';
-    } else if (pt.includes('python') || (p.start_cmd && p.start_cmd.includes('python'))) {
-      typeIconName = 'terminal';
+    let iconBg = 'rgba(99, 102, 241, 0.12)';
+    let iconBorder = 'rgba(99, 102, 241, 0.25)';
+
+    if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java')) {
+      typeIconName = 'java';
+      typeName = 'Java Daemon';
+      iconBg = 'rgba(231, 111, 0, 0.12)';
+      iconBorder = 'rgba(231, 111, 0, 0.25)';
+    } else if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
+      typeIconName = 'python';
       typeName = 'Python Daemon';
-    } else if (pt.includes('node') || (p.start_cmd && p.start_cmd.includes('node'))) {
-      typeIconName = 'zap';
+      iconBg = 'rgba(56, 189, 248, 0.12)';
+      iconBorder = 'rgba(56, 189, 248, 0.25)';
+    } else if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
+      typeIconName = 'rust';
+      typeName = 'Rust Daemon';
+      iconBg = 'rgba(222, 165, 132, 0.12)';
+      iconBorder = 'rgba(222, 165, 132, 0.25)';
+    } else if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
+      typeIconName = 'go';
+      typeName = 'Go Daemon';
+      iconBg = 'rgba(0, 173, 216, 0.12)';
+      iconBorder = 'rgba(0, 173, 216, 0.25)';
+    } else if (pt.includes('node') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
+      typeIconName = 'nodejs';
       typeName = 'Node.js Daemon';
+      iconBg = 'rgba(83, 168, 79, 0.12)';
+      iconBorder = 'rgba(83, 168, 79, 0.25)';
+    } else if (pt.includes('php') || sc.includes('php')) {
+      typeIconName = 'php';
+      typeName = 'PHP Daemon';
+      iconBg = 'rgba(119, 123, 180, 0.12)';
+      iconBorder = 'rgba(119, 123, 180, 0.25)';
+    } else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails') || sc.includes('puma')) {
+      typeIconName = 'ruby';
+      typeName = 'Ruby Daemon';
+      iconBg = 'rgba(204, 52, 45, 0.12)';
+      iconBorder = 'rgba(204, 52, 45, 0.25)';
+    } else if (pt.includes('docker') || sc.includes('docker')) {
+      typeIconName = 'docker';
+      typeName = 'Docker Container';
+      iconBg = 'rgba(36, 150, 237, 0.12)';
+      iconBorder = 'rgba(36, 150, 237, 0.25)';
     } else if (pt.includes('discord')) {
       typeIconName = 'message-square';
       typeName = 'Discord Bot';
+      iconBg = 'rgba(88, 101, 242, 0.12)';
+      iconBorder = 'rgba(88, 101, 242, 0.25)';
     } else if (pt.includes('telegram')) {
       typeIconName = 'send';
       typeName = 'Telegram Bot';
+      iconBg = 'rgba(0, 136, 204, 0.12)';
+      iconBorder = 'rgba(0, 136, 204, 0.25)';
     } else if (pt.includes('worker')) {
       typeIconName = 'cpu';
       typeName = 'Queue Worker';
+      iconBg = 'rgba(168, 85, 247, 0.12)';
+      iconBorder = 'rgba(168, 85, 247, 0.25)';
     }
 
     const isLocal = !p.repo_url || p.repo_url === 'local' || pt.includes('lavalink');
@@ -192,8 +233,8 @@ export function renderServicesList() {
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.12); color: #818cf8; display: flex; align-items: center; justify-content: center;">
-              ${icon(typeIconName, { size: 18 })}
+            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: ${iconBg}; border: 1px solid ${iconBorder}; display: flex; align-items: center; justify-content: center;">
+              ${icon(typeIconName, { size: 22 })}
             </div>
             <div style="min-width: 0;">
               <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">

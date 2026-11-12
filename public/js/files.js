@@ -77,6 +77,10 @@ export function getFileMeta(entry) {
   if (['py', 'pyw', 'ipynb'].includes(ext)) return build('python', 'PY', true, false);
   if (['js', 'mjs', 'cjs'].includes(ext)) return build('javascript', 'JS', true, false);
   if (['ts', 'tsx'].includes(ext)) return build('typescript', 'TS', true, false);
+  if (['rs'].includes(ext)) return build('rust', 'RS', true, false);
+  if (['go'].includes(ext)) return build('go', 'GO', true, false);
+  if (['php'].includes(ext)) return build('php', 'PHP', true, false);
+  if (['rb', 'erb'].includes(ext)) return build('ruby', 'RB', true, false);
   if (name === '.env' || name.startsWith('.env.')) return build('env', 'ENV', true, false);
   if (['json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'conf', 'config'].includes(ext)) return build('config', ext.toUpperCase() || 'CONF', true, false);
   if (['sh', 'bash', 'bat', 'cmd', 'ps1'].includes(ext)) return build('shell', 'SHELL', true, false);

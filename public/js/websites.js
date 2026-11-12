@@ -128,12 +128,34 @@ function renderProjectsList() {
       accessBadge = `<span class="badge badge-warning" style="font-size: 10px;">${icon('globe', { size: 10 })} Public</span>`;
     }
 
+    const pt = (p.project_type || '').toLowerCase();
+    const sc = (p.start_cmd || '').toLowerCase();
+    let langDevicon = '';
+    if (pt.includes('node') || pt.includes('express') || sc.includes('node') || sc.includes('npm')) {
+      langDevicon = icon('nodejs', { size: 16 });
+    } else if (pt.includes('next') || pt.includes('react') || pt.includes('typescript')) {
+      langDevicon = icon('typescript', { size: 16 });
+    } else if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
+      langDevicon = icon('python', { size: 16 });
+    } else if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
+      langDevicon = icon('go', { size: 16 });
+    } else if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
+      langDevicon = icon('rust', { size: 16 });
+    } else if (pt.includes('php') || sc.includes('php')) {
+      langDevicon = icon('php', { size: 16 });
+    } else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) {
+      langDevicon = icon('ruby', { size: 16 });
+    } else if (pt.includes('docker') || sc.includes('docker')) {
+      langDevicon = icon('docker', { size: 16 });
+    }
+
     return `
       <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
         <div class="project-card-header">
           <div>
             <div class="project-info-title">
               <span class="status-dot ${isOnline ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
+              ${langDevicon ? `<span style="display: inline-flex; align-items: center; margin-right: 4px;">${langDevicon}</span>` : ''}
               <span>${escapeHtml(p.name)}</span>
             </div>
             ${primaryDomain ? `<div class="project-info-domains">${primaryDomain}</div>` : ''}
