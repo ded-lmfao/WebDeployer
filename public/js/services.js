@@ -13,16 +13,10 @@ import { openWebsiteWorkspace, navigateTo } from './workspace.js';
 export * from './services_modal.js';
 
 export async function loadServicesView() {
-  const container = document.getElementById('services-list');
-  if (!container) return;
-
-  try {
-    const list = await api('/api/projects');
-    state.projects = Array.isArray(list) ? list : [];
-    renderServicesList();
-  } catch (err) {
-    container.innerHTML = `<div style="grid-column: 1 / -1; color: var(--danger-light); padding: 20px;">Failed to load services: ${escapeHtml(err.message)}</div>`;
+  if (typeof loadProjects === 'function') {
+    await loadProjects();
   }
+  renderServicesList();
 }
 
 export function renderSingleServicePipeline(serviceId, currentStage, currentStatus, detailText = '') {
@@ -97,46 +91,58 @@ export function syncServiceCardPipeline(p) {
 }
 
 export function renderServicesList() {
-  const container = document.getElementById('services-list');
+  const container = document.getElementById('services-cards-container') || document.getElementById('services-list');
   if (!container) return;
 
   const allProjects = state.projects || [];
   const services = allProjects.filter((p) => p.project_kind === 'service');
 
-  const countBadge = document.getElementById('services-count-badge');
-  if (countBadge) {
-    countBadge.textContent = `${services.length} Total Service${services.length === 1 ? '' : 's'}`;
-  }
+  if (!state.serviceStatusFilter) state.serviceStatusFilter = 'all';
+
+  const countAll = services.length;
+  const countRunning = services.filter((p) => p.app_status === 'running' || p.status?.running).length;
+  const countStopped = countAll - countRunning;
+
+  const elAll = document.getElementById('services-filter-count-all');
+  const elRunning = document.getElementById('services-filter-count-running');
+  const elStopped = document.getElementById('services-filter-count-stopped');
+  if (elAll) elAll.textContent = countAll;
+  if (elRunning) elRunning.textContent = countRunning;
+  if (elStopped) elStopped.textContent = countStopped;
+
+  document.querySelectorAll('#services-status-filters .pill').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-filter') === state.serviceStatusFilter);
+  });
 
   const q = (document.getElementById('services-search-input')?.value || '').toLowerCase().trim();
   const filter = state.serviceStatusFilter || 'all';
 
   const filtered = services.filter((s) => {
-    const isOnline = s.status?.appStatus === 'running' || s.status?.running;
-    if (filter === 'online' && !isOnline) return false;
+    const isOnline = s.app_status === 'running' || s.status?.running;
+    if (filter === 'running' && !isOnline) return false;
     if (filter === 'stopped' && isOnline) return false;
     if (!q) return true;
-    return (s.name || '').toLowerCase().includes(q) || (s.slug || '').toLowerCase().includes(q) || (s.start_cmd || '').toLowerCase().includes(q);
+    return (s.name || '').toLowerCase().includes(q) ||
+      (s.slug || '').toLowerCase().includes(q) ||
+      (s.start_cmd || '').toLowerCase().includes(q) ||
+      (s.project_type || '').toLowerCase().includes(q);
   });
 
   if (!filtered.length) {
     container.innerHTML = `
-      <div class="empty-state-card" style="grid-column: 1 / -1; padding: 48px; text-align: center; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-subtle);">
-        <div style="font-size: 36px; margin-bottom: 12px; opacity: 0.6;">🤖</div>
-        <h3 style="margin-bottom: 6px; font-size: 16px;">No backend services found</h3>
-        <p style="color: var(--text-muted); font-size: 13px; max-width: 420px; margin: 0 auto 16px;">
-          ${q ? 'No services match your search query.' : 'Deploy Discord bots, Lavalink nodes, or queue workers with zero downtime and automatic crash recovery.'}
+      <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
+        <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No backend services found</p>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">
+          ${q ? 'No services match your search filter.' : 'Add your first service to deploy it directly to your VM.'}
         </p>
-        <button class="btn btn-primary" onclick="openAddServiceModal()">
-          ${icon('plus', { size: 14 })} Add Backend Service
-        </button>
+        <button class="btn btn-primary" onclick="openAddServiceModal()">Add New Service</button>
       </div>
     `;
     return;
   }
 
   container.innerHTML = filtered.map((s) => {
-    const isOnline = s.status?.appStatus === 'running' || s.status?.running;
+    const isOnline = s.app_status === 'running' || s.status?.running;
     const isBuilding = s.deployStatus?.status === 'in_progress' || s.deployStatus?.status === 'building';
     const statusText = isBuilding ? 'BUILDING' : (isOnline ? 'ONLINE' : 'STOPPED');
     const statusBadgeClass = isBuilding ? 'badge-warning' : (isOnline ? 'badge-success' : 'badge-neutral');
@@ -164,9 +170,10 @@ export function renderServicesList() {
       typeLabel = 'Queue Worker';
     }
 
-    const sha = s.deployedSha ? s.deployedSha.slice(0, 7).toUpperCase() : (s.repo_url === 'local' ? 'MANUAL' : 'AUTO');
+    const sha = s.deployed_sha ? s.deployed_sha.slice(0, 7).toUpperCase() : (s.deployedSha ? s.deployedSha.slice(0, 7).toUpperCase() : (s.repo_url === 'local' ? 'MANUAL' : 'AUTO'));
     const portText = s.port ? `PORT ${s.port}` : 'NO PORT';
-    const accessText = s.access_mode === 'public' ? 'PUBLIC REVERSE PROXY' : (s.access_mode === 'allowed_ips' ? 'IP WHITELIST' : 'LOCALHOST ONLY');
+    const accessText = s.access_mode === 'public' ? 'PUBLIC REVERSE PROXY' : (s.access_mode === 'allowlist' || s.access_mode === 'allowed_ips' ? 'IP WHITELIST' : 'LOCALHOST ONLY');
+    const pidVal = s.app_pid || s.status?.pid;
 
     return `
       <div class="service-card" id="service-card-${s.id}">
@@ -191,7 +198,7 @@ export function renderServicesList() {
 
         <div class="service-command-preview">
           <code><span class="prompt-sig">$</span> ${escapeHtml(s.start_cmd || './start.sh')}</code>
-          ${s.status?.pid ? `<span class="pid-badge">PID ${s.status.pid}</span>` : ''}
+          ${pidVal ? `<span class="pid-badge">PID ${pidVal}</span>` : ''}
         </div>
 
         <div class="service-meta-chips">

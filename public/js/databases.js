@@ -81,7 +81,7 @@ export async function loadDatabasesView() {
 }
 
 export function renderDatabasesList() {
-  const container = document.getElementById('databases-list');
+  const container = document.getElementById('databases-cards-container') || document.getElementById('databases-list');
   if (!container) return;
 
   const list = state.databases || [];
@@ -92,15 +92,10 @@ export function renderDatabasesList() {
 
   if (!list.length) {
     container.innerHTML = `
-      <div class="empty-state-card" style="grid-column: 1 / -1; padding: 48px; text-align: center; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-subtle);">
-        <div style="font-size: 36px; margin-bottom: 12px; opacity: 0.6;">🗄️</div>
-        <h3 style="margin-bottom: 6px; font-size: 16px;">No databases provisioned</h3>
-        <p style="color: var(--text-muted); font-size: 13px; max-width: 420px; margin: 0 auto 16px;">
-          Deploy dedicated PostgreSQL clusters with automatic SCRAM-SHA-256 credentials, custom ports, and granular network isolation.
-        </p>
-        <button class="btn btn-primary" onclick="openCreateDatabaseModal()">
-          ${icon('plus', { size: 14 })} Create PostgreSQL Database
-        </button>
+      <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
+        <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No databases found</p>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">Deploy an isolated PostgreSQL database directly on your VM.</p>
+        <button class="btn btn-primary" onclick="openCreateDatabaseModal()">Add New Database</button>
       </div>
     `;
     return;
@@ -142,7 +137,7 @@ export function renderDatabasesList() {
     const hostOrDomain = d.domain ? d.domain : (d.host || '127.0.0.1');
 
     return `
-      <div class="database-card" id="database-card-${d.id}">
+      <div class="project-card database-card" id="database-card-${d.id}">
         <div class="database-card-header">
           <div class="database-avatar-box">
             ${icon('database', { size: 18 })}
