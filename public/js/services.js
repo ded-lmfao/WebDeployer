@@ -221,7 +221,7 @@ function renderServicesList() {
     const uptimeText = isOnline ? 'Active process' : 'Process inactive';
 
     const isLocal = !p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink'));
-    const defaultTab = isLocal ? 'files' : 'deployments';
+    const defaultTab = 'deployments';
 
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;

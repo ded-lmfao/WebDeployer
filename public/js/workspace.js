@@ -11,9 +11,7 @@ import { api, toast, prefetchWebsiteWorkspace } from './api.js';
 function openWebsiteWorkspace(projectId, tab = null) {
   state.selectedProjectId = Number(projectId);
   prefetchWebsiteWorkspace(state.selectedProjectId);
-  const p = state.projects.find((x) => x.id === state.selectedProjectId);
-  const isLocalService = p && p.project_kind === 'service' && (!p.repo_url || p.repo_url === 'local' || (p.project_type && p.project_type.includes('lavalink')));
-  const targetTab = tab || (isLocalService ? 'files' : 'deployments');
+  const targetTab = tab || 'deployments';
   navigateTo(targetTab, state.selectedProjectId);
 }
 window.openWebsiteWorkspace = openWebsiteWorkspace;
