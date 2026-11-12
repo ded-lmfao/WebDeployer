@@ -66,6 +66,33 @@ pub(crate) async fn system_update_handler(
     Ok(Json(serde_json::json!({ "ok": true, "message": "Update sequence started" })))
 }
 
+pub(crate) async fn system_update_repo_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<crate::updater::SetUpdateRepoPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let actor = verify_main_admin(&state, &headers)?;
+    let remote_url = state.updater.set_remote_repo(&payload.repo)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    log_audit(
+        &state,
+        &actor.username,
+        "system.update_repo",
+        Some("platform"),
+        Some(&format!("Changed platform update origin repository to {}", remote_url)),
+    );
+    state.logs.add(
+        None,
+        None,
+        "system",
+        "info",
+        &format!("Platform update repository updated to '{}' by {}", remote_url, actor.username),
+    );
+
+    Ok(Json(serde_json::json!({ "ok": true, "remote_url": remote_url })))
+}
+
 pub(crate) async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
     Json(state.cache.stats())
 }

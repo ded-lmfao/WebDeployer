@@ -17,7 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.13.9">
+  <link rel="stylesheet" href="/style.css?v=3.13.10">
 </head>
 
 <body>
@@ -1485,6 +1485,17 @@
                 </div>
               </div>
 
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
+                <label for="platform-update-repo-input" style="font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap;">Update Repo:</label>
+                <input type="text" class="form-control" id="platform-update-repo-input"
+                  placeholder="owner/repo or https://github.com/owner/repo.git"
+                  style="flex: 1; min-width: 240px; font-family: var(--font-mono); font-size: 12px;"
+                  aria-label="Platform update repository">
+                <button type="button" class="btn btn-secondary btn-sm" id="save-platform-repo-btn" onclick="savePlatformUpdateRepo()">
+                  Save Repo
+                </button>
+              </div>
+
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                 <div style="font-size: 11.5px; color: var(--text-dim);">
                   <span style="color: var(--success); font-weight: 600;">✓ Safe:</span> Preserves your databases (<code>data/</code>) and <code>.env</code> settings.
@@ -2786,7 +2797,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.13.9"></script>
+  <script type="module" src="/app.js?v=3.13.10"></script>
 </body>
 
 </html>

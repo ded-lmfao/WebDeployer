@@ -409,12 +409,16 @@ export async function loadSystemVersionInfo(quiet = false) {
     const remoteStatusEl = document.getElementById('platform-remote-status-text');
     const badgeEl = document.getElementById('platform-version-badge');
     const updateBtn = document.getElementById('trigger-platform-update-btn');
+    const repoInput = document.getElementById('platform-update-repo-input');
 
     if (branchEl) branchEl.textContent = v.current_branch || 'main';
     if (hashEl) hashEl.textContent = v.current_commit || 'unknown';
     if (msgEl) msgEl.textContent = v.commit_message || 'Self-hosted WebDep deployment platform';
     if (remoteBranchEl) remoteBranchEl.textContent = v.current_branch || 'main';
     if (remoteHashEl) remoteHashEl.textContent = v.remote_commit ? v.remote_commit : 'Up to date';
+    if (repoInput && document.activeElement !== repoInput && v.remote_url) {
+      repoInput.value = v.remote_url;
+    }
 
     if (remoteStatusEl) {
       if (v.has_update) {
@@ -451,6 +455,31 @@ export async function loadSystemVersionInfo(quiet = false) {
   } catch (err) {
     if (!quiet) toast(`Could not load version info: ${err.message}`, 'warning');
     return null;
+  }
+}
+
+export async function savePlatformUpdateRepo() {
+  const input = document.getElementById('platform-update-repo-input');
+  const btn = document.getElementById('save-platform-repo-btn');
+  const repo = (input?.value || '').trim();
+  if (!repo) {
+    toast('Please enter a repository name (e.g. owner/repo) or Git URL.', 'warning');
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/api/system/update/repo', {
+      method: 'POST',
+      body: { repo },
+    });
+    if (input && res.remote_url) input.value = res.remote_url;
+    toast(`Platform update repository set to ${res.remote_url}`, 'success');
+    await loadSystemVersionInfo(true);
+  } catch (err) {
+    toast(`Failed to update repository: ${err.message}`, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -700,6 +729,7 @@ window.loadSettingsView = loadSettingsView;
 window.renderSecurityStatusSummary = renderSecurityStatusSummary;
 window.loadAuditView = loadAuditView;
 window.loadSystemVersionInfo = loadSystemVersionInfo;
+window.savePlatformUpdateRepo = savePlatformUpdateRepo;
 window.checkPlatformUpdates = checkPlatformUpdates;
 window.startPlatformUpdate = startPlatformUpdate;
 window.executePostUpdateRestart = executePostUpdateRestart;

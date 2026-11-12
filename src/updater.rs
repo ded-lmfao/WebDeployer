@@ -37,6 +37,7 @@ pub struct GitVersionInfo {
     pub current_branch: String,
     pub commit_message: String,
     pub remote_commit: Option<String>,
+    pub remote_url: String,
     pub has_update: bool,
     pub update_in_progress: bool,
     pub ready_to_restart: bool,
@@ -45,6 +46,11 @@ pub struct GitVersionInfo {
 #[derive(Deserialize)]
 pub struct TriggerUpdatePayload {
     pub branch: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetUpdateRepoPayload {
+    pub repo: String,
 }
 
 pub struct Updater {
@@ -194,6 +200,13 @@ impl Updater {
                 }
             });
 
+        let remote_url = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
+            .unwrap_or_default();
+
         let has_update = match (&remote_commit, &current_commit) {
             (Some(rem), cur) if cur != "unknown" && !rem.is_empty() => rem != cur,
             _ => false,
@@ -204,10 +217,48 @@ impl Updater {
             current_branch,
             commit_message,
             remote_commit,
+            remote_url,
             has_update,
             update_in_progress: is_updating,
             ready_to_restart,
         }
+    }
+
+    pub fn set_remote_repo(&self, repo_input: &str) -> Result<String, String> {
+        let trimmed = repo_input.trim();
+        if trimmed.is_empty() {
+            return Err("Repository name or URL cannot be empty".to_string());
+        }
+        if trimmed.chars().any(|c| c.is_whitespace()) {
+            return Err("Repository name or URL cannot contain spaces".to_string());
+        }
+
+        let normalized = if trimmed.contains("://") || trimmed.starts_with("git@") {
+            trimmed.to_string()
+        } else if trimmed.contains('/') {
+            let clean = trimmed.trim_start_matches('/').trim_end_matches(".git");
+            format!("https://github.com/{}.git", clean)
+        } else {
+            return Err("Enter a valid repo (e.g. owner/repo) or Git URL".to_string());
+        };
+
+        let set_out = Command::new("git")
+            .args(["remote", "set-url", "origin", &normalized])
+            .output()
+            .map_err(|e| format!("Failed to execute git remote: {}", e))?;
+
+        if !set_out.status.success() {
+            let add_out = Command::new("git")
+                .args(["remote", "add", "origin", &normalized])
+                .output()
+                .map_err(|e| format!("Failed to execute git remote add: {}", e))?;
+            if !add_out.status.success() {
+                let err = String::from_utf8_lossy(&add_out.stderr).trim().to_string();
+                return Err(if err.is_empty() { "Failed to update git origin remote".to_string() } else { err });
+            }
+        }
+
+        Ok(normalized)
     }
 
     pub fn start_update(&self, branch_override: Option<String>) -> Result<(), String> {
