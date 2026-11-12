@@ -239,11 +239,18 @@ function renderServicesList() {
       : '';
     const portBadge = p.port ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Port ${p.port}</span>` : '';
 
+    let subTitle = typeName;
+    if (!isLocal && p.branch) {
+      subTitle = `${typeName} &bull; ${escapeHtml(p.branch)}`;
+    } else if (p.name.toLowerCase() === typeName.toLowerCase()) {
+      subTitle = isLocal ? 'Manual Files' : 'Service';
+    }
+
     return `
-      <div class="project-card" style="cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; display: flex; flex-direction: column; justify-content: space-between;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
-        <div class="project-card-header" style="min-height: 42px; display: flex; justify-content: space-between; align-items: center;">
+      <div class="project-card service-card" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
+        <div class="project-card-header" style="min-height: 38px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-            <div style="width: 38px; height: 38px; min-width: 38px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); color: #818cf8; display: flex; align-items: center; justify-content: center;">
+            <div style="width: 36px; height: 36px; min-width: 36px; border-radius: 8px; background: rgba(99, 102, 241, 0.12); color: #818cf8; display: flex; align-items: center; justify-content: center;">
               ${icon(typeIconName, { size: 18 })}
             </div>
             <div style="min-width: 0;">
@@ -251,62 +258,51 @@ function renderServicesList() {
                 <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
                 <span>${escapeHtml(p.name)}</span>
               </div>
-              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${escapeHtml(typeName)}${!isLocal && p.branch ? ` • ${escapeHtml(p.branch)}` : ''}">
-                ${escapeHtml(typeName)}${!isLocal && p.branch ? ` &bull; ${escapeHtml(p.branch)}` : ''}
+              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${escapeHtml(subTitle)}">
+                ${subTitle}
               </div>
             </div>
           </div>
-          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" style="flex-shrink: 0;">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
+          <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${isOnline ? 'ONLINE' : 'STOPPED'}</span>
         </div>
 
-        <div style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; font-family: var(--font-mono); margin: 12px 0 8px 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 36px; box-sizing: border-box;">
-          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 75%;">
+        <div style="background: var(--bg-alt); padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); height: 32px; min-height: 32px; display: flex; justify-content: space-between; align-items: center; overflow: hidden; box-sizing: border-box;">
+          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(p.start_cmd || '')}">
             $ ${escapeHtml(p.start_cmd || 'node index.js')}
           </span>
-          ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">PID ${p.app_pid}</span>` : ''}
+          ${p.app_pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 5px; flex-shrink: 0;">PID ${p.app_pid}</span>` : ''}
         </div>
 
-        <!-- Per-Service Dedicated Organic Fluid Water Pipeline Track -->
-        <div style="margin: 6px 0 10px 0; padding: 8px 10px; background: var(--bg-alt); border-radius: var(--radius-md); border: 1px solid var(--border);" onclick="event.stopPropagation()">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);">Lifecycle Pipeline</span>
-            <span class="badge ${isOnline ? 'badge-success' : 'badge-neutral'}" id="service-pipeline-badge-${p.id}" style="font-size: 9.5px; padding: 2px 7px;">
-              ${isOnline ? 'ONLINE (READY)' : 'IDLE'}
-            </span>
-          </div>
-          <div class="pipeline-track card-pipeline-track" id="service-pipeline-track-${p.id}" style="min-height: auto;">
-            <!-- Rendered with fluid animated water vials and pipes -->
-          </div>
-        </div>
-
-        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; min-height: 22px; align-items: center;">
-          ${accessBadge}
-          ${domainBadge}
+        <div style="display: flex; align-items: center; gap: 6px; height: 22px; min-height: 22px; overflow: hidden; font-size: 11px;">
+          ${isLocal
+            ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('folder', { size: 10 })} Manual</span>`
+            : `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 6px;">${icon('git-branch', { size: 10 })} ${sha}</span>`
+          }
           ${portBadge}
+          ${domainBadge}
+          ${accessBadge}
+          ${diskStr ? `<span style="font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono); margin-left: auto;">${diskStr}</span>` : ''}
         </div>
 
-        <div class="project-meta-row" style="margin-bottom: 12px; min-height: 20px; align-items: center;">
-          <div class="project-meta-item">
-            <span>${isLocal ? '<strong>Manual Files</strong>' : `Commit: <strong>${sha}</strong>`}</span>
-          </div>
-          ${diskStr ? `<div class="project-meta-item"><span>Disk <strong style="color:var(--text-main);">${diskStr}</strong></span></div>` : ''}
-          <div class="project-meta-item">
-            <span id="service-uptime-${p.id}" style="font-size: 11.5px; color: var(--text-muted);">${uptimeText}</span>
-          </div>
-        </div>
+        <!-- Hidden DOM hooks for runtime telemetry & pipeline updates (no function broken) -->
+        <div id="service-pipeline-track-${p.id}" style="display: none;"></div>
+        <span id="service-pipeline-badge-${p.id}" style="display: none;"></span>
+        <span id="service-uptime-${p.id}" style="display: none;">${uptimeText}</span>
 
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px;">
-          <div style="display: flex; gap: 6px;">
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px solid var(--border-subtle); padding-top: 10px; margin-top: auto; height: 38px; box-sizing: border-box;">
+          <div style="display: flex; gap: 5px; align-items: center;">
             ${isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})">Start</button>`
+              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Stop</button>`
+              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Start</button>`
             }
-            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})">Deploy</button>` : ''}
-            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" title="Upload and manage service files">Files</button>
-            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" title="View live logs">Logs</button>
-            <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" title="Service, Network &amp; Domain Settings">⚙️</button>
+            ${!isLocal ? `<button class="btn btn-secondary btn-sm" onclick="deployProject(${p.id})" style="padding: 3px 9px; font-size: 11.5px;">Deploy</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 3px 9px; font-size: 11.5px;" title="Upload and manage service files">Files</button>
+            <button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 3px 9px; font-size: 11.5px;" title="View live logs">Logs</button>
+            <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal(${p.id})" style="padding: 3px 7px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Settings">
+              ${icon('settings', { size: 12 })}
+            </button>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')">
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, '${defaultTab}')" style="padding: 3px 10px; font-size: 11.5px; font-weight: 500;">
             Manage &rarr;
           </button>
         </div>

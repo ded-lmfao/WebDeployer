@@ -854,8 +854,8 @@ impl Databases {
             &format!("[DB #{}] PostgreSQL engine running (PID: {}) on port {}. Ready for connections.", id, pid, port),
         );
 
-        // 4. Ensure custom database exists and is owned by db_user
-        if db_name != "postgres" {
+        // 4. Ensure custom database exists and is owned by db_user (only for newly initialized clusters)
+        if is_new && db_name != "postgres" {
             let sql = format!(r#"CREATE DATABASE "{}" OWNER "{}";"#, db_name, db_user);
             let mut psql_cmd = Command::new(&pg_bins.psql);
             psql_cmd.args([

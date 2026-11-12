@@ -187,7 +187,7 @@ async function loadDeploymentsView() {
     } else if (latest) {
       const pWater = waterPipelines['main-pipeline-track'];
       if (latest.status === 'success') {
-        if (pWater && pWater.currentProgress < 6.95 && pWater.lastDeploymentId === latest.id) {
+        if (pWater && pWater.isLooping && pWater.currentProgress < 6.95 && pWater.lastDeploymentId === latest.id) {
           if (badge) {
             badge.textContent = 'FINALIZING DEPLOYMENT...';
             badge.className = 'badge badge-warning';
@@ -293,10 +293,47 @@ function initWaterPipelineDOM(container, containerId, stages = PIPELINE_STAGES) 
   `;
 }
 
+function getOrCacheStageNodes(pipeline, container) {
+  if (pipeline.stageNodes && pipeline.stageNodes.length === (pipeline.stages || PIPELINE_STAGES).length) {
+    if (pipeline.stageNodes[0]?.unit && pipeline.stageNodes[0].unit.isConnected) {
+      return pipeline.stageNodes;
+    }
+  }
+  const stages = pipeline.stages || PIPELINE_STAGES;
+  pipeline.stageNodes = stages.map((s, idx) => {
+    const unit = container.querySelector(`.water-stage-unit[data-unit-idx="${idx}"]`);
+    if (!unit) return null;
+    return {
+      unit,
+      vial: unit.querySelector('.water-node-vial'),
+      liquid: unit.querySelector('.water-vial-liquid'),
+      num: unit.querySelector('.water-vial-num'),
+      check: unit.querySelector('.water-vial-check'),
+      cross: unit.querySelector('.water-vial-cross'),
+      name: unit.querySelector('.water-node-name'),
+      sub: unit.querySelector('.water-node-sub'),
+      pipeLiquid: unit.querySelector('.water-pipe-liquid'),
+      meniscus: unit.querySelector('.water-pipe-meniscus'),
+      _lastVialClass: '',
+      _lastSubText: '',
+      _lastSubClass: '',
+      _lastNameClass: '',
+      _lastPipeClass: '',
+      _lastNumDisplay: '',
+      _lastCheckDisplay: '',
+      _lastCrossDisplay: '',
+      _lastHeight: -1,
+      _lastWidth: -1,
+    };
+  });
+  return pipeline.stageNodes;
+}
+
 function updateWaterDOM(pipeline) {
   const container = document.getElementById(pipeline.containerId);
   if (!container) return;
 
+  const stageNodes = getOrCacheStageNodes(pipeline, container);
   const stages = pipeline.stages || PIPELINE_STAGES;
   const maxP = stages.length;
   const P = pipeline.currentProgress;
@@ -308,115 +345,125 @@ function updateWaterDOM(pipeline) {
   const drainStageIdx = isDraining ? Math.min(stages.length - 1, Math.max(0, Math.floor(P))) : -1;
 
   stages.forEach((s, idx) => {
-    const unit = container.querySelector(`.water-stage-unit[data-unit-idx="${idx}"]`);
-    if (!unit) return;
+    const nodes = stageNodes ? stageNodes[idx] : null;
+    if (!nodes) return;
 
-    const vial = unit.querySelector('.water-node-vial');
-    const liquid = unit.querySelector('.water-vial-liquid');
-    const num = unit.querySelector('.water-vial-num');
-    const check = unit.querySelector('.water-vial-check');
-    const cross = unit.querySelector('.water-vial-cross');
-    const name = unit.querySelector('.water-node-name');
-    const sub = unit.querySelector('.water-node-sub');
-    const pipeLiquid = unit.querySelector('.water-pipe-liquid');
-    const meniscus = unit.querySelector('.water-pipe-meniscus');
+    const { vial, liquid, num, check, cross, name, sub, pipeLiquid, meniscus } = nodes;
 
     let vialHeight = 0;
+
+    const setDisplay = (el, val, prop) => {
+      if (el && nodes[prop] !== val) {
+        el.style.display = val;
+        nodes[prop] = val;
+      }
+    };
+    const setClass = (el, val, prop) => {
+      if (el && nodes[prop] !== val) {
+        el.className = val;
+        nodes[prop] = val;
+      }
+    };
+    const setText = (el, val, prop) => {
+      if (el && nodes[prop] !== val) {
+        el.textContent = val;
+        nodes[prop] = val;
+      }
+    };
 
     // ========================================================================
     // A. EMPTYING / DRAINING (Exact mirror opposite of filling progression)
     // ========================================================================
     if (isDraining) {
       if (idx > drainStageIdx) {
-        // Stage already completely drained: 0% liquid, queued/idle
         vialHeight = 0;
-        if (vial) vial.className = 'water-node-vial queued';
-        if (num) num.style.display = 'block';
-        if (check) check.style.display = 'none';
-        if (cross) cross.style.display = 'none';
-        if (sub) {
-          sub.textContent = pipeline.status === 'idle' ? 'Idle' : 'Queued';
-          sub.className = 'water-node-sub queued';
-        }
-        if (name) name.className = 'water-node-name queued';
+        setClass(vial, 'water-node-vial queued', '_lastVialClass');
+        setDisplay(num, 'block', '_lastNumDisplay');
+        setDisplay(check, 'none', '_lastCheckDisplay');
+        setDisplay(cross, 'none', '_lastCrossDisplay');
+        setText(sub, pipeline.status === 'idle' ? 'Idle' : 'Queued', '_lastSubText');
+        setClass(sub, 'water-node-sub queued', '_lastSubClass');
+        setClass(name, 'water-node-name queued', '_lastNameClass');
         if (pipeLiquid) {
-          pipeLiquid.style.width = '0%';
-          pipeLiquid.className = 'water-pipe-liquid empty';
+          if (nodes._lastPipeFrac !== 0) {
+            pipeLiquid.style.transform = 'scaleX(0)';
+            pipeLiquid.style.width = '0%';
+            nodes._lastPipeFrac = 0;
+          }
+          setClass(pipeLiquid, 'water-pipe-liquid empty', '_lastPipeClass');
           if (meniscus) meniscus.style.opacity = '0';
         }
       } else if (idx < drainStageIdx) {
-        // Stage has not drained yet: remains 100% full, holding liquid with checkmark!
         vialHeight = 100;
-        if (vial) vial.className = 'water-node-vial completed';
-        if (num) num.style.display = 'none';
-        if (check) check.style.display = 'block';
-        if (cross) cross.style.display = 'none';
-        if (sub) {
-          sub.textContent = 'Done';
-          sub.className = 'water-node-sub completed';
-        }
-        if (name) name.className = 'water-node-name completed';
+        setClass(vial, 'water-node-vial completed', '_lastVialClass');
+        setDisplay(num, 'none', '_lastNumDisplay');
+        setDisplay(check, 'block', '_lastCheckDisplay');
+        setDisplay(cross, 'none', '_lastCrossDisplay');
+        setText(sub, 'Done', '_lastSubText');
+        setClass(sub, 'water-node-sub completed', '_lastSubClass');
+        setClass(name, 'water-node-name completed', '_lastNameClass');
         if (pipeLiquid) {
-          pipeLiquid.style.width = '100%';
-          pipeLiquid.className = 'water-pipe-liquid filled';
+          if (nodes._lastPipeFrac !== 1) {
+            pipeLiquid.style.transform = 'scaleX(1)';
+            pipeLiquid.style.width = '100%';
+            nodes._lastPipeFrac = 1;
+          }
+          setClass(pipeLiquid, 'water-pipe-liquid filled', '_lastPipeClass');
           if (meniscus) meniscus.style.opacity = '0';
         }
       } else {
-        // Actively draining stage: idx === drainStageIdx
         const fraction = Math.max(0, Math.min(1.0, P - idx));
 
         if (idx < stages.length - 1) {
-          // Has an outgoing pipe to the next stage
           if (fraction >= 0.6) {
-            // Step 1 of draining: Outgoing pipe empties backward from 100% to 0%
             const pipeFrac = (fraction - 0.6) / 0.4;
             const pipeWidth = Math.min(100, Math.max(0, pipeFrac * 100));
             if (pipeLiquid) {
-              pipeLiquid.style.width = `${pipeWidth.toFixed(1)}%`;
-              pipeLiquid.className = 'water-pipe-liquid draining';
+              const roundedPFrac = Math.round((pipeWidth / 100) * 1000) / 1000;
+              if (nodes._lastPipeFrac !== roundedPFrac) {
+                pipeLiquid.style.transform = `scaleX(${roundedPFrac})`;
+                pipeLiquid.style.width = `${(roundedPFrac * 100).toFixed(1)}%`;
+                nodes._lastPipeFrac = roundedPFrac;
+              }
+              setClass(pipeLiquid, 'water-pipe-liquid draining', '_lastPipeClass');
               if (meniscus) meniscus.style.opacity = '0';
             }
-            // Vial remains 100% full while pipe liquid recedes
             vialHeight = 100;
-            if (vial) vial.className = 'water-node-vial active';
-            if (num) num.style.display = 'block';
-            if (check) check.style.display = 'none';
-            if (cross) cross.style.display = 'none';
-            if (sub) {
-              sub.textContent = 'Emptying...';
-              sub.className = 'water-node-sub draining active';
-            }
-            if (name) name.className = 'water-node-name active';
+            setClass(vial, 'water-node-vial active', '_lastVialClass');
+            setDisplay(num, 'block', '_lastNumDisplay');
+            setDisplay(check, 'none', '_lastCheckDisplay');
+            setDisplay(cross, 'none', '_lastCrossDisplay');
+            setText(sub, 'Emptying...', '_lastSubText');
+            setClass(sub, 'water-node-sub draining active', '_lastSubClass');
+            setClass(name, 'water-node-name active', '_lastNameClass');
           } else {
-            // Step 2 of draining: Pipe has emptied (0%), now vial liquid level drops 100% -> 0%
             if (pipeLiquid) {
-              pipeLiquid.style.width = '0%';
-              pipeLiquid.className = 'water-pipe-liquid empty';
+              if (nodes._lastPipeFrac !== 0) {
+                pipeLiquid.style.transform = 'scaleX(0)';
+                pipeLiquid.style.width = '0%';
+                nodes._lastPipeFrac = 0;
+              }
+              setClass(pipeLiquid, 'water-pipe-liquid empty', '_lastPipeClass');
               if (meniscus) meniscus.style.opacity = '0';
             }
             vialHeight = Math.min(100, Math.max(0, (fraction / 0.6) * 100));
-            if (vial) vial.className = 'water-node-vial draining';
-            if (num) num.style.display = 'block';
-            if (check) check.style.display = 'none';
-            if (cross) cross.style.display = 'none';
-            if (sub) {
-              sub.textContent = 'Emptying...';
-              sub.className = 'water-node-sub draining';
-            }
-            if (name) name.className = 'water-node-name active';
+            setClass(vial, 'water-node-vial draining', '_lastVialClass');
+            setDisplay(num, 'block', '_lastNumDisplay');
+            setDisplay(check, 'none', '_lastCheckDisplay');
+            setDisplay(cross, 'none', '_lastCrossDisplay');
+            setText(sub, 'Emptying...', '_lastSubText');
+            setClass(sub, 'water-node-sub draining', '_lastSubClass');
+            setClass(name, 'water-node-name active', '_lastNameClass');
           }
         } else {
-          // Last stage (no outgoing pipe): Vial liquid level drops smoothly 100% -> 0%
           vialHeight = Math.min(100, Math.max(0, (fraction / 0.8) * 100));
-          if (vial) vial.className = 'water-node-vial draining';
-          if (num) num.style.display = 'block';
-          if (check) check.style.display = 'none';
-          if (cross) cross.style.display = 'none';
-          if (sub) {
-            sub.textContent = 'Emptying...';
-            sub.className = 'water-node-sub draining';
-          }
-          if (name) name.className = 'water-node-name active';
+          setClass(vial, 'water-node-vial draining', '_lastVialClass');
+          setDisplay(num, 'block', '_lastNumDisplay');
+          setDisplay(check, 'none', '_lastCheckDisplay');
+          setDisplay(cross, 'none', '_lastCrossDisplay');
+          setText(sub, 'Emptying...', '_lastSubText');
+          setClass(sub, 'water-node-sub draining', '_lastSubClass');
+          setClass(name, 'water-node-name active', '_lastNameClass');
         }
       }
     }
@@ -424,7 +471,6 @@ function updateWaterDOM(pipeline) {
     // B. FORWARD FILLING (Poured left-to-right)
     // ========================================================================
     else {
-      // Stage fill level: fills between P = idx and P = idx + 0.6
       if (P >= idx + 0.6) {
         vialHeight = 100;
       } else if (P > idx) {
@@ -433,69 +479,79 @@ function updateWaterDOM(pipeline) {
 
       // 1. Failed Stage
       if (isFailed && idx === failedIdx && P >= idx + 0.5) {
-        if (vial) vial.className = 'water-node-vial failed';
-        if (num) num.style.display = 'none';
-        if (check) check.style.display = 'none';
-        if (cross) cross.style.display = 'block';
-        if (sub) { sub.textContent = 'Failed'; sub.className = 'water-node-sub failed'; }
-        if (name) name.className = 'water-node-name failed';
+        setClass(vial, 'water-node-vial failed', '_lastVialClass');
+        setDisplay(num, 'none', '_lastNumDisplay');
+        setDisplay(check, 'none', '_lastCheckDisplay');
+        setDisplay(cross, 'block', '_lastCrossDisplay');
+        setText(sub, 'Failed', '_lastSubText');
+        setClass(sub, 'water-node-sub failed', '_lastSubClass');
+        setClass(name, 'water-node-name failed', '_lastNameClass');
       }
       // 2. Completed Stage
       else if ((idx < activeIdx && P >= idx + 0.6) || (isSuccess && P >= idx + 0.6)) {
-        if (vial) vial.className = 'water-node-vial completed';
-        if (num) num.style.display = 'none';
-        if (check) check.style.display = 'block';
-        if (cross) cross.style.display = 'none';
-        if (sub) { sub.textContent = 'Done'; sub.className = 'water-node-sub completed'; }
-        if (name) name.className = 'water-node-name completed';
+        setClass(vial, 'water-node-vial completed', '_lastVialClass');
+        setDisplay(num, 'none', '_lastNumDisplay');
+        setDisplay(check, 'block', '_lastCheckDisplay');
+        setDisplay(cross, 'none', '_lastCrossDisplay');
+        setText(sub, 'Done', '_lastSubText');
+        setClass(sub, 'water-node-sub completed', '_lastSubClass');
+        setClass(name, 'water-node-name completed', '_lastNameClass');
       }
       // 3. Active Stage: currently filling
       else if (P > idx) {
-        if (vial) vial.className = 'water-node-vial active';
-        if (num) num.style.display = 'block';
-        if (check) check.style.display = 'none';
-        if (cross) cross.style.display = 'none';
-        if (sub) {
-          sub.textContent = vialHeight >= 99 ? `${s.label}...` : 'Filling...';
-          sub.className = 'water-node-sub active';
-        }
-        if (name) name.className = 'water-node-name active';
+        setClass(vial, 'water-node-vial active', '_lastVialClass');
+        setDisplay(num, 'block', '_lastNumDisplay');
+        setDisplay(check, 'none', '_lastCheckDisplay');
+        setDisplay(cross, 'none', '_lastCrossDisplay');
+        const activeSub = vialHeight >= 99 ? `${s.label}...` : 'Filling...';
+        setText(sub, activeSub, '_lastSubText');
+        setClass(sub, 'water-node-sub active', '_lastSubClass');
+        setClass(name, 'water-node-name active', '_lastNameClass');
       }
       // 4. Queued / Idle Stage
       else {
-        if (vial) vial.className = 'water-node-vial queued';
-        if (num) num.style.display = 'block';
-        if (check) check.style.display = 'none';
-        if (cross) cross.style.display = 'none';
-        if (sub) {
-          sub.textContent = pipeline.status === 'idle' ? 'Idle' : 'Queued';
-          sub.className = 'water-node-sub queued';
-        }
-        if (name) name.className = 'water-node-name queued';
+        setClass(vial, 'water-node-vial queued', '_lastVialClass');
+        setDisplay(num, 'block', '_lastNumDisplay');
+        setDisplay(check, 'none', '_lastCheckDisplay');
+        setDisplay(cross, 'none', '_lastCrossDisplay');
+        setText(sub, pipeline.status === 'idle' ? 'Idle' : 'Queued', '_lastSubText');
+        setClass(sub, 'water-node-sub queued', '_lastSubClass');
+        setClass(name, 'water-node-name queued', '_lastNameClass');
       }
 
-      // Pipe fill level (pipe idx connects stage idx to stage idx + 1):
-      // Fills between P = idx + 0.6 and P = idx + 1.0
+      // Pipe fill level
       if (idx < stages.length - 1 && pipeLiquid) {
         let pipeWidth = 0;
         if (P >= idx + 1.0) {
           pipeWidth = 100;
-          pipeLiquid.className = 'water-pipe-liquid filled';
+          setClass(pipeLiquid, 'water-pipe-liquid filled', '_lastPipeClass');
           if (meniscus) meniscus.style.opacity = '0';
         } else if (P > idx + 0.6) {
           pipeWidth = Math.min(100, Math.max(0, ((P - (idx + 0.6)) / 0.4) * 100));
-          pipeLiquid.className = 'water-pipe-liquid flowing';
+          setClass(pipeLiquid, 'water-pipe-liquid flowing', '_lastPipeClass');
           if (meniscus) meniscus.style.opacity = '1';
         } else {
           pipeWidth = 0;
-          pipeLiquid.className = 'water-pipe-liquid empty';
+          setClass(pipeLiquid, 'water-pipe-liquid empty', '_lastPipeClass');
           if (meniscus) meniscus.style.opacity = '0';
         }
-        pipeLiquid.style.width = `${pipeWidth.toFixed(1)}%`;
+        const roundedPFrac = Math.round((pipeWidth / 100) * 1000) / 1000;
+        if (nodes._lastPipeFrac !== roundedPFrac) {
+          pipeLiquid.style.transform = `scaleX(${roundedPFrac})`;
+          pipeLiquid.style.width = `${(roundedPFrac * 100).toFixed(1)}%`;
+          nodes._lastPipeFrac = roundedPFrac;
+        }
       }
     }
 
-    if (liquid) liquid.style.height = `${vialHeight.toFixed(1)}%`;
+    if (liquid) {
+      const roundedVFrac = Math.round((vialHeight / 100) * 1000) / 1000;
+      if (nodes._lastVialFrac !== roundedVFrac) {
+        liquid.style.transform = `scaleY(${roundedVFrac})`;
+        liquid.style.height = `${(roundedVFrac * 100).toFixed(1)}%`;
+        nodes._lastVialFrac = roundedVFrac;
+      }
+    }
   });
 
   // When all stages are filled and operation succeeded, mark pipeline status deployed!
@@ -560,23 +616,29 @@ function startWaterLoop(pipeline) {
   if (pipeline.isLooping) return;
   pipeline.isLooping = true;
 
-  function step() {
+  let lastTime = performance.now();
+
+  function step(now) {
     const container = document.getElementById(pipeline.containerId);
     if (!container) {
       pipeline.isLooping = false;
       return;
     }
 
+    const dt = Math.min(Math.max((now - lastTime) / 1000, 0.001), 0.05);
+    lastTime = now;
+
     const diff = pipeline.targetProgress - pipeline.currentProgress;
 
-    // Organic, steady water pouring/draining pace (~2.3s per stage at 60fps)
-    const speed = 0.007;
+    // Organic, steady water pouring/draining pace with smooth deceleration easing
+    const maxSpeed = 0.55 * dt;
+    const factor = 1 - Math.exp(-dt * 4.2);
+    const speed = Math.max(0.12 * dt, Math.min(maxSpeed, Math.abs(diff) * factor));
 
-    if (Math.abs(diff) > 0.0005) {
+    if (Math.abs(diff) > 0.0008) {
       if (diff > 0) {
         pipeline.currentProgress = Math.min(pipeline.targetProgress, pipeline.currentProgress + speed);
       } else {
-        // Draining uses the same steady, organic pace as filling (exact mirror opposite)
         pipeline.currentProgress = Math.max(pipeline.targetProgress, pipeline.currentProgress - speed);
       }
       updateWaterDOM(pipeline);
@@ -608,6 +670,7 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
     failedStageIdx: -1,
     lastDeploymentId: depId,
     isLooping: false,
+    stageNodes: null,
   });
 
   const existingWrapper = container.querySelector('.water-pipeline-wrapper');
@@ -638,14 +701,31 @@ function renderPipelineStages(containerId, currentStage, currentStatus, depId = 
     pipeline.targetProgress = 0.0;
     pipeline.activeStageIdx = -1;
     pipeline.failedStageIdx = -1;
+    if (!pipeline.isLooping) {
+      pipeline.currentProgress = 0.0;
+      updateWaterDOM(pipeline);
+      return;
+    }
   } else if (currentStatus === 'failed') {
     pipeline.failedStageIdx = currentIndex >= 0 ? currentIndex : 0;
     pipeline.activeStageIdx = pipeline.failedStageIdx;
     pipeline.targetProgress = pipeline.failedStageIdx + 0.6;
+    if (!pipeline.isLooping) {
+      pipeline.currentProgress = pipeline.targetProgress;
+      updateWaterDOM(pipeline);
+      return;
+    }
   } else if (currentStatus === 'success') {
     pipeline.activeStageIdx = stages.length - 1;
     pipeline.failedStageIdx = -1;
     pipeline.targetProgress = maxP;
+    // CRITICAL: If the pipeline is not currently animating in an active live deployment,
+    // immediately display the completed state so it NEVER replays from 0 to max!
+    if (!pipeline.isLooping) {
+      pipeline.currentProgress = maxP;
+      updateWaterDOM(pipeline);
+      return;
+    }
   } else {
     // Stage in progress: water flows smoothly up to this stage and holds firmly in its vial!
     pipeline.activeStageIdx = currentIndex >= 0 ? currentIndex : 0;

@@ -26,6 +26,8 @@ function switchWebsiteTab(tab) {
 }
 window.switchWebsiteTab = switchWebsiteTab;
 
+let isInternalNavigation = false;
+
 function navigateTo(viewName, projectId = null) {
   if (!state.user || !state.csrf || state.pendingMfaToken) {
     showLogin();
@@ -37,12 +39,20 @@ function navigateTo(viewName, projectId = null) {
     state.selectedProjectId = Number(projectId);
   }
 
-  window.location.hash = projectId ? `#/${viewName}/${projectId}` : `#/${viewName}`;
+  const targetHash = projectId ? `#/${viewName}/${projectId}` : `#/${viewName}`;
+  if (window.location.hash !== targetHash) {
+    isInternalNavigation = true;
+    window.location.hash = targetHash;
+  }
   renderCurrentView();
 }
 window.navigateTo = navigateTo;
 
 function handleHashRoute() {
+  if (isInternalNavigation) {
+    isInternalNavigation = false;
+    return;
+  }
   if (!state.user || !state.csrf || state.pendingMfaToken) {
     resetCleanUrl();
     showLogin();
@@ -494,8 +504,8 @@ function renderCurrentView() {
 // ============================================================================
 async function refreshCurrentViewsAfterLifecycle() {
   await loadProjects();
-  renderProjectsList();
-  renderServicesList();
+  if (state.currentView === 'projects') renderProjectsList();
+  if (state.currentView === 'services') renderServicesList();
   if (state.currentView === 'overview') await loadOverview();
   if (WEBSITE_WORKSPACE_TABS.has(state.currentView)) {
     state.lastWsBannerSig = null;
