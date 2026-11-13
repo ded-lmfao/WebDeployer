@@ -107,21 +107,15 @@ export function renderSecurityStatusSummary() {
   if (badge) {
     const isProtected = is2fa || pkCount > 0;
     badge.className = `badge ${isProtected ? 'badge-success' : 'badge-warning'}`;
-    if (pkCount > 0 && is2fa) {
-      badge.textContent = `PASSKEY + 2FA ACTIVE`;
-    } else if (pkCount > 0) {
-      badge.textContent = `${pkCount} PASSKEY${pkCount === 1 ? '' : 'S'} ACTIVE`;
-    } else {
-      badge.textContent = is2fa ? '2FA ENABLED' : '2FA NOT ENABLED';
-    }
+    badge.textContent = isProtected ? 'PROTECTED' : 'UNPROTECTED';
   }
   const unameEl = document.getElementById('settings-sec-username');
   if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main Admin' : 'User'})`;
 
   const pkText = document.getElementById('settings-sec-passkeys-text');
   if (pkText) {
-    pkText.textContent = pkCount > 0 ? `${pkCount} Registered (Face ID / Fingerprint)` : 'None Registered';
-    pkText.style.color = pkCount > 0 ? 'var(--success-light)' : 'var(--text-dim)';
+    pkText.textContent = pkCount > 0 ? `${pkCount} Registered` : 'None';
+    pkText.style.color = pkCount > 0 ? 'var(--text-main)' : 'var(--text-dim)';
   }
 
   const pkModalBadge = document.getElementById('sec-passkey-modal-badge');
@@ -132,13 +126,13 @@ export function renderSecurityStatusSummary() {
 
   const tfaText = document.getElementById('settings-sec-2fa-text');
   if (tfaText) {
-    tfaText.textContent = is2fa ? 'Protected (TOTP Active)' : 'Not Enabled';
-    tfaText.style.color = is2fa ? 'var(--success-light)' : 'var(--warning-light)';
+    tfaText.textContent = is2fa ? 'Enabled' : 'Not Enabled';
+    tfaText.style.color = is2fa ? 'var(--text-main)' : 'var(--warning-light)';
   }
 
   const sessText = document.getElementById('settings-sec-sessions');
   const count = state.activeSessions || 1;
-  if (sessText) sessText.textContent = `${count} active session${count === 1 ? '' : 's'}`;
+  if (sessText) sessText.textContent = `${count} active`;
 
   const modalSess = document.getElementById('sec-modal-sessions-summary');
   if (modalSess) modalSess.textContent = `Your account currently has ${count} active authenticated session${count === 1 ? '' : 's'}.`;
@@ -430,51 +424,31 @@ export async function loadSystemVersionInfo(quiet = false) {
     const branchEl = document.getElementById('platform-branch-name');
     const hashEl = document.getElementById('platform-commit-hash');
     const msgEl = document.getElementById('platform-commit-msg');
-    const remoteBranchEl = document.getElementById('platform-remote-branch');
-    const remoteHashEl = document.getElementById('platform-remote-hash');
-    const remoteStatusEl = document.getElementById('platform-remote-status-text');
     const badgeEl = document.getElementById('platform-version-badge');
-    const updateBtn = document.getElementById('trigger-platform-update-btn');
     const repoInput = document.getElementById('platform-update-repo-input');
 
     if (branchEl) branchEl.textContent = v.current_branch || 'main';
     if (hashEl) hashEl.textContent = v.current_commit || 'unknown';
     if (msgEl) msgEl.textContent = v.commit_message || 'Self-hosted WebDep deployment platform';
-    if (remoteBranchEl) remoteBranchEl.textContent = v.current_branch || 'main';
-    if (remoteHashEl) remoteHashEl.textContent = v.remote_commit ? v.remote_commit : 'Up to date';
     if (repoInput && document.activeElement !== repoInput && v.remote_url) {
       repoInput.value = v.remote_url;
     }
 
-    if (remoteStatusEl) {
-      if (v.has_update) {
-        remoteStatusEl.innerHTML = `<span style="color:var(--accent-light); font-weight:600;">Update available (${v.remote_commit})</span>`;
-      } else {
-        remoteStatusEl.innerHTML = '<span style="color:var(--success); font-weight:600;">Up to date</span>';
-      }
-    }
-
     if (badgeEl) {
+      badgeEl.style.background = '';
+      badgeEl.style.color = '';
       if (v.update_in_progress) {
+        badgeEl.className = 'badge badge-warning';
         badgeEl.textContent = '● Update in Progress';
-        badgeEl.style.background = 'rgba(234, 179, 8, 0.15)';
-        badgeEl.style.color = '#eab308';
       } else if (v.ready_to_restart) {
+        badgeEl.className = 'badge badge-warning';
         badgeEl.textContent = 'Restart Required';
-        badgeEl.style.background = 'rgba(245, 158, 11, 0.15)';
-        badgeEl.style.color = '#fbbf24';
       } else if (v.has_update) {
+        badgeEl.className = 'badge badge-success';
         badgeEl.textContent = `Update Available (${v.remote_commit})`;
-        badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
-        badgeEl.style.color = 'var(--success)';
-        if (updateBtn) {
-          updateBtn.classList.remove('btn-secondary');
-          updateBtn.classList.add('btn-primary');
-        }
       } else {
+        badgeEl.className = 'badge badge-neutral';
         badgeEl.textContent = 'Up to Date';
-        badgeEl.style.background = 'rgba(99, 102, 241, 0.15)';
-        badgeEl.style.color = 'var(--accent-light)';
       }
     }
     return v;

@@ -1010,7 +1010,7 @@
             <div class="view-title-group">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <div
-                  style="width: 36px; height: 36px; border-radius: 8px; background: rgba(59, 130, 246, 0.12); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                  style="width: 36px; height: 36px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; font-size: 18px;">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                   </svg>
@@ -1566,7 +1566,7 @@
               <div class="project-card-header"
                 style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-                  <div class="project-card-icon" style="color: #38bdf8;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                       stroke-linejoin="round">
                       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
@@ -1691,7 +1691,7 @@
               <div class="project-card-header"
                 style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-                  <div class="project-card-icon" style="color: var(--accent-light);">
+                  <div class="project-card-icon" style="color: var(--text-main);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                       stroke-linejoin="round">
                       <polyline points="23 4 23 10 17 10"></polyline>
@@ -1705,13 +1705,12 @@
                     </div>
                     <div
                       style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
-                      origin/<span id="platform-remote-branch">main</span> &bull; <code id="platform-remote-hash"
-                        style="color: var(--text-muted); font-size: 11px;">...</code>
+                      Version &bull; Repository
                     </div>
                   </div>
                 </div>
-                <span class="badge" id="platform-version-badge"
-                  style="background: rgba(99, 102, 241, 0.15); color: var(--accent-light); font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;">Checking...</span>
+                <span class="badge badge-neutral" id="platform-version-badge"
+                  style="font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;">Checking...</span>
               </div>
 
               <div class="settings-card-inset">
@@ -1721,10 +1720,8 @@
                     <span style="font-weight: 600; color: var(--text-main);">Instance: <span
                         id="platform-branch-name">main</span></span>
                     <span style="color: var(--text-dim);">&bull;</span>
-                    <code id="platform-commit-hash" style="color: var(--accent-light); font-size: 12px;">...</code>
+                    <code id="platform-commit-hash" style="color: var(--text-muted); font-size: 12px;">...</code>
                   </div>
-                  <div style="font-size: 11.5px; font-weight: 600; flex-shrink: 0;" id="platform-remote-status-text">
-                    Checking...</div>
                 </div>
                 <div id="platform-commit-msg"
                   style="font-size: 11px; color: var(--text-dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -1764,7 +1761,7 @@
               <div class="project-card-header"
                 style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-                  <div class="project-card-icon" style="color: #10b981;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                       stroke-linejoin="round">
                       <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
@@ -1791,13 +1788,6 @@
                 Safely restart the WebDep panel daemon with zero workload downtime or flush server response caches.
               </div>
 
-              <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
-                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Zero-Downtime
-                  Restart</span>
-                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Telemetry
-                  Cache</span>
-              </div>
-
               <div class="project-card-actions" style="justify-content: flex-start;">
                 <button type="button" class="btn btn-secondary btn-sm" id="restart-panel-btn">Restart Panel</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="clear-cache-btn">Clear Cache</button>
@@ -1809,7 +1799,7 @@
               <div class="project-card-header"
                 style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
-                  <div class="project-card-icon" style="color: #a855f7;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                       stroke-linejoin="round">
                       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -1821,7 +1811,7 @@
                   <div style="min-width: 0;">
                     <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
                       <span>User Permissions</span>
-                      <span class="badge badge-info" id="settings-users-count-badge"
+                      <span class="badge badge-neutral" id="settings-users-count-badge"
                         style="font-size: 10px;">RBAC</span>
                     </div>
                     <div

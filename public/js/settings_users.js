@@ -132,6 +132,39 @@ export function renderUserProjectsChecklist(selectedIds = [], allProjects = true
   }).join('');
 }
 
+function formatNeutralBadgesSummary(labels, fallbackHtml, maxVisible = 4) {
+  if (!labels.length) return fallbackHtml;
+  const fullTooltip = escapeHtml(labels.join(', '));
+  const shown = labels
+    .slice(0, maxVisible)
+    .map((lbl) => `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(lbl)}</span>`)
+    .join('');
+  const overflow = labels.length > maxVisible
+    ? `<span class="badge badge-neutral" style="font-size: 10px;" title="${fullTooltip}">+${labels.length - maxVisible} More</span>`
+    : '';
+  return shown + overflow;
+}
+
+function formatUserPowersHtml(u, isMain) {
+  if (isMain || (u.permissions && u.permissions.includes('*'))) {
+    return '<span class="badge badge-neutral" style="font-size: 10px;">All Powers (*)</span>';
+  }
+  const perms = u.permissions || [];
+  if (!perms.length) {
+    return '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>';
+  }
+  const allKeys = Object.keys(POWER_LABELS).filter((k) => k !== '*');
+  if (allKeys.every((k) => perms.includes(k))) {
+    const tip = escapeHtml(allKeys.map((k) => POWER_LABELS[k]).join(', '));
+    return `<span class="badge badge-neutral" style="font-size: 10px;" title="${tip}">All Powers (${allKeys.length})</span>`;
+  }
+  return formatNeutralBadgesSummary(
+    perms.map((p) => POWER_LABELS[p] || p),
+    '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>',
+    4,
+  );
+}
+
 export function renderUsersTable(users) {
   const tbody = document.getElementById('users-table-body');
   if (!tbody) return;
@@ -153,20 +186,17 @@ export function renderUsersTable(users) {
     tbody.innerHTML = slice.map((u) => {
       const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
       const projHtml = (isMain || u.allProjects)
-        ? '<span class="badge badge-info" style="font-size: 10px;">All Websites (*)</span>'
-        : (u.allowedProjects && u.allowedProjects.length
-            ? u.allowedProjects.map((pid) => {
-                const proj = state.projects.find((p) => p.id === pid);
-                return `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(proj ? proj.name : `#${pid}`)}</span>`;
-              }).join('')
-            : '<span class="badge badge-warning" style="font-size: 10px;">No Websites</span>');
+        ? '<span class="badge badge-neutral" style="font-size: 10px;">All Websites (*)</span>'
+        : formatNeutralBadgesSummary(
+            (u.allowedProjects || []).map((pid) => {
+              const proj = state.projects.find((p) => p.id === pid);
+              return proj ? proj.name : `#${pid}`;
+            }),
+            '<span class="badge badge-warning" style="font-size: 10px;">No Websites</span>',
+            3,
+          );
 
-      const perms = isMain || (u.permissions && u.permissions.includes('*'))
-        ? ['*']
-        : (u.permissions || []);
-      const permsHtml = perms.length
-        ? perms.map((p) => `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(POWER_LABELS[p] || p)}</span>`).join('')
-        : '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>';
+      const permsHtml = formatUserPowersHtml(u, isMain);
 
       const presence = u.disabled
         ? 'disabled'
@@ -184,7 +214,7 @@ export function renderUsersTable(users) {
           <td>
             <div style="display:flex; align-items:center; gap:7px;">
               <strong>${escapeHtml(u.username)}</strong>
-              ${isMain ? '<span class="badge badge-info" style="font-size: 9.5px;">MAIN ADMIN</span>' : ''}
+              ${isMain ? '<span class="badge badge-neutral" style="font-size: 9.5px;">MAIN ADMIN</span>' : ''}
               ${u.id === state.user?.id ? '<span style="color:var(--text-dim); font-size:11px;">(You)</span>' : ''}
             </div>
           </td>

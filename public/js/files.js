@@ -3,7 +3,7 @@
  * Directory navigator, breadcrumbs, search filter, file actions, and drag-and-drop uploader.
  */
 
-import { icon, FILE_KINDS } from './icons.js';
+import { DEVICONS, icon } from './icons.js';
 import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard, getFilesEntityContext } from './state.js';
 import { api, toast } from './api.js';
 
@@ -53,51 +53,83 @@ export function formatFileDate(unixSec) {
   return { relative, full };
 }
 
-export function getFileMeta(entry) {
-  const build = (kindKey, extLabel, isEditable, isBinary, isDir = false) => {
-    const k = FILE_KINDS[kindKey] || FILE_KINDS.file;
-    return {
-      isDir,
-      extLabel,
-      isEditable,
-      isBinary,
-      iconColor: k.color,
-      iconBg: k.bg,
-      iconSvg: icon(k.icon, { size: 16 }),
-    };
-  };
+const FILE_EXT_GROUPS = [
+  { exts: ['jar', 'war', 'class'], icon: 'java', label: null, editable: false, binary: true },
+  { exts: ['java'], icon: 'java', label: 'JAVA', editable: true, binary: false },
+  { exts: ['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2'], icon: 'file-archive', label: 'ZIP', editable: false, binary: true },
+  { exts: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'], icon: 'file-image', label: 'IMG', editable: false, binary: true },
+  { exts: ['db', 'sqlite', 'sqlite3'], icon: 'sqlite', label: null, editable: false, binary: true },
+  { exts: ['sql'], icon: 'postgresql', label: 'SQL', editable: true, binary: false },
+  { exts: ['py', 'pyw', 'ipynb'], icon: 'python', label: 'PY', editable: true, binary: false },
+  { exts: ['js', 'mjs', 'cjs'], icon: 'javascript', label: 'JS', editable: true, binary: false },
+  { exts: ['jsx'], icon: 'react', label: 'JSX', editable: true, binary: false },
+  { exts: ['tsx'], icon: 'react', label: 'TSX', editable: true, binary: false },
+  { exts: ['ts'], icon: 'typescript', label: 'TS', editable: true, binary: false },
+  { exts: ['vue'], icon: 'vuejs', label: 'VUE', editable: true, binary: false },
+  { exts: ['svelte'], icon: 'svelte', label: null, editable: true, binary: false },
+  { exts: ['rs'], icon: 'rust', label: 'RS', editable: true, binary: false },
+  { exts: ['go'], icon: 'go', label: 'GO', editable: true, binary: false },
+  { exts: ['php'], icon: 'php', label: 'PHP', editable: true, binary: false },
+  { exts: ['rb', 'erb'], icon: 'ruby', label: 'RB', editable: true, binary: false },
+  { exts: ['html', 'htm'], icon: 'html5', label: null, editable: true, binary: false },
+  { exts: ['css', 'less'], icon: 'css3', label: null, editable: true, binary: false },
+  { exts: ['scss', 'sass'], icon: 'sass', label: null, editable: true, binary: false },
+  { exts: ['json'], icon: 'json', label: null, editable: true, binary: false },
+  { exts: ['yaml', 'yml'], icon: 'yaml', label: null, editable: true, binary: false },
+  { exts: ['toml'], icon: 'toml', label: null, editable: true, binary: false },
+  { exts: ['xml'], icon: 'xml', label: null, editable: true, binary: false },
+  { exts: ['ini', 'conf', 'config'], icon: 'file-json', label: null, editable: true, binary: false },
+  { exts: ['ps1'], icon: 'powershell', label: 'PS1', editable: true, binary: false },
+  { exts: ['sh', 'bash', 'bat', 'cmd'], icon: 'bash', label: 'SHELL', editable: true, binary: false },
+  { exts: ['md', 'mdx'], icon: 'markdown', label: 'MD', editable: true, binary: false },
+  { exts: ['txt', 'log'], icon: 'file-text', label: null, editable: true, binary: false },
+];
 
-  if (entry.is_dir) return build('folder', 'DIR', false, false, true);
+const FILE_EXT_MAP = Object.fromEntries(
+  FILE_EXT_GROUPS.flatMap((g) => g.exts.map((ext) => [ext, g])),
+);
+
+const FILE_NAME_RULES = [
+  { match: (n) => n === '.env' || n.startsWith('.env.'), icon: 'file-lock', label: 'ENV', editable: true, binary: false },
+  { match: (n) => n === 'dockerfile' || n.startsWith('dockerfile.'), icon: 'docker', label: 'DOCKER', editable: true, binary: false },
+  { match: (n) => n === '.dockerignore', icon: 'docker', label: 'DOCK', editable: true, binary: false },
+  { match: (n) => n.startsWith('docker-compose') || n === 'compose.yaml' || n === 'compose.yml', icon: 'docker', label: null, editable: true, binary: false },
+  { match: (n) => n === '.gitignore' || n === '.gitattributes' || n === '.gitmodules', icon: 'git', label: 'GIT', editable: true, binary: false },
+  { match: (n) => n === 'package.json' || n === 'package-lock.json', icon: 'npm', label: null, editable: true, binary: false },
+  { match: (n) => n.startsWith('vite.config.'), icon: 'vitejs', label: null, editable: true, binary: false },
+  { match: (n) => n === 'netlify.toml', icon: 'netlify', label: 'TOML', editable: true, binary: false },
+  { match: (n) => n === 'nginx.conf' || n.endsWith('.nginx'), icon: 'nginx', label: null, editable: true, binary: false },
+];
+
+export function getFileMeta(entry) {
+  const make = (iconName, extLabel, isEditable, isBinary, isDir = false) => ({
+    isDir,
+    extLabel,
+    isEditable,
+    isBinary,
+    iconColor: isDir ? 'var(--text-main)' : 'var(--text-muted)',
+    boxColor: (isDir || DEVICONS[iconName]) ? 'var(--text-main)' : 'var(--text-muted)',
+    iconBg: isDir ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.05)',
+    iconSvg: icon(iconName, { size: 17 }),
+  });
+
+  if (entry.is_dir) return make('folder', 'DIR', false, false, true);
 
   const name = entry.name.toLowerCase();
-  const ext = name.includes('.') ? name.split('.').pop() : '';
+  const baseName = name.includes('/') ? name.split('/').pop() : name;
+  const ext = baseName.includes('.') ? baseName.split('.').pop() : '';
 
-  if (['jar', 'war', 'class'].includes(ext)) return build('java', ext.toUpperCase(), false, true);
-  if (['py', 'pyw', 'ipynb'].includes(ext)) return build('python', 'PY', true, false);
-  if (['js', 'mjs', 'cjs'].includes(ext)) return build('javascript', 'JS', true, false);
-  if (['ts', 'tsx'].includes(ext)) return build('typescript', 'TS', true, false);
-  if (['rs'].includes(ext)) return build('rust', 'RS', true, false);
-  if (['go'].includes(ext)) return build('go', 'GO', true, false);
-  if (['php'].includes(ext)) return build('php', 'PHP', true, false);
-  if (['rb', 'erb'].includes(ext)) return build('ruby', 'RB', true, false);
-  if (name === '.env' || name.startsWith('.env.')) return build('env', 'ENV', true, false);
-  if (['json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'conf', 'config'].includes(ext)) return build('config', ext.toUpperCase() || 'CONF', true, false);
-  if (['sh', 'bash', 'bat', 'cmd', 'ps1'].includes(ext)) return build('shell', 'SHELL', true, false);
-  if (['md', 'txt', 'log'].includes(ext)) return build('doc', ext.toUpperCase(), true, false);
-  if (['html', 'htm', 'css', 'scss', 'sass', 'less'].includes(ext)) return build('web', ext.toUpperCase(), true, false);
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return build('image', 'IMG', false, true);
-  if (['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2'].includes(ext)) return build('archive', 'ZIP', false, true);
-  if (name === 'dockerfile' || name.startsWith('docker-compose')) return build('docker', 'DOCKER', true, false);
+  const nameRule = FILE_NAME_RULES.find((r) => r.match(baseName));
+  if (nameRule) {
+    return make(nameRule.icon, nameRule.label || (ext ? ext.toUpperCase() : 'FILE'), nameRule.editable, nameRule.binary);
+  }
 
-  return {
-    isDir: false,
-    extLabel: ext ? ext.toUpperCase().slice(0, 4) : 'FILE',
-    isEditable: entry.size < 2 * 1024 * 1024,
-    isBinary: false,
-    iconColor: 'var(--text-muted)',
-    iconBg: 'rgba(255, 255, 255, 0.05)',
-    iconSvg: icon('file', { size: 16 }),
-  };
+  const spec = FILE_EXT_MAP[ext];
+  if (spec) {
+    return make(spec.icon, spec.label || ext.toUpperCase() || 'FILE', spec.editable, spec.binary);
+  }
+
+  return make('file', ext ? ext.toUpperCase().slice(0, 4) : 'FILE', entry.size < 2 * 1024 * 1024, false);
 }
 
 export async function loadFilesView() {
@@ -230,7 +262,7 @@ export function renderFilesTable() {
       <tr class="file-tr ${isEditing ? 'file-tr-active' : ''}">
         <td style="padding: 10px 16px;">
           <div class="file-cell-name" onclick="${clickAction}">
-            <div class="file-icon-box" style="background: ${meta.iconBg}; color: ${meta.iconColor};">
+            <div class="file-icon-box" style="background: transparent; color: ${meta.boxColor};">
               ${meta.iconSvg}
             </div>
             <span class="file-name-text" title="${safeName}">${safeName}</span>
