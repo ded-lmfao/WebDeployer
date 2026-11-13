@@ -7,6 +7,12 @@ use axum::{
 use serde::Deserialize;
 
 use super::common::*;
+use super::files::{
+    delete_in_root, download_in_root, list_entries_in_root, mkdir_in_root, read_file_in_root,
+    rename_in_root, upload_in_root, write_file_in_root, FileMkdirPayload, FileRenamePayload,
+    FileWritePayload, FilesQuery,
+};
+use axum::extract::{Multipart, Query};
 
 // ---------------------------------------------------------------------------
 // Managed Databases (PostgreSQL)
@@ -18,7 +24,7 @@ fn can_access_db(user: &crate::auth::user::User, db: &crate::databases::ManagedD
         .unwrap_or(can_unlinked)
 }
 
-fn verify_db_access(
+pub(crate) fn verify_db_access(
     state: &AppState,
     headers: &HeaderMap,
     powers: &[&str],
@@ -29,6 +35,48 @@ fn verify_db_access(
         return Err((StatusCode::FORBIDDEN, "Access to unlinked database is restricted".to_string()));
     }
     Ok(user)
+}
+
+pub(crate) fn get_authorized_database(
+    state: &AppState,
+    headers: &HeaderMap,
+    powers: &[&str],
+    id: i64,
+) -> Result<(crate::auth::user::User, crate::databases::ManagedDatabase), (StatusCode, String)> {
+    let db = state
+        .databases
+        .get(id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
+    let user = verify_db_access(state, headers, powers, &db)?;
+    Ok((user, db))
+}
+
+fn verify_db_files_write(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: i64,
+) -> Result<(crate::auth::user::User, crate::databases::ManagedDatabase), (StatusCode, String)> {
+    let (user, db) = get_authorized_database(state, headers, &["databases", "databases_manage"], id)?;
+    if !user.has_power("databases_manage") && !(user.has_power("databases") && user.has_power("files_write")) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Permission denied: Missing 'databases_manage' or 'files_write' privilege".to_string(),
+        ));
+    }
+    Ok((user, db))
+}
+
+fn database_root(db: &crate::databases::ManagedDatabase) -> std::path::PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let raw = std::path::Path::new(&db.data_dir);
+    let root = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        cwd.join(db.data_dir.trim_start_matches("./").trim_start_matches(".\\"))
+    };
+    let _ = std::fs::create_dir_all(&root);
+    root
 }
 
 fn redact_pg_url(url: &str) -> String {
@@ -327,31 +375,163 @@ pub(crate) async fn unlink_database_handler(
     Ok(Json(serde_json::json!({ "ok": true, "message": desc })))
 }
 
+fn classify_pg_log_level(line: &str) -> &'static str {
+    let upper = line.to_ascii_uppercase();
+    if upper.contains("FATAL:") || upper.contains("PANIC:") || upper.contains("ERROR:") {
+        "error"
+    } else if upper.contains("WARNING:") {
+        "warn"
+    } else {
+        "info"
+    }
+}
+
 pub(crate) async fn get_database_logs_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.databases.get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    let _user = verify_db_access(&state, &headers, &["databases", "databases_manage"], &db)?;
+    let (_user, db) = get_authorized_database(&state, &headers, &["databases", "databases_manage"], id)?;
 
-    let log_content = state.databases.get_logs(id)
+    let log_content = state
+        .databases
+        .get_logs(id)
         .unwrap_or_else(|e| format!("Error reading log file: {}", e));
+
+    let db_tag = format!("[DB #{}]", id);
+    let mut entries: Vec<serde_json::Value> = state
+        .logs
+        .list(None, None, Some("database"), None, 150)
+        .into_iter()
+        .filter(|e| e.message.contains(&db_tag) || e.message.contains(&db.name))
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id,
+                "ts": e.ts,
+                "level": e.level,
+                "channel": e.channel,
+                "message": e.message,
+            })
+        })
+        .collect();
+
+    let now_ts = crate::db::now();
+    for (idx, line) in log_content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        entries.push(serde_json::json!({
+            "id": 1_000_000_000i64 + idx as i64,
+            "ts": now_ts,
+            "level": classify_pg_log_level(trimmed),
+            "channel": "postgres",
+            "message": trimmed,
+        }));
+    }
 
     Ok(Json(serde_json::json!({
         "id": db.id,
         "name": db.name,
         "status": db.status,
         "port": db.port,
-        "logs": log_content
+        "logs": log_content,
+        "entries": entries
     })))
+}
+
+pub(crate) async fn db_files_list_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (_actor, db) = get_authorized_database(&state, &headers, &["databases", "databases_manage"], id)?;
+    let root = database_root(&db);
+    list_entries_in_root(&root, &q.path).await
+}
+
+pub(crate) async fn db_files_read_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, db) = get_authorized_database(&state, &headers, &["databases", "databases_manage"], id)?;
+    let root = database_root(&db);
+    read_file_in_root(&actor, &root, &q.path).await
+}
+
+pub(crate) async fn db_files_write_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileWritePayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, db) = verify_db_files_write(&state, &headers, id)?;
+    let root = database_root(&db);
+    write_file_in_root(&state, &actor, None, &db.name, "database.file.write", &root, payload).await
+}
+
+pub(crate) async fn db_files_mkdir_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileMkdirPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, db) = verify_db_files_write(&state, &headers, id)?;
+    let root = database_root(&db);
+    mkdir_in_root(&actor, &root, payload).await
+}
+
+pub(crate) async fn db_files_delete_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, db) = verify_db_files_write(&state, &headers, id)?;
+    let root = database_root(&db);
+    delete_in_root(&state, &actor, None, &db.name, "database.file.delete", &root, &q.path).await
+}
+
+pub(crate) async fn db_files_upload_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, db) = verify_db_files_write(&state, &headers, id)?;
+    let root = database_root(&db);
+    upload_in_root(&state, &actor, None, &db.name, "database.file.upload", &root, &q.path, multipart).await
+}
+
+pub(crate) async fn db_files_download_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Response, (StatusCode, String)> {
+    let (actor, db) = get_authorized_database(&state, &headers, &["databases", "databases_manage"], id)?;
+    let root = database_root(&db);
+    download_in_root(&actor, &root, &q.path).await
+}
+
+pub(crate) async fn db_files_rename_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileRenamePayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, db) = verify_db_files_write(&state, &headers, id)?;
+    let root = database_root(&db);
+    rename_in_root(&state, &actor, None, &db.name, "database.file.rename", &root, payload).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::redact_db_if_unprivileged;
+    use super::{classify_pg_log_level, redact_db_if_unprivileged};
     use crate::databases::ManagedDatabase;
 
     fn sample_db() -> ManagedDatabase {
@@ -391,5 +571,13 @@ mod tests {
         let full = redact_db_if_unprivileged(sample_db(), true);
         assert_eq!(full.db_password.as_deref(), Some("super-secret-pass"));
         assert!(full.internal_url.contains("super-secret-pass"));
+    }
+
+    #[test]
+    fn test_classify_pg_log_level() {
+        assert_eq!(classify_pg_log_level("2026-11-13 LOG: database system is ready"), "info");
+        assert_eq!(classify_pg_log_level("2026-11-13 WARNING: deprecated setting"), "warn");
+        assert_eq!(classify_pg_log_level("2026-11-13 ERROR: role does not exist"), "error");
+        assert_eq!(classify_pg_log_level("2026-11-13 FATAL: password authentication failed"), "error");
     }
 }

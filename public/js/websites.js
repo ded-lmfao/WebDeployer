@@ -17,6 +17,9 @@ import {
   showConfirmDialog,
   showPromptDialog,
   invalidateClientCache,
+  isProjectOnline,
+  isProjectMaintenance,
+  syncOverviewResourceStatus,
   WEBSITE_WORKSPACE_TABS,
   PRESETS,
 } from './state.js';
@@ -33,7 +36,25 @@ import { deployProject } from './deployments.js';
 // ============================================================================
 async function loadProjects(force = false) {
   try {
-    state.projects = await api('/api/projects', force ? { noCache: true } : {});
+    const incoming = await api('/api/projects', force ? { noCache: true } : {});
+    const pendingSet = state.pendingLifecycleProjects;
+    if (!force && pendingSet && pendingSet.size > 0 && Array.isArray(state.projects)) {
+      const prevById = new Map(state.projects.map((p) => [p.id, p]));
+      state.projects = (incoming || []).map((p) => {
+        if (pendingSet.has(p.id) && prevById.has(p.id)) {
+          return { ...p, app_status: prevById.get(p.id).app_status };
+        }
+        return p;
+      });
+    } else {
+      state.projects = incoming;
+    }
+
+    for (const p of state.projects || []) {
+      const pid = p.app_status === 'running' ? (p.app_pid ?? p.status?.pid ?? null) : null;
+      syncOverviewResourceStatus('project', p.id, p.app_status, pid);
+    }
+
     const websites = (state.projects || []).filter((p) => p.project_kind !== 'service');
     const services = (state.projects || []).filter((p) => p.project_kind === 'service');
 
@@ -97,7 +118,7 @@ function renderProjectsList() {
   const search = (document.getElementById('projects-search-input')?.value || '').toLowerCase();
   const filtered = websites.filter((p) => {
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
-    const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
+    const isOnline = isProjectOnline(p, resItem);
     if (state.projectStatusFilter === 'running' && !isOnline) return false;
     if (state.projectStatusFilter === 'stopped' && isOnline) return false;
     return p.name.toLowerCase().includes(search) ||
@@ -118,8 +139,8 @@ function renderProjectsList() {
 
   setHtmlIfChanged(container, filtered.map((p) => {
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
-    const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
-    const isMaintenance = p.app_status === 'maintenance' || resItem?.status === 'maintenance';
+    const isOnline = isProjectOnline(p, resItem);
+    const isMaintenance = isProjectMaintenance(p, resItem);
 
     const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7).toUpperCase() : (p.deployedSha ? p.deployedSha.slice(0, 7).toUpperCase() : '');
     const branchText = (p.branch || 'main').toUpperCase();

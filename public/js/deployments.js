@@ -7,6 +7,8 @@ import { icon } from './icons.js';
 import {
   state,
   getSelectedProject,
+  getSelectedDatabase,
+  DB_PIPELINE_STAGES,
   paginateAndRender,
   escapeHtml,
   formatDate,
@@ -162,7 +164,135 @@ async function fetchProjectUpdates(projectId) {
 // ============================================================================
 let deploymentPollTimer = null;
 
+async function loadDatabaseOverviewSection(db) {
+  if (deploymentPollTimer) {
+    clearTimeout(deploymentPollTimer);
+    deploymentPollTimer = null;
+  }
+
+  const depTitle = document.getElementById('deployments-view-title');
+  const depDesc = document.getElementById('deployments-view-desc');
+  if (depTitle) depTitle.textContent = 'Overview';
+  if (depDesc) {
+    depDesc.textContent = `Live PostgreSQL cluster metrics, runtime lifecycle, and endpoint details for ${db.name}`;
+  }
+
+  const depRecordsCard = document.getElementById('deployments-records-card');
+  const dbDetailsCard = document.getElementById('db-overview-details-card');
+  if (depRecordsCard) depRecordsCard.style.display = 'none';
+  if (dbDetailsCard) dbDetailsCard.style.display = '';
+
+  void loadAppUsageCards({ kind: 'database', id: db.id, name: db.name });
+
+  const isRunning = db.status === 'running';
+  const isStarting = db.status === 'starting';
+  const isStopping = db.status === 'stopping';
+  const isError = db.status === 'error';
+
+  const badge = document.getElementById('pipeline-status-badge');
+  let stage = 'sandbox';
+  let stageStatus = 'idle';
+  if (isRunning) {
+    stage = 'healthy';
+    stageStatus = 'success';
+    if (badge) { badge.textContent = 'ONLINE (LIVE)'; badge.className = 'badge badge-success'; }
+  } else if (isStarting) {
+    stage = 'spawning';
+    stageStatus = 'running';
+    if (badge) { badge.textContent = 'STARTING Engine'; badge.className = 'badge badge-warning'; }
+  } else if (isStopping) {
+    stage = 'spawning';
+    stageStatus = 'running';
+    if (badge) { badge.textContent = 'STOPPING Engine'; badge.className = 'badge badge-warning'; }
+  } else if (isError) {
+    stage = 'spawning';
+    stageStatus = 'failed';
+    if (badge) { badge.textContent = 'ERROR'; badge.className = 'badge badge-danger'; }
+  } else {
+    if (badge) { badge.textContent = 'STOPPED'; badge.className = 'badge badge-neutral'; }
+  }
+  renderPipelineStages('main-pipeline-track', stage, stageStatus, null, DB_PIPELINE_STAGES);
+  if (isRunning) {
+    const subs = document.getElementById('main-pipeline-track')?.querySelectorAll('.water-node-sub');
+    if (subs && subs.length > 0) subs[subs.length - 1].textContent = 'Online';
+  }
+
+  const accessMode = db.accessMode || db.access_mode || 'local';
+  const accessBadge = document.getElementById('db-overview-access-badge');
+  if (accessBadge) {
+    if (accessMode === 'public') {
+      accessBadge.textContent = 'PUBLIC INTERNET';
+      accessBadge.className = 'badge badge-warning';
+    } else if (accessMode === 'allowlist') {
+      accessBadge.textContent = 'IP WHITELIST';
+      accessBadge.className = 'badge badge-info';
+    } else {
+      accessBadge.textContent = 'LOCALHOST ONLY';
+      accessBadge.className = 'badge badge-neutral';
+    }
+  }
+
+  const body = document.getElementById('db-overview-details-body');
+  if (body) {
+    const hostOrDomain = db.domain ? db.domain : (db.host || '127.0.0.1');
+    const dbName = db.dbName || db.db_name || 'app';
+    const dbUser = db.dbUser || db.db_user || 'app_user';
+    const linkedName = db.linkedProjectName || db.linked_project_name || 'Standalone Cluster';
+    const dataDir = db.dataDir || db.data_dir || `data/databases/db-${db.id}`;
+    const psqlCmd = db.psqlCommand || db.psql_command || `psql -h ${hostOrDomain} -p ${db.port || 5432} -U ${dbUser} -d ${dbName}`;
+    const canCreds = typeof window.hasAnyPower === 'function' ? window.hasAnyPower(['databases_manage', 'env']) : false;
+    const canManage = typeof window.hasPower === 'function' ? window.hasPower('databases_manage') : false;
+
+    const nextHtml = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 14px;">
+        <div style="background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px;">
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Host / Endpoint</div>
+          <div style="font-family: var(--font-mono); font-size: 12.5px; color: var(--text-main); font-weight: 600;">${escapeHtml(hostOrDomain)}:${db.port || 5432}</div>
+        </div>
+        <div style="background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px;">
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Database Name</div>
+          <div style="font-family: var(--font-mono); font-size: 12.5px; color: var(--text-main); font-weight: 600;">${escapeHtml(dbName)}</div>
+        </div>
+        <div style="background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px;">
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Database User</div>
+          <div style="font-family: var(--font-mono); font-size: 12.5px; color: var(--text-main); font-weight: 600;">${escapeHtml(dbUser)}</div>
+        </div>
+        <div style="background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px;">
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Linked Application</div>
+          <div style="font-size: 12.5px; color: var(--text-main); font-weight: 600;">${escapeHtml(linkedName)}</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 9px 12px;">
+        <div style="min-width: 0; flex: 1;">
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 2px;">PostgreSQL CLI Command &bull; Data Dir: <code>${escapeHtml(dataDir)}</code></div>
+          <code style="font-size: 12px; color: var(--accent-light); word-break: break-all;">${escapeHtml(psqlCmd)}</code>
+        </div>
+        <div style="display: flex; gap: 6px; flex-shrink: 0;">
+          ${canCreds ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${db.id})">Connection</button>` : ''}
+          ${canManage ? `<button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${db.id})">Access</button>` : ''}
+          <button class="btn btn-secondary btn-sm" onclick="switchWebsiteTab('logs')">Logs</button>
+          <button class="btn btn-secondary btn-sm" onclick="switchWebsiteTab('files')">Files</button>
+        </div>
+      </div>
+    `;
+    setHtmlIfChanged(body, nextHtml);
+  }
+}
+
 async function loadDeploymentsView() {
+  if (state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    if (db) {
+      await loadDatabaseOverviewSection(db);
+    }
+    return;
+  }
+
+  const depRecordsCard = document.getElementById('deployments-records-card');
+  const dbDetailsCard = document.getElementById('db-overview-details-card');
+  if (depRecordsCard) depRecordsCard.style.display = '';
+  if (dbDetailsCard) dbDetailsCard.style.display = 'none';
+
   const p = getSelectedProject();
   const query = p ? `?project=${p.id}&limit=5` : '?limit=50';
   const tbody = document.getElementById('deployments-table-body');

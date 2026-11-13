@@ -4,7 +4,7 @@
  */
 
 import { icon } from './icons.js';
-import { state, escapeHtml } from './state.js';
+import { state, escapeHtml, getFilesEntityContext } from './state.js';
 import { api, toast } from './api.js';
 import { highlightHTML } from '../vendor/speed-highlight/index.js';
 
@@ -171,12 +171,12 @@ export function bindEditorEvents() {
 }
 
 export async function filesOpen(path) {
-  const p = window.getSelectedProject ? window.getSelectedProject() : null;
-  if (!p) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
 
   try {
     toast(`Loading ${path}...`, 'info');
-    const res = await api(`/api/projects/${p.id}/files/content?path=${encodeURIComponent(path)}`, { noCache: true });
+    const res = await api(`${ctx.baseUrl}/content?path=${encodeURIComponent(path)}`, { noCache: true });
     state.filesOpenPath = path;
     state.filesEditorInitialContent = res.content || '';
     state.filesEditorDirty = false;
@@ -200,10 +200,10 @@ export async function filesOpen(path) {
     }
     if (textarea) {
       textarea.value = res.content || '';
-      textarea.readOnly = !hasPower('files_write');
+      textarea.readOnly = !ctx.canWrite;
     }
     const saveBtn = document.getElementById('files-save-btn');
-    if (saveBtn) saveBtn.style.display = hasPower('files_write') ? '' : 'none';
+    if (saveBtn) saveBtn.style.display = ctx.canWrite ? '' : 'none';
     if (dirtyBadge) dirtyBadge.style.display = 'none';
 
     const fmtBytes = window.formatFileBytes || ((b) => `${b} B`);
@@ -309,9 +309,8 @@ export function filesCloseEditor(force = false) {
 }
 
 export async function filesSaveCurrent(andClose = true) {
-  if (!hasPower('files_write')) return;
-  const p = window.getSelectedProject ? window.getSelectedProject() : null;
-  if (!p || !state.filesOpenPath) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx || !ctx.canWrite || !state.filesOpenPath) return;
 
   const btn = document.getElementById('files-save-btn');
   const textarea = document.getElementById('files-editor');
@@ -320,14 +319,14 @@ export async function filesSaveCurrent(andClose = true) {
 
   try {
     const savedPath = state.filesOpenPath;
-    await api(`/api/projects/${p.id}/files/content`, {
+    await api(`${ctx.baseUrl}/content`, {
       method: 'PUT',
       body: { path: savedPath, content: textarea ? textarea.value : '' },
     });
     state.filesEditorInitialContent = textarea ? textarea.value : '';
     state.filesEditorDirty = false;
     if (dirtyBadge) dirtyBadge.style.display = 'none';
-    toast(`Saved ${savedPath}. Restart service to apply changes.`, 'success');
+    toast(`Saved ${savedPath}. Restart ${ctx.kind === 'database' ? 'cluster' : 'service'} if config changed.`, 'success');
 
     if (andClose) {
       filesCloseEditor(true);

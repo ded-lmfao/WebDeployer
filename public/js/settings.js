@@ -264,10 +264,18 @@ export async function loadAuditView() {
   const tbody = document.getElementById('audit-table-body');
   const titleEl = document.getElementById('audit-view-title');
   const subEl = document.getElementById('audit-view-subtitle');
-  const activeProject = window.getSelectedProject?.();
+  const isDb = state.selectedEntityKind === 'database';
+  const activeDb = isDb ? window.getSelectedDatabase?.() : null;
+  const activeProject = !isDb ? window.getSelectedProject?.() : null;
 
   if (titleEl && subEl) {
-    if (activeProject) {
+    if (isDb && activeDb) {
+      titleEl.textContent = `${activeDb.name} — Activity`;
+      subEl.textContent = `Complete timeline of start/stop, restarts, access policies, file edits, and app links on ${activeDb.name}`;
+    } else if (isDb) {
+      titleEl.textContent = 'Database Activity';
+      subEl.textContent = 'Select a database to view its complete activity timeline';
+    } else if (activeProject) {
       titleEl.textContent = `${activeProject.name} — Activity`;
       subEl.textContent = `Complete timeline of who deployed, started/stopped, edited .env, or took snapshots on ${activeProject.name}`;
     } else {
@@ -276,13 +284,20 @@ export async function loadAuditView() {
     }
   }
 
-  if (!activeProject) {
+  if (isDb && !activeDb) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">Select a database first.</td></tr>';
+    return;
+  }
+  if (!isDb && !activeProject) {
     if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 24px;">Select a website first.</td></tr>';
     return;
   }
 
   try {
-    const logs = await api(`/api/audit?projectId=${activeProject.id}&limit=500`);
+    const endpoint = isDb
+      ? `/api/audit?databaseId=${activeDb.id}&limit=500`
+      : `/api/audit?projectId=${activeProject.id}&limit=500`;
+    const logs = await api(endpoint);
     state.auditLogs = Array.isArray(logs) ? logs : [];
     renderFilteredAuditLogs();
   } catch (err) {
@@ -302,7 +317,7 @@ export function renderFilteredAuditLogs() {
     if (cat) {
       if (cat === 'website' && !(action.startsWith('website') || action.startsWith('project.create') || action.startsWith('project.update') || action.startsWith('project.delete'))) {
         return false;
-      } else if (cat === 'container' && !(action.startsWith('container') || action.startsWith('project.start') || action.startsWith('project.stop') || action.startsWith('project.restart'))) {
+      } else if (cat === 'container' && !(action.startsWith('container') || action.startsWith('project.start') || action.startsWith('project.stop') || action.startsWith('project.restart') || action === 'database.start' || action === 'database.stop' || action === 'database.restart')) {
         return false;
       } else if (cat !== 'website' && cat !== 'container' && !action.startsWith(cat)) {
         return false;

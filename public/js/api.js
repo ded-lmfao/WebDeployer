@@ -3,7 +3,7 @@
  * High-performance network requests, stale-while-revalidate client caching, and toasts
  */
 
-import { state, clientCache, inflightGets, persistCacheToSession, getCacheTtlMs, invalidateClientCache } from './state.js';
+import { state, clientCache, inflightGets, persistCacheToSession, getCacheTtlMs, getCacheEpoch, invalidateClientCache } from './state.js';
 
 
 async function networkFetch(path, options = {}) {
@@ -88,10 +88,13 @@ async function api(path, options = {}) {
     if (age <= ttl * 6) {
       // Stale-While-Revalidate -> return cached data in 0ms and refresh silently in background
       if (!inflightGets.has(path)) {
+        const bgEpoch = getCacheEpoch();
         const bgPromise = networkFetch(path, options)
           .then((fresh) => {
-            clientCache.set(path, { data: fresh, ts: Date.now(), ttl });
-            persistCacheToSession();
+            if (getCacheEpoch() === bgEpoch) {
+              clientCache.set(path, { data: fresh, ts: Date.now(), ttl });
+              persistCacheToSession();
+            }
             return fresh;
           })
           .catch(() => {})
@@ -102,24 +105,29 @@ async function api(path, options = {}) {
     }
   }
 
-  // Deduplicate concurrent identical GET requests
-  if (inflightGets.has(path)) {
+  // Deduplicate concurrent identical GET requests unless caller explicitly bypassed cache
+  if (!options.noCache && inflightGets.has(path)) {
     return inflightGets.get(path);
   }
 
+  const reqEpoch = getCacheEpoch();
   const reqPromise = networkFetch(path, options)
     .then((data) => {
-      if (ttl > 0) {
+      if (ttl > 0 && getCacheEpoch() === reqEpoch) {
         clientCache.set(path, { data, ts: Date.now(), ttl });
         persistCacheToSession();
       }
       return data;
     })
     .finally(() => {
-      inflightGets.delete(path);
+      if (inflightGets.get(path) === reqPromise) {
+        inflightGets.delete(path);
+      }
     });
 
-  inflightGets.set(path, reqPromise);
+  if (!options.noCache) {
+    inflightGets.set(path, reqPromise);
+  }
   return reqPromise;
 }
 
@@ -144,6 +152,23 @@ function prefetchWebsiteWorkspace(projectId) {
   }, 10);
 }
 window.prefetchWebsiteWorkspace = prefetchWebsiteWorkspace;
+
+function prefetchDatabaseWorkspace(dbId) {
+  const did = Number(dbId);
+  if (!did) return;
+  const endpoints = [
+    `/api/databases/${did}/files?path=`,
+    `/api/audit?databaseId=${did}&limit=500`,
+  ];
+  setTimeout(() => {
+    for (const url of endpoints) {
+      if (!clientCache.has(url)) {
+        api(url).catch(() => {});
+      }
+    }
+  }, 10);
+}
+window.prefetchDatabaseWorkspace = prefetchDatabaseWorkspace;
 
 // ============================================================================
 // Toasts
@@ -170,4 +195,4 @@ window.api = api;
 window.prefetchWebsiteWorkspace = prefetchWebsiteWorkspace;
 window.toast = toast;
 
-export { networkFetch, api, prefetchWebsiteWorkspace };
+export { networkFetch, api, prefetchWebsiteWorkspace, prefetchDatabaseWorkspace };

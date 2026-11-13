@@ -4,14 +4,24 @@
  */
 
 import { icon } from './icons.js';
-import { state, WEBSITE_WORKSPACE_TABS, invalidateClientCache } from './state.js';
-import { api, toast, prefetchWebsiteWorkspace } from './api.js';
+import {
+  state,
+  WEBSITE_WORKSPACE_TABS,
+  DATABASE_WORKSPACE_TABS,
+  escapeHtml,
+  getSelectedProject,
+  getSelectedDatabase,
+  isProjectOnline,
+  isProjectMaintenance,
+  isDatabaseRunning,
+} from './state.js';
+import { toast, prefetchWebsiteWorkspace, prefetchDatabaseWorkspace } from './api.js';
 
 // Re-export process controls and lifecycle actions submodule
 export * from './workspace_actions.js';
 
-
 function openWebsiteWorkspace(projectId, tab = null) {
+  state.selectedEntityKind = 'project';
   state.selectedProjectId = Number(projectId);
   prefetchWebsiteWorkspace(state.selectedProjectId);
   let targetTab = tab || 'deployments';
@@ -20,7 +30,28 @@ function openWebsiteWorkspace(projectId, tab = null) {
 }
 window.openWebsiteWorkspace = openWebsiteWorkspace;
 
+function openDatabaseWorkspace(dbId, tab = null) {
+  state.selectedEntityKind = 'database';
+  state.selectedDatabaseId = Number(dbId);
+  prefetchDatabaseWorkspace(state.selectedDatabaseId);
+  let targetTab = tab || 'deployments';
+  if (targetTab === 'overview') targetTab = 'deployments';
+  if (!DATABASE_WORKSPACE_TABS.has(targetTab)) targetTab = 'deployments';
+  navigateTo(targetTab, `db-${state.selectedDatabaseId}`);
+}
+window.openDatabaseWorkspace = openDatabaseWorkspace;
+
 function switchWebsiteTab(tab) {
+  if (state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    if (!db) {
+      navigateTo('databases');
+      return;
+    }
+    const targetTab = DATABASE_WORKSPACE_TABS.has(tab) ? tab : 'deployments';
+    navigateTo(targetTab, `db-${db.id}`);
+    return;
+  }
   const p = getSelectedProject();
   if (!p) {
     navigateTo('projects');
@@ -32,18 +63,33 @@ window.switchWebsiteTab = switchWebsiteTab;
 
 let isInternalNavigation = false;
 
-function navigateTo(viewName, projectId = null) {
+function navigateTo(viewName, entityParam = null) {
   if (!state.user || !state.csrf || state.pendingMfaToken) {
     showLogin();
     return;
   }
   if (viewName === 'backups') viewName = 'releases';
   state.currentView = viewName;
-  if (projectId !== null) {
-    state.selectedProjectId = Number(projectId);
+
+  if (typeof entityParam === 'string' && entityParam.startsWith('db-')) {
+    const dbId = Number(entityParam.slice(3));
+    if (dbId) {
+      state.selectedEntityKind = 'database';
+      state.selectedDatabaseId = dbId;
+    }
+  } else if (entityParam !== null && entityParam !== undefined) {
+    state.selectedEntityKind = 'project';
+    state.selectedProjectId = Number(entityParam);
+  } else if (!WEBSITE_WORKSPACE_TABS.has(viewName)) {
+    // Switching back to a top-level view clears database workspace scope
+    state.selectedEntityKind = 'project';
   }
 
-  const targetHash = projectId ? `#/${viewName}/${projectId}` : `#/${viewName}`;
+  let hashParam = entityParam;
+  if (!hashParam && WEBSITE_WORKSPACE_TABS.has(viewName) && state.selectedEntityKind === 'database' && state.selectedDatabaseId) {
+    hashParam = `db-${state.selectedDatabaseId}`;
+  }
+  const targetHash = hashParam ? `#/${viewName}/${hashParam}` : `#/${viewName}`;
   if (window.location.hash !== targetHash) {
     isInternalNavigation = true;
     window.location.hash = targetHash;
@@ -66,10 +112,19 @@ function handleHashRoute() {
   const parts = hash.split('/');
   let view = parts[0] || 'overview';
   if (view === 'backups') view = 'releases';
-  const pid = parts[1] ? Number(parts[1]) : null;
+
+  if (parts[1] && parts[1].startsWith('db-')) {
+    const dbId = Number(parts[1].slice(3));
+    state.selectedEntityKind = 'database';
+    if (dbId) state.selectedDatabaseId = dbId;
+    if (!DATABASE_WORKSPACE_TABS.has(view)) view = 'deployments';
+  } else {
+    state.selectedEntityKind = 'project';
+    const pid = parts[1] ? Number(parts[1]) : null;
+    if (pid) state.selectedProjectId = pid;
+  }
 
   state.currentView = view;
-  if (pid) state.selectedProjectId = pid;
   renderCurrentView();
 }
 window.handleHashRoute = handleHashRoute;
@@ -86,7 +141,6 @@ function updateBreadcrumbs() {
   if (!secEl) return;
 
   const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
-  const p = getSelectedProject();
   const tabLabels = {
     deployments: 'Overview',
     github: 'GitHub & Commits',
@@ -99,6 +153,15 @@ function updateBreadcrumbs() {
     audit: 'Activity',
   };
 
+  if (isInsideCard && state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    if (db) {
+      secEl.innerHTML = `<span style="cursor:pointer; color:var(--text-muted);" onclick="navigateTo('databases')">Databases</span> &rsaquo; <strong style="color:var(--text-main);">${escapeHtml(db.name)}</strong> &rsaquo; <span style="color:var(--accent-light);">${escapeHtml(tabLabels[state.currentView] || state.currentView)}</span>`;
+      return;
+    }
+  }
+
+  const p = getSelectedProject();
   if (isInsideCard && p) {
     const parentView = p.project_kind === 'service' ? 'services' : 'projects';
     const parentLabel = p.project_kind === 'service' ? 'Services' : 'Websites';
@@ -115,21 +178,219 @@ function updateBreadcrumbs() {
   }
 }
 
+function renderDatabaseWorkspaceHeader(banner) {
+  const d = getSelectedDatabase();
+  if (!d) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'block';
+  const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === d.id || x.database_id === d.id));
+  const isRunning = isDatabaseRunning(d, resItem);
+  const isStarting = d.status === 'starting';
+  const isStopping = d.status === 'stopping';
+  const isError = d.status === 'error';
+
+  const dot = document.getElementById('ws-status-dot');
+  if (dot) dot.className = `status-dot ${isRunning ? 'online' : (isStarting || isStopping) ? 'maintenance' : 'offline'}`;
+
+  const title = document.getElementById('ws-project-title');
+  if (title) title.textContent = d.name;
+
+  const breadcrumbSlug = document.getElementById('ws-breadcrumb-slug');
+  if (breadcrumbSlug) breadcrumbSlug.textContent = d.name;
+
+  const backCrumb = document.querySelector('.ws-back-crumb');
+  if (backCrumb) {
+    backCrumb.setAttribute('onclick', "navigateTo('databases')");
+    backCrumb.setAttribute('title', 'Back to Managed Databases');
+    const s = backCrumb.querySelector('span');
+    if (s) s.textContent = 'Databases';
+  }
+
+  const badge = document.getElementById('ws-status-badge');
+  if (badge) {
+    if (isRunning) {
+      badge.className = 'badge badge-success';
+      badge.textContent = 'ONLINE';
+    } else if (isStarting) {
+      badge.className = 'badge badge-warning';
+      badge.textContent = 'STARTING';
+    } else if (isStopping) {
+      badge.className = 'badge badge-warning';
+      badge.textContent = 'STOPPING';
+    } else if (isError) {
+      badge.className = 'badge badge-danger';
+      badge.textContent = 'ERROR';
+    } else {
+      badge.className = 'badge badge-neutral';
+      badge.textContent = 'STOPPED';
+    }
+  }
+
+  const pidFromContainer = (d.containerId || d.container_id || '').startsWith('pid-')
+    ? Number((d.containerId || d.container_id).slice(4))
+    : null;
+  const effectivePid = d.pid || resItem?.pid || pidFromContainer;
+  const diskStr = resItem?.diskFormatted || resItem?.disk_formatted || '';
+  const accessMode = d.accessMode || d.access_mode || 'local';
+  const dbName = d.dbName || d.db_name || 'app';
+  const dbUser = d.dbUser || d.db_user || 'app_user';
+  const linkedName = d.linkedProjectName || d.linked_project_name || '';
+
+  const bannerSig = `db:${d.id}:${d.name}:${d.status}:${isRunning ? 1 : 0}:${d.port}:${accessMode}:${d.domain || ''}:${dbName}:${dbUser}:${linkedName}:${diskStr}:${effectivePid || ''}`;
+  if (state.lastWsBannerSig !== bannerSig) {
+    state.lastWsBannerSig = bannerSig;
+
+    const links = document.getElementById('ws-project-links');
+    if (links) {
+      let accessText = `${icon('lock', { size: 11 })} Localhost`;
+      if (accessMode === 'allowlist') accessText = `${icon('shield', { size: 11 })} IP Whitelist`;
+      else if (accessMode === 'public') accessText = `${icon('globe', { size: 11 })} Public Internet`;
+
+      links.innerHTML = `
+        ${d.domain ? `
+          <span class="ws-meta-item" style="color:var(--accent-light); font-weight:600; display:inline-flex; align-items:center; gap:4px;" title="Assigned Database Domain">
+            ${icon('globe', { size: 12 })}
+            <span>${escapeHtml(d.domain)}</span>
+          </span>
+          <span class="ws-meta-sep">&bull;</span>
+        ` : ''}
+        <span class="ws-meta-item" style="color:var(--accent-light); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+          ${icon('postgres', { size: 14 })}
+          <span>PostgreSQL Cluster</span>
+        </span>
+        <span class="ws-meta-sep">&bull;</span>
+        <span class="ws-meta-item" title="Database &amp; Role">
+          <code class="ws-meta-sha">${escapeHtml(dbUser)}@${escapeHtml(dbName)}</code>
+        </span>
+        ${d.port ? `
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Listening Port">Port <strong style="color:var(--text-main); font-weight:600;">${d.port}</strong></span>
+        ` : ''}
+        ${diskStr ? `
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="On-Disk Storage">Disk <strong style="color:var(--text-main); font-weight:600;">${diskStr}</strong></span>
+        ` : ''}
+        <span class="ws-meta-sep">&bull;</span>
+        <span class="ws-meta-item" title="Configure Network Access &amp; Domain" style="font-size:11px; cursor:pointer;" onclick="openDatabaseAccessModal(${d.id})">${accessText}</span>
+        ${linkedName ? `
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Linked App">Linked <strong style="color:var(--text-main); font-weight:600;">${escapeHtml(linkedName)}</strong></span>
+        ` : ''}
+        ${(isRunning && effectivePid) ? `
+          <span class="ws-meta-sep">&bull;</span>
+          <span class="ws-meta-item" title="Master Postmaster PID">PID <strong style="color:var(--text-main); font-weight:600;">${effectivePid}</strong></span>
+        ` : ''}
+      `;
+    }
+
+    const actions = document.getElementById('ws-project-actions');
+    if (actions) {
+      const canManage = typeof window.hasPower === 'function' ? window.hasPower('databases_manage') : false;
+      const canControl = typeof window.hasAnyPower === 'function' ? window.hasAnyPower(['databases', 'databases_manage']) : false;
+      const canCreds = typeof window.hasAnyPower === 'function' ? window.hasAnyPower(['databases_manage', 'env']) : false;
+      const safeName = escapeHtml(d.name).replace(/'/g, '&#39;');
+      actions.innerHTML = `
+        <div class="ws-actions-group">
+          ${canControl ? `
+            <button class="btn ${isRunning ? 'btn-secondary ws-btn-stop' : 'btn-success ws-btn-start'} btn-sm" id="ws-btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" ${(isStarting || isStopping) ? 'disabled' : ''}>
+              ${isRunning
+                ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg><span>Stop</span>`
+                : isStarting
+                  ? `<span class="btn-spinner"></span><span>Starting...</span>`
+                  : isStopping
+                    ? `<span class="btn-spinner"></span><span>Stopping...</span>`
+                    : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Start</span>`}
+            </button>
+            <button class="btn btn-secondary btn-sm ws-btn-restart" onclick="restartDatabase(${d.id})" title="Restart PostgreSQL cluster" ${(isStarting || isStopping) ? 'disabled' : ''}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
+              <span>Restart</span>
+            </button>
+          ` : ''}
+        </div>
+
+        <div class="ws-actions-group">
+          ${canCreds ? `
+            <button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" title="Connection Strings &amp; Credentials">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+              <span>Connection</span>
+            </button>
+          ` : ''}
+          ${canManage ? `
+            <button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" title="Network Access &amp; Domain">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              <span>Access</span>
+            </button>
+            <button class="btn btn-sm ws-btn-delete" onclick="deleteDatabase(${d.id}, '${safeName}')" title="Delete Database">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }
+  }
+
+  const depTabLabel = document.getElementById('ws-tab-deployments-label');
+  if (depTabLabel) depTabLabel.textContent = 'Overview';
+
+  const dbTabPowerMap = {
+    deployments: ['databases', 'databases_manage'],
+    logs: ['databases', 'databases_manage', 'logs'],
+    files: ['databases', 'databases_manage', 'files', 'files_write'],
+    audit: ['databases', 'databases_manage', 'audit'],
+  };
+
+  const tabsBar = document.getElementById('ws-tabs-bar');
+  let activeBtn = null;
+  document.querySelectorAll('#ws-tabs-bar .ws-tab-item').forEach((btn) => {
+    const tab = btn.getAttribute('data-ws-tab');
+    const isAllowed = DATABASE_WORKSPACE_TABS.has(tab);
+    const reqPowers = dbTabPowerMap[tab];
+    const hasAccess = !reqPowers || (typeof window.hasAnyPower === 'function' ? window.hasAnyPower(reqPowers) : true);
+    const isActive = tab === state.currentView;
+    btn.style.display = (isAllowed && hasAccess) ? '' : 'none';
+    btn.classList.toggle('active', isActive);
+    if (isActive) activeBtn = btn;
+  });
+
+  const activeTabSig = `db:${d.id}:${state.currentView}`;
+  if (tabsBar && activeBtn && state.lastCenteredWsTab !== activeTabSig) {
+    requestAnimationFrame(() => {
+      if (centerActiveWebsiteTab(true)) state.lastCenteredWsTab = activeTabSig;
+      setTimeout(() => {
+        if (centerActiveWebsiteTab(true)) state.lastCenteredWsTab = activeTabSig;
+      }, 80);
+    });
+  }
+}
+
 function renderWebsiteWorkspaceHeader() {
   const banner = document.getElementById('website-workspace-banner');
   if (!banner) return;
 
   const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
+  if (!isInsideCard) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  if (state.selectedEntityKind === 'database') {
+    renderDatabaseWorkspaceHeader(banner);
+    return;
+  }
+
   const p = getSelectedProject();
-  if (!isInsideCard || !p) {
+  if (!p) {
     banner.style.display = 'none';
     return;
   }
 
   banner.style.display = 'block';
   const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
-  const isOnline = p.app_status === 'running' || p.status?.running || resItem?.status === 'running';
-  const isMaintenance = p.app_status === 'maintenance';
+  const isOnline = isProjectOnline(p, resItem);
+  const isMaintenance = isProjectMaintenance(p, resItem);
   const isService = p.project_kind === 'service';
 
   const dot = document.getElementById('ws-status-dot');
@@ -173,7 +434,7 @@ function renderWebsiteWorkspaceHeader() {
   const effectivePid = p.app_pid || p.status?.pid || resItem?.pid;
   const diskStr = resItem?.diskFormatted || resItem?.disk_formatted || '';
 
-  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}:${diskStr}`;
+  const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${isOnline ? 1 : 0}:${isMaintenance ? 1 : 0}:${effectivePid || ''}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}:${p.access_mode || ''}:${p.repo_url || ''}:${diskStr}`;
   if (state.lastWsBannerSig !== bannerSig) {
     state.lastWsBannerSig = bannerSig;
 
@@ -425,9 +686,11 @@ function syncProjectSelectors() {
 // Which kind of item the global "Add" button should create for the current view (null = hide it)
 function getGlobalAddKind() {
   const v = state.currentView;
+  if (v === 'databases') return 'database';
   if (v === 'services') return 'service';
   if (v === 'projects') return 'website';
   if (WEBSITE_WORKSPACE_TABS.has(v)) {
+    if (state.selectedEntityKind === 'database') return 'database';
     const cur = getSelectedProject();
     return cur && cur.project_kind === 'service' ? 'service' : 'website';
   }
@@ -435,7 +698,9 @@ function getGlobalAddKind() {
 }
 
 function globalAddAction() {
-  if (getGlobalAddKind() === 'service') openAddServiceModal();
+  const kind = getGlobalAddKind();
+  if (kind === 'database') openCreateDatabaseModal();
+  else if (kind === 'service') openAddServiceModal();
   else openAddWebsiteModal();
 }
 window.globalAddAction = globalAddAction;
@@ -454,12 +719,17 @@ function renderCurrentView() {
   document.querySelector('.sidebar')?.classList.remove('mobile-open');
   document.getElementById('sidebar-backdrop')?.classList.remove('active');
 
-  // Update sidebar active classes (highlight 'projects' or 'services' when inside a workspace)
+  // Update sidebar active classes (highlight 'projects', 'services', or 'databases' when inside a workspace)
   const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
-  const curP = isInsideCard ? getSelectedProject() : null;
-  const activeSidebarView = isInsideCard
-    ? (curP && curP.project_kind === 'service' ? 'services' : 'projects')
-    : state.currentView;
+  let activeSidebarView = state.currentView;
+  if (isInsideCard) {
+    if (state.selectedEntityKind === 'database') {
+      activeSidebarView = 'databases';
+    } else {
+      const curP = getSelectedProject();
+      activeSidebarView = (curP && curP.project_kind === 'service') ? 'services' : 'projects';
+    }
+  }
   document.querySelectorAll('.nav-item').forEach((item) => {
     item.classList.toggle('active', item.getAttribute('data-view') === activeSidebarView);
   });
@@ -504,6 +774,7 @@ window.renderCurrentView = renderCurrentView;
 
 export {
   openWebsiteWorkspace,
+  openDatabaseWorkspace,
   switchWebsiteTab,
   navigateTo,
   handleHashRoute,

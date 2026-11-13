@@ -3,19 +3,22 @@
  * Renders live per-app CPU, RAM, Network (60fps smooth monotone spline), and Disk metrics.
  */
 
-import { state, getSelectedProject } from './state.js';
+import { state, getSelectedProject, getSelectedDatabase } from './state.js';
 import { api } from './api.js';
 
 const SVG_W = 320;
 const SVG_H = 84;
 const TOP_PAD = 10;
-const BOTTOM_PAD = 8;
+const BOTTOM_PAD = 10;
 const PLOT_BOTTOM = SVG_H - BOTTOM_PAD;
+const Y_ZERO_IN = PLOT_BOTTOM - 2.5;
+const Y_ZERO_OUT = PLOT_BOTTOM;
 const WINDOW_MS = 45000;
 const LAG_MS = 1250;
 const POLL_INTERVAL_MS = 1000;
 
 const _netState = {
+  entityKey: null,
   projectId: null,
   running: false,
   port: null,
@@ -115,14 +118,14 @@ function computeMonotoneTangents(pts) {
   return m;
 }
 
-function buildCubicPaths(pts, m) {
+function buildCubicPaths(pts, m, baseBottom = PLOT_BOTTOM) {
   const n = pts.length;
   if (n === 0) return { line: '', area: '' };
   if (n === 1) {
     const p = pts[0];
     return {
       line: `M${p.x.toFixed(2)},${p.y.toFixed(2)}`,
-      area: `M${p.x.toFixed(2)},${PLOT_BOTTOM} L${p.x.toFixed(2)},${p.y.toFixed(2)} L${p.x.toFixed(2)},${PLOT_BOTTOM} Z`,
+      area: `M${p.x.toFixed(2)},${baseBottom} L${p.x.toFixed(2)},${p.y.toFixed(2)} L${p.x.toFixed(2)},${baseBottom} Z`,
     };
   }
 
@@ -138,7 +141,7 @@ function buildCubicPaths(pts, m) {
 
   const last = pts[n - 1];
   const first = pts[0];
-  const area = `${line} L${last.x.toFixed(2)},${PLOT_BOTTOM} L${first.x.toFixed(2)},${PLOT_BOTTOM} Z`;
+  const area = `${line} L${last.x.toFixed(2)},${baseBottom} L${first.x.toFixed(2)},${baseBottom} Z`;
   return { line, area };
 }
 
@@ -234,29 +237,24 @@ function ensureOnlineChartDom() {
           <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}"></rect>
         </clipPath>
         <linearGradient id="netGradIn" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#34d399" stop-opacity="0.34"/>
+          <stop offset="0%" stop-color="#34d399" stop-opacity="0.32"/>
           <stop offset="100%" stop-color="#34d399" stop-opacity="0.01"/>
         </linearGradient>
         <linearGradient id="netGradOut" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.30"/>
+          <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.28"/>
           <stop offset="100%" stop-color="#60a5fa" stop-opacity="0.01"/>
         </linearGradient>
-        <filter id="netGlow" filterUnits="userSpaceOnUse" x="-10" y="-10" width="${SVG_W + 20}" height="${SVG_H + 20}">
-          <feGaussianBlur stdDeviation="1.3" result="blur"/>
-          <feMerge>
-            <feMergeNode in="blur"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
       </defs>
       <line x1="0" y1="22" x2="${SVG_W}" y2="22" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
-      <line x1="0" y1="48" x2="${SVG_W}" y2="48" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="46" x2="${SVG_W}" y2="46" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
       <line x1="0" y1="${PLOT_BOTTOM}" x2="${SVG_W}" y2="${PLOT_BOTTOM}" stroke="rgba(255,255,255,0.08)"/>
       <g clip-path="url(#app-net-clip)">
         <path id="net-in-area" d="" fill="url(#netGradIn)"/>
         <path id="net-out-area" d="" fill="url(#netGradOut)"/>
-        <path id="net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
-        <path id="net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
+        <path id="net-in-glow" d="" fill="none" stroke="rgba(52, 211, 153, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-out-glow" d="" fill="none" stroke="rgba(96, 165, 250, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>
     <div id="net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
@@ -295,6 +293,8 @@ function drawNetFrame(nowPerf) {
   const samples = _netState.samples;
   const inAreaEl = document.getElementById('net-in-area');
   const outAreaEl = document.getElementById('net-out-area');
+  const inGlowEl = document.getElementById('net-in-glow');
+  const outGlowEl = document.getElementById('net-out-glow');
   const inLineEl = document.getElementById('net-in-line');
   const outLineEl = document.getElementById('net-out-line');
   const inDotEl = document.getElementById('net-in-dot');
@@ -304,14 +304,26 @@ function drawNetFrame(nowPerf) {
   if (!inLineEl || !outLineEl || !inAreaEl || !outAreaEl) return;
 
   if (samples.length < 2) {
-    const flatLine = `M0,${PLOT_BOTTOM} L${SVG_W},${PLOT_BOTTOM}`;
-    const flatArea = `M0,${PLOT_BOTTOM} L${SVG_W},${PLOT_BOTTOM} Z`;
-    inLineEl.setAttribute('d', flatLine);
-    outLineEl.setAttribute('d', flatLine);
-    inAreaEl.setAttribute('d', flatArea);
-    outAreaEl.setAttribute('d', flatArea);
-    if (inDotEl) inDotEl.style.opacity = '0';
-    if (outDotEl) outDotEl.style.opacity = '0';
+    const flatInLine = `M0.00,${Y_ZERO_IN} L${SVG_W}.00,${Y_ZERO_IN}`;
+    const flatOutLine = `M0.00,${Y_ZERO_OUT} L${SVG_W}.00,${Y_ZERO_OUT}`;
+    const flatInArea = `M0.00,${Y_ZERO_IN} L${SVG_W}.00,${Y_ZERO_IN} Z`;
+    const flatOutArea = `M0.00,${Y_ZERO_OUT} L${SVG_W}.00,${Y_ZERO_OUT} Z`;
+    inLineEl.setAttribute('d', flatInLine);
+    outLineEl.setAttribute('d', flatOutLine);
+    if (inGlowEl) inGlowEl.setAttribute('d', flatInLine);
+    if (outGlowEl) outGlowEl.setAttribute('d', flatOutLine);
+    inAreaEl.setAttribute('d', flatInArea);
+    outAreaEl.setAttribute('d', flatOutArea);
+    if (inDotEl) {
+      inDotEl.style.opacity = '1';
+      inDotEl.style.left = '100%';
+      inDotEl.style.top = `${(Y_ZERO_IN / SVG_H) * 100}%`;
+    }
+    if (outDotEl) {
+      outDotEl.style.opacity = '1';
+      outDotEl.style.left = '100%';
+      outDotEl.style.top = `${(Y_ZERO_OUT / SVG_H) * 100}%`;
+    }
     if (peakEl) peakEl.textContent = samples.length === 1 ? 'Sampling...' : 'Starting...';
     _netState.rafId = requestAnimationFrame(drawNetFrame);
     return;
@@ -343,34 +355,35 @@ function drawNetFrame(nowPerf) {
   _netState.displayMaxRate += (targetPeak - _netState.displayMaxRate) * scaleAlpha;
   const maxRate = Math.max(1024, _netState.displayMaxRate);
 
-  const usableH = PLOT_BOTTOM - TOP_PAD;
+  const inUsableH = Y_ZERO_IN - TOP_PAD;
+  const outUsableH = Y_ZERO_OUT - TOP_PAD;
   const ptsIn = [];
   const ptsOut = [];
   for (let i = 0; i < visible.length; i++) {
     const s = visible[i];
     const x = ((s.ts - viewStart) / WINDOW_MS) * SVG_W;
-    const yIn = PLOT_BOTTOM - Math.min(1, s.inboundBps / maxRate) * usableH;
-    const yOut = PLOT_BOTTOM - Math.min(1, s.outboundBps / maxRate) * usableH;
+    const yIn = Y_ZERO_IN - Math.min(1, s.inboundBps / maxRate) * inUsableH;
+    const yOut = Y_ZERO_OUT - Math.min(1, s.outboundBps / maxRate) * outUsableH;
     ptsIn.push({ x, y: yIn });
     ptsOut.push({ x, y: yOut });
   }
 
   if (ptsIn.length === 0) {
     const latest = samples[samples.length - 1];
-    const yInLast = PLOT_BOTTOM - Math.min(1, (latest?.inboundBps || 0) / maxRate) * usableH;
-    const yOutLast = PLOT_BOTTOM - Math.min(1, (latest?.outboundBps || 0) / maxRate) * usableH;
-    ptsIn.push({ x: 0, y: PLOT_BOTTOM }, { x: SVG_W, y: yInLast });
-    ptsOut.push({ x: 0, y: PLOT_BOTTOM }, { x: SVG_W, y: yOutLast });
+    const yInLast = Y_ZERO_IN - Math.min(1, (latest?.inboundBps || 0) / maxRate) * inUsableH;
+    const yOutLast = Y_ZERO_OUT - Math.min(1, (latest?.outboundBps || 0) / maxRate) * outUsableH;
+    ptsIn.push({ x: 0, y: Y_ZERO_IN }, { x: SVG_W, y: yInLast });
+    ptsOut.push({ x: 0, y: Y_ZERO_OUT }, { x: SVG_W, y: yOutLast });
   } else {
-    // Anchor both edges so lines always flow continuously across the full chart width.
+    // Anchor both edges so zero/active lines remain visible continuously across the full width.
     const firstX = ptsIn[0].x;
     if (firstX > 0.5) {
       if (firstX > 6) {
-        ptsIn.unshift({ x: firstX - 3, y: PLOT_BOTTOM });
-        ptsOut.unshift({ x: firstX - 3, y: PLOT_BOTTOM });
+        ptsIn.unshift({ x: firstX - 3, y: Y_ZERO_IN });
+        ptsOut.unshift({ x: firstX - 3, y: Y_ZERO_OUT });
       }
-      ptsIn.unshift({ x: 0, y: PLOT_BOTTOM });
-      ptsOut.unshift({ x: 0, y: PLOT_BOTTOM });
+      ptsIn.unshift({ x: 0, y: Y_ZERO_IN });
+      ptsOut.unshift({ x: 0, y: Y_ZERO_OUT });
     }
     const lastIn = ptsIn[ptsIn.length - 1];
     const lastOut = ptsOut[ptsOut.length - 1];
@@ -382,13 +395,15 @@ function drawNetFrame(nowPerf) {
 
   const mIn = computeMonotoneTangents(ptsIn);
   const mOut = computeMonotoneTangents(ptsOut);
-  const pathsIn = buildCubicPaths(ptsIn, mIn);
-  const pathsOut = buildCubicPaths(ptsOut, mOut);
+  const pathsIn = buildCubicPaths(ptsIn, mIn, Y_ZERO_IN);
+  const pathsOut = buildCubicPaths(ptsOut, mOut, Y_ZERO_OUT);
 
   inAreaEl.setAttribute('d', pathsIn.area);
   outAreaEl.setAttribute('d', pathsOut.area);
   inLineEl.setAttribute('d', pathsIn.line);
   outLineEl.setAttribute('d', pathsOut.line);
+  if (inGlowEl) inGlowEl.setAttribute('d', pathsIn.line);
+  if (outGlowEl) outGlowEl.setAttribute('d', pathsOut.line);
 
   const rightX = Math.max(0, Math.min(SVG_W, ptsIn[ptsIn.length - 1].x));
   const dotYIn = evalMonotoneYAtX(ptsIn, mIn, rightX);
@@ -447,8 +462,30 @@ function startNetChartRaf() {
   }
 }
 
-function applyUsagePayload(p, data) {
-  if (!data || _netState.projectId !== p.id) return;
+function normalizeUsageEntity(entity) {
+  if (!entity || !entity.id) return null;
+  const kind = entity.kind === 'database' || (state.selectedEntityKind === 'database' && entity.project_kind === undefined)
+    ? 'database'
+    : (entity.kind || 'project');
+  return {
+    kind,
+    id: Number(entity.id),
+    entityKey: `${kind}:${entity.id}`,
+    name: entity.name || '',
+  };
+}
+
+function getCurrentUsageEntity() {
+  if (state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    return db ? { kind: 'database', id: Number(db.id), entityKey: `database:${db.id}`, name: db.name } : null;
+  }
+  const p = getSelectedProject();
+  return p ? { kind: 'project', id: Number(p.id), entityKey: `project:${p.id}`, name: p.name } : null;
+}
+
+function applyUsagePayload(entity, data) {
+  if (!data || !entity || _netState.entityKey !== entity.entityKey) return;
 
   const running = !!data.running;
   const cpuPct = Number(data.cpu?.percent || 0);
@@ -490,7 +527,7 @@ function applyUsagePayload(p, data) {
   setText('usage-disk-val', data.disk?.formatted || formatBytesShort(data.disk?.bytes || 0));
   setMeterWidth('usage-disk-bar', diskPct);
   setText('usage-disk-badge', `${diskPct.toFixed(1)}%`);
-  setText('usage-disk-sub', `App & releases • ${vpsFree} free`);
+  setText('usage-disk-sub', `${entity.kind === 'database' ? 'Cluster & WAL' : 'App & releases'} • ${vpsFree} free`);
 
   const net = data.network || {};
   const portOnly = data.port ? `:${data.port}` : '';
@@ -543,14 +580,18 @@ function applyUsagePayload(p, data) {
   startNetChartRaf();
 }
 
-async function fetchProjectUsage(project) {
-  if (!project || _netState.fetchInFlight) return;
+async function fetchProjectUsage(entityInput) {
+  const entity = normalizeUsageEntity(entityInput);
+  if (!entity || _netState.fetchInFlight) return;
   _netState.fetchInFlight = true;
   _netState.lastFetchAt = Date.now();
   try {
-    const data = await api(`/api/projects/${project.id}/usage`, { noCache: true });
-    if (getSelectedProject()?.id === project.id) {
-      applyUsagePayload(project, data);
+    const endpoint = entity.kind === 'database'
+      ? `/api/databases/${entity.id}/usage`
+      : `/api/projects/${entity.id}/usage`;
+    const data = await api(endpoint, { noCache: true });
+    if (getCurrentUsageEntity()?.entityKey === entity.entityKey) {
+      applyUsagePayload(entity, data);
     }
   } catch (err) {
     console.warn('[WebDep] Failed to fetch app usage metrics:', err);
@@ -566,8 +607,8 @@ function ensureAppUsagePoller() {
       stopNetChartRaf();
       return;
     }
-    const p = getSelectedProject();
-    if (!p) {
+    const entity = getCurrentUsageEntity();
+    if (!entity) {
       resetAppUsageCards();
       return;
     }
@@ -575,14 +616,15 @@ function ensureAppUsagePoller() {
       startNetChartRaf();
     }
     if (Date.now() - _netState.lastFetchAt >= POLL_INTERVAL_MS - 120) {
-      void fetchProjectUsage(p);
+      void fetchProjectUsage(entity);
     }
   }, POLL_INTERVAL_MS);
 }
 
-function resetAppUsageCards(projectId = null) {
+function resetAppUsageCards(projectId = null, entityKey = null) {
   stopNetChartRaf();
   stopAppUsagePoller();
+  _netState.entityKey = entityKey;
   _netState.projectId = projectId;
   _netState.running = false;
   _netState.samples = [];
@@ -601,7 +643,7 @@ function resetAppUsageCards(projectId = null) {
   setText('usage-disk-badge', '0%');
   setText('usage-net-in-val', '0 B/s');
   setText('usage-net-out-val', '0 B/s');
-  setText('usage-net-iface', 'App Network');
+  setText('usage-net-iface', '');
   setText('usage-net-totals', '↓ 0 B  ↑ 0 B');
 
   const chartEl = document.getElementById('usage-net-chart');
@@ -612,25 +654,26 @@ function resetAppUsageCards(projectId = null) {
   setOfflinePills(false);
 }
 
-async function loadAppUsageCards(project) {
-  if (!project) {
+async function loadAppUsageCards(entityInput) {
+  const entity = normalizeUsageEntity(entityInput);
+  if (!entity) {
     resetAppUsageCards();
     return;
   }
 
-  const switchedProject = _netState.projectId !== project.id;
-  if (switchedProject) {
-    resetAppUsageCards(project.id);
+  const switchedEntity = _netState.entityKey !== entity.entityKey;
+  if (switchedEntity) {
+    resetAppUsageCards(entity.id, entity.entityKey);
   }
 
   ensureAppUsagePoller();
 
   // Avoid colliding with the 1s sampler when the 4.5s overview poll fires immediately after a 1s tick.
-  if (!switchedProject && Date.now() - _netState.lastFetchAt < 650) {
+  if (!switchedEntity && Date.now() - _netState.lastFetchAt < 650) {
     return;
   }
 
-  await fetchProjectUsage(project);
+  await fetchProjectUsage(entity);
 }
 
 document.addEventListener('visibilitychange', () => {

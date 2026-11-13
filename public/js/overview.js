@@ -170,21 +170,24 @@ function renderResourceBreakdown(resources) {
     const diskPctVal = (r.diskPct || 0).toFixed(1);
     const diskWarm = (r.diskPct || 0) > 20 ? 'hot' : (r.diskPct || 0) > 5 ? 'warm' : '';
 
+    const dbId = r.databaseId ?? r.database_id;
     let actionBtn = '';
     if (r.kind === 'panel') {
-      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'settings\')">Settings &rarr;</button>';
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'settings\')">Settings &rarr;</button>';
     } else if (r.kind === 'database') {
-      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'databases\')">Databases &rarr;</button>';
+      actionBtn = dbId
+        ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openDatabaseWorkspace(${dbId}, 'deployments')">Manage &rarr;</button>`
+        : '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'databases\')">Databases &rarr;</button>';
     } else if (r.kind === 'service') {
-      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'services\')">Services &rarr;</button>';
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'services\')">Services &rarr;</button>';
     } else {
-      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="navigateTo(\'projects\')">Websites &rarr;</button>';
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'projects\')">Websites &rarr;</button>';
     }
 
     const rowClick = pId
       ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${pId})"`
       : (r.kind === 'database'
-        ? 'style="cursor: pointer;" onclick="navigateTo(\'databases\')"'
+        ? (dbId ? `style="cursor: pointer;" onclick="openDatabaseWorkspace(${dbId}, 'deployments')"` : 'style="cursor: pointer;" onclick="navigateTo(\'databases\')"')
         : 'style="cursor: pointer;" onclick="navigateTo(\'settings\')"');
 
     return `

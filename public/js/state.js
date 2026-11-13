@@ -12,7 +12,9 @@ const state = {
   user: null,
   csrf: null,
   currentView: 'overview',
+  selectedEntityKind: 'project',
   selectedProjectId: null,
+  selectedDatabaseId: null,
   projects: [],
   databases: [],
   overview: null,
@@ -23,6 +25,8 @@ const state = {
   logLines: [],
   revealingEnvKey: null,
   projectStatusFilter: 'all',
+  pendingLifecycleProjects: new Set(),
+  pendingLifecycleDatabases: new Set(),
   pages: {
     overviewRecent: 1,
     commits: 1,
@@ -112,6 +116,14 @@ const PIPELINE_STAGES = [
   { id: 'health_checking', label: 'Health Checking' },
 ];
 
+const DB_PIPELINE_STAGES = [
+  { id: 'sandbox', label: 'Sandbox' },
+  { id: 'initdb', label: 'Cluster' },
+  { id: 'security', label: 'Security' },
+  { id: 'spawning', label: 'Engine' },
+  { id: 'healthy', label: 'Online' },
+];
+
 // Application Presets
 const PRESETS = {
   node: {
@@ -179,6 +191,11 @@ const PRESETS = {
 const clientCache = new Map();
 const inflightGets = new Map();
 const SESSION_CACHE_KEY = 'webdep_fast_cache_v3';
+let cacheEpoch = 0;
+
+function getCacheEpoch() {
+  return cacheEpoch;
+}
 
 try {
   sessionStorage.removeItem('webdep_fast_cache_v1');
@@ -229,7 +246,7 @@ function persistCacheToSession() {
 
 function getCacheTtlMs(path) {
   if (path.startsWith('/api/auth/')) return 0; // Always verify live authentication state with server
-  if (path.startsWith('/api/logs') || path.includes('/files/content')) return 0; // Live logs / raw file contents
+  if (path.startsWith('/api/logs') || path.includes('/files/content') || /\/api\/databases\/\d+\/logs/.test(path)) return 0; // Live logs / raw file contents
   if (path.startsWith('/api/databases')) return 3500; // Live database status
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 3000;
   if (path.startsWith('/api/deployments')) return 0; // Live deployment status and pipeline stage
@@ -248,6 +265,7 @@ function hasCachedApi(path) {
 window.hasCachedApi = hasCachedApi;
 
 function invalidateClientCache(prefix = '') {
+  cacheEpoch += 1;
   if (!prefix) {
     clientCache.clear();
     inflightGets.clear();
@@ -268,6 +286,52 @@ function invalidateClientCache(prefix = '') {
   } catch (_) {}
 }
 window.invalidateClientCache = invalidateClientCache;
+
+function isProjectOnline(p, resItem = null) {
+  if (!p) return false;
+  if (p.app_status) {
+    return p.app_status === 'running' || p.status?.running === true;
+  }
+  return Boolean(p.status?.running || resItem?.status === 'running');
+}
+
+function isProjectMaintenance(p, resItem = null) {
+  if (!p) return false;
+  if (p.app_status) {
+    return p.app_status === 'maintenance';
+  }
+  return resItem?.status === 'maintenance';
+}
+
+function isDatabaseRunning(d, resItem = null) {
+  if (!d) return false;
+  if (d.status) {
+    return d.status === 'running';
+  }
+  return resItem?.status === 'running';
+}
+
+function syncOverviewResourceStatus(kind, id, status, pid = undefined) {
+  const resources = state.overview?.resources;
+  if (!Array.isArray(resources)) return;
+  const numId = Number(id);
+  const resItem = resources.find((x) => (
+    kind === 'database'
+      ? Number(x.databaseId ?? x.database_id) === numId
+      : Number(x.projectId ?? x.project_id) === numId
+  ));
+  if (!resItem) return;
+  if (status) {
+    resItem.status = status;
+  }
+  if (status === 'stopped' || status === 'maintenance' || status === 'error') {
+    resItem.pid = null;
+    resItem.cpuPct = 0;
+    resItem.ramBytes = 0;
+  } else if (pid !== undefined) {
+    resItem.pid = pid;
+  }
+}
 
 async function copyTextToClipboard(text, msg = 'Copied to clipboard') {
   try {
@@ -298,6 +362,13 @@ const WEBSITE_WORKSPACE_TABS = new Set([
   'audit',
 ]);
 
+const DATABASE_WORKSPACE_TABS = new Set([
+  'deployments',
+  'logs',
+  'files',
+  'audit',
+]);
+
 // ============================================================================
 const AUDIT_ACTION_META = {
   'deploy.trigger': { label: 'Deploy Triggered', cls: 'badge-info' },
@@ -315,6 +386,22 @@ const AUDIT_ACTION_META = {
   'project.stop': { label: 'Container Stopped', cls: 'badge-danger' },
   'container.restart': { label: 'Container Restarted', cls: 'badge-warning' },
   'project.restart': { label: 'Container Restarted', cls: 'badge-warning' },
+  'database.create': { label: 'Database Created', cls: 'badge-success' },
+  'database.start': { label: 'Database Started', cls: 'badge-success' },
+  'database.stop': { label: 'Database Stopped', cls: 'badge-danger' },
+  'database.restart': { label: 'Database Restarted', cls: 'badge-warning' },
+  'database.access': { label: 'Access Policy Saved', cls: 'badge-info' },
+  'database.link': { label: 'Linked to App', cls: 'badge-info' },
+  'database.unlink': { label: 'Unlinked from App', cls: 'badge-warning' },
+  'database.delete': { label: 'Database Deleted', cls: 'badge-danger' },
+  'database.file.write': { label: 'File Saved', cls: 'badge-info' },
+  'database.file.upload': { label: 'Files Uploaded', cls: 'badge-info' },
+  'database.file.rename': { label: 'File Renamed', cls: 'badge-neutral' },
+  'database.file.delete': { label: 'File Deleted', cls: 'badge-danger' },
+  'file.write': { label: 'File Saved', cls: 'badge-info' },
+  'file.upload': { label: 'Files Uploaded', cls: 'badge-info' },
+  'file.rename': { label: 'File Renamed', cls: 'badge-neutral' },
+  'file.delete': { label: 'File Deleted', cls: 'badge-danger' },
   'env.set': { label: 'Env Variable Saved', cls: 'badge-info' },
   'env.add': { label: 'Env Variable Saved', cls: 'badge-info' },
   'env.bulk_import': { label: 'Bulk .env Imported', cls: 'badge-info' },
@@ -515,6 +602,48 @@ function getSelectedProject() {
   return list.find((p) => p.id === state.selectedProjectId) || list[0] || null;
 }
 
+function getSelectedDatabase() {
+  const list = state.databases || [];
+  return list.find((d) => d.id === state.selectedDatabaseId) || list[0] || null;
+}
+
+function getActiveWorkspaceEntity() {
+  if (state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    return db ? { kind: 'database', id: db.id, name: db.name, db } : null;
+  }
+  const project = getSelectedProject();
+  return project ? { kind: 'project', id: project.id, name: project.name, project } : null;
+}
+
+function getFilesEntityContext() {
+  const hp = typeof window.hasPower === 'function' ? window.hasPower : () => false;
+  if (state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    if (!db) return null;
+    return {
+      kind: 'database',
+      key: `db:${db.id}`,
+      id: db.id,
+      name: db.name,
+      rootLabel: 'data',
+      baseUrl: `/api/databases/${db.id}/files`,
+      canWrite: hp('databases_manage') || (hp('databases') && hp('files_write')),
+    };
+  }
+  const p = getSelectedProject();
+  if (!p) return null;
+  return {
+    kind: 'project',
+    key: `proj:${p.id}`,
+    id: p.id,
+    name: p.name,
+    rootLabel: 'app',
+    baseUrl: `/api/projects/${p.id}/files`,
+    canWrite: hp('files_write'),
+  };
+}
+
 window.state = state;
 window.PAGE_SIZE = PAGE_SIZE;
 window.goToTablePage = goToTablePage;
@@ -533,6 +662,9 @@ window.formatDuration = formatDuration;
 window.setHtmlIfChanged = setHtmlIfChanged;
 window.setBtnLoading = setBtnLoading;
 window.getSelectedProject = getSelectedProject;
+window.getSelectedDatabase = getSelectedDatabase;
+window.getActiveWorkspaceEntity = getActiveWorkspaceEntity;
+window.getFilesEntityContext = getFilesEntityContext;
 
 export {
   PAGE_SIZE,
@@ -541,16 +673,23 @@ export {
   paginateAndRender,
   goToTablePage,
   PIPELINE_STAGES,
+  DB_PIPELINE_STAGES,
   PRESETS,
   WEBSITE_WORKSPACE_TABS,
+  DATABASE_WORKSPACE_TABS,
   AUDIT_ACTION_META,
   clientCache,
   inflightGets,
   SESSION_CACHE_KEY,
   persistCacheToSession,
   getCacheTtlMs,
+  getCacheEpoch,
   hasCachedApi,
   invalidateClientCache,
+  isProjectOnline,
+  isProjectMaintenance,
+  isDatabaseRunning,
+  syncOverviewResourceStatus,
   copyTextToClipboard,
   openModal,
   closeModal,
@@ -565,4 +704,7 @@ export {
   formatDuration,
   setBtnLoading,
   getSelectedProject,
+  getSelectedDatabase,
+  getActiveWorkspaceEntity,
+  getFilesEntityContext,
 };

@@ -4,22 +4,15 @@
  */
 
 import { icon } from './icons.js';
-import { state, escapeHtml } from './state.js';
+import { state, escapeHtml, DB_PIPELINE_STAGES, syncOverviewResourceStatus } from './state.js';
 import { api, toast } from './api.js';
 import { renderPipelineStages } from './deployments.js';
 
 // Re-export database modals submodule for 100% backward compatibility
 export * from './databases_modal.js';
+export { DB_PIPELINE_STAGES };
 
-export const DB_PIPELINE_STAGES = [
-  { id: 'sandbox', label: 'Sandbox' },
-  { id: 'initdb', label: 'Cluster' },
-  { id: 'security', label: 'Security' },
-  { id: 'spawning', label: 'Engine' },
-  { id: 'healthy', label: 'Online' },
-];
-
-export async function loadDatabases() {
+export async function loadDatabases(force = false) {
   if (typeof window.hasAnyPower === 'function' && !window.hasAnyPower(['databases', 'databases_manage'])) {
     state.databases = [];
     const badge = document.getElementById('badge-databases-count');
@@ -27,8 +20,23 @@ export async function loadDatabases() {
     return;
   }
   try {
-    const list = await api('/api/databases');
-    state.databases = Array.isArray(list) ? list : [];
+    const list = await api('/api/databases', force ? { noCache: true } : {});
+    const incoming = Array.isArray(list) ? list : [];
+    const pendingSet = state.pendingLifecycleDatabases;
+    if (!force && pendingSet && pendingSet.size > 0 && Array.isArray(state.databases)) {
+      const prevById = new Map(state.databases.map((d) => [d.id, d]));
+      state.databases = incoming.map((d) => {
+        if (pendingSet.has(d.id) && prevById.has(d.id)) {
+          return { ...d, status: prevById.get(d.id).status };
+        }
+        return d;
+      });
+    } else {
+      state.databases = incoming;
+    }
+    for (const d of state.databases) {
+      syncOverviewResourceStatus('database', d.id, d.status, d.status === 'running' ? (d.pid ?? null) : null);
+    }
     const badge = document.getElementById('badge-databases-count');
     if (badge) badge.textContent = state.databases.length;
   } catch (err) {
@@ -40,23 +48,50 @@ export async function loadDatabases() {
 }
 
 export function renderSingleDatabasePipeline(dbId, currentStage, currentStatus, detailText = '') {
-  const containerId = `db-pipeline-track-${dbId}`;
-  let el = document.getElementById(containerId) || document.getElementById(`db-pipeline-container-${dbId}`);
-  if (!el) return;
-  if (el.id !== containerId) {
-    el.id = containerId;
+  const numericId = Number(dbId);
+  const targets = [`db-pipeline-track-${dbId}`, `db-pipeline-container-${dbId}`];
+  if (
+    state.selectedEntityKind === 'database' &&
+    Number(state.selectedDatabaseId) === numericId &&
+    state.currentView === 'deployments'
+  ) {
+    targets.push('main-pipeline-track');
   }
 
-  renderPipelineStages(containerId, currentStage, currentStatus, null, DB_PIPELINE_STAGES);
+  for (const targetId of targets) {
+    const el = document.getElementById(targetId);
+    if (!el) continue;
 
-  if (currentStatus === 'success') {
-    const subs = el.querySelectorAll('.water-node-sub');
-    if (subs && subs.length > 0) {
-      subs[subs.length - 1].textContent = 'Online';
+    renderPipelineStages(targetId, currentStage, currentStatus, null, DB_PIPELINE_STAGES);
+
+    if (currentStatus === 'success') {
+      const subs = el.querySelectorAll('.water-node-sub');
+      if (subs && subs.length > 0) {
+        subs[subs.length - 1].textContent = 'Online';
+      }
+    } else if (detailText) {
+      const activeSub = el.querySelector('.water-node-vial.active')?.closest('.water-stage-unit')?.querySelector('.water-node-sub');
+      if (activeSub) activeSub.textContent = detailText;
     }
-  } else if (detailText) {
-    const activeSub = el.querySelector('.water-node-vial.active')?.closest('.water-stage-unit')?.querySelector('.water-node-sub');
-    if (activeSub) activeSub.textContent = detailText;
+
+    if (targetId === 'main-pipeline-track') {
+      const pBadge = document.getElementById('pipeline-status-badge');
+      if (pBadge) {
+        if (currentStatus === 'success') {
+          pBadge.textContent = 'ONLINE (LIVE)';
+          pBadge.className = 'badge badge-success';
+        } else if (currentStatus === 'failed') {
+          pBadge.textContent = detailText || 'FAILED';
+          pBadge.className = 'badge badge-danger';
+        } else if (currentStatus === 'running') {
+          pBadge.textContent = detailText || 'RUNNING';
+          pBadge.className = 'badge badge-warning';
+        } else {
+          pBadge.textContent = 'IDLE';
+          pBadge.className = 'badge badge-neutral';
+        }
+      }
+    }
   }
 }
 
@@ -154,20 +189,34 @@ export function renderDatabasesList() {
     const accessMode = d.accessMode || d.access_mode || 'local';
     let accessLabel = 'LOCALHOST ONLY';
     let accessBadgeCls = 'badge-neutral';
+    let accessIconName = 'lock';
     if (accessMode === 'public') {
       accessLabel = 'PUBLIC INTERNET';
       accessBadgeCls = 'badge-warning';
+      accessIconName = 'globe';
     } else if (accessMode === 'allowlist') {
       accessLabel = 'IP WHITELIST';
       accessBadgeCls = 'badge-info';
+      accessIconName = 'shield';
     }
 
+    const dbName = d.dbName || d.db_name || 'app';
+    const dbUser = d.dbUser || d.db_user || 'app_user';
     const hostOrDomain = d.domain ? d.domain : (d.host || '127.0.0.1');
+    const psqlCmd = d.psqlCommand || d.psql_command || `psql -h ${hostOrDomain} -p ${d.port || 5432} -U ${dbUser} -d ${dbName}`;
     const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === d.id || x.database_id === d.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+    const pidFromContainer = (d.containerId || d.container_id || '').startsWith('pid-')
+      ? Number((d.containerId || d.container_id).slice(4))
+      : null;
+    const pidVal = isRunning ? (d.pid || resItem?.pid || pidFromContainer || null) : null;
+    const linkedName = d.linkedProjectName || d.linked_project_name;
+    const subTitle = linkedName
+      ? `PostgreSQL &bull; ${escapeHtml(linkedName)}`
+      : `PostgreSQL Cluster &bull; :${d.port || 5432}`;
 
     return `
-      <div class="project-card database-card" id="database-card-${d.id}">
+      <div class="project-card database-card" id="database-card-${d.id}" style="cursor: pointer;" onclick="openDatabaseWorkspace(${d.id}, 'deployments')">
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
@@ -176,85 +225,53 @@ export function renderDatabasesList() {
             </div>
             <div style="min-width: 0;">
               <div class="project-info-title" style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                <span class="status-dot ${isRunning ? 'online' : 'offline'}"></span>
+                <span class="status-dot ${isRunning ? 'online' : (isStarting || isStopping) ? 'maintenance' : 'offline'}" id="db-card-status-dot-${d.id}"></span>
                 <span>${escapeHtml(d.name)}</span>
               </div>
-              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
-                PostgreSQL Cluster &bull; :${d.port || 5432}
+              <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;" title="${escapeHtml(subTitle)}">
+                ${subTitle}
               </div>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-            ${d.pid ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px;">PID ${d.pid}</span>` : ''}
-            <span class="badge ${statusBadgeCls}" id="db-card-status-badge-${d.id}" style="font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${statusText}</span>
-          </div>
+          <span class="badge ${statusBadgeCls}" id="db-card-status-badge-${d.id}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${statusText}</span>
         </div>
 
-        <!-- Lifecycle Pipeline Track (Replaces connection string) -->
-        <div class="card-pipeline-track" id="db-pipeline-track-${d.id}" style="background: var(--bg-alt); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); margin: 2px 0;"></div>
+        <!-- Command / Endpoint Line -->
+        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 2px 0 0 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
+          <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(psqlCmd)}">
+            $ ${escapeHtml(psqlCmd)}
+          </span>
+          ${pidVal ? `<span class="badge badge-neutral" style="font-size: 9.5px; padding: 1px 6px; flex-shrink: 0;">PID ${pidVal}</span>` : ''}
+        </div>
 
         <!-- Badges & Telemetry Row -->
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
-          <span class="badge ${accessBadgeCls}" style="font-size: 10px;">${icon('lock', { size: 10 })} ${accessLabel}</span>
-          <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">DB: ${escapeHtml(d.dbName || d.db_name || 'app')}</span>
-          <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">USER: ${escapeHtml(d.dbUser || d.db_user || 'app_user')}</span>
-          ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">PORT ${d.port || 5432}</span>
+          <span class="badge ${accessBadgeCls}" style="font-size: 10px; padding: 2px 7px;">${icon(accessIconName, { size: 10 })} ${accessLabel}</span>
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">DB: ${escapeHtml(dbName)}</span>
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">USER: ${escapeHtml(dbUser)}</span>
+          ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
           ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
         </div>
 
         <!-- Actions Footer -->
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: auto;">
-          <div style="display: flex; gap: 6px; align-items: center;">
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 2px;">
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             ${hasAnyPower(['databases', 'databases_manage']) ? `
-              <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
-                <span>${isRunning ? 'Stop' : 'Start'}</span>
+              <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" ${(isStarting || isStopping) ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
+                <span>${isRunning ? 'Stop' : isStarting ? 'Starting...' : isStopping ? 'Stopping...' : 'Start'}</span>
               </button>
             ` : ''}
             ${hasAnyPower(['databases_manage', 'env']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings & Password">Connection</button>` : ''}
-            ${hasAnyPower(['databases', 'databases_manage']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseLogs(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="View PostgreSQL Server Logs">Logs</button>` : ''}
             ${hasPower('databases_manage') ? `<button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Network Access & Domain">Access</button>` : ''}
           </div>
-          ${hasPower('databases_manage') ? `
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDatabase(${d.id}, '${escapeHtml(d.name)}')" style="padding: 4px 8px; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;" title="Delete Database">
-              ${icon('trash', { size: 12 })}
-            </button>
-          ` : ''}
+          <button class="btn btn-primary btn-sm" onclick="openDatabaseWorkspace(${d.id}, 'deployments')" style="padding: 4px 14px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
+            Manage &rarr;
+          </button>
         </div>
       </div>
     `;
   }).join('');
-
-  // Synchronize pipelines for all rendered database cards
-  filtered.forEach((d) => {
-    const isRunning = d.status === 'running';
-    const isStarting = d.status === 'starting';
-    const isStopping = d.status === 'stopping';
-    const isError = d.status === 'error';
-
-    let stage = 'sandbox';
-    let status = 'idle';
-    let detail = '';
-
-    if (isRunning) {
-      stage = 'healthy';
-      status = 'success';
-      detail = 'Online';
-    } else if (isStarting) {
-      stage = 'spawning';
-      status = 'running';
-      detail = 'Starting';
-    } else if (isStopping) {
-      stage = 'spawning';
-      status = 'running';
-      detail = 'Stopping';
-    } else if (isError) {
-      stage = 'spawning';
-      status = 'failed';
-      detail = 'Error';
-    }
-
-    renderSingleDatabasePipeline(d.id, stage, status, detail);
-  });
 }
 
 export function syncDatabaseCardState(id, status) {
@@ -263,16 +280,21 @@ export function syncDatabaseCardState(id, status) {
   const isStopping = status === 'stopping';
   const isError = status === 'error';
 
+  const cardDot = document.getElementById(`db-card-status-dot-${id}`);
+  if (cardDot) {
+    cardDot.className = `status-dot ${isRunning ? 'online' : (isStarting || isStopping) ? 'maintenance' : 'offline'}`;
+  }
+
   const cardBadge = document.getElementById(`db-card-status-badge-${id}`);
   if (cardBadge) {
     if (isRunning) {
-      cardBadge.textContent = 'RUNNING';
+      cardBadge.textContent = 'ONLINE';
       cardBadge.className = 'badge badge-success';
     } else if (isStarting) {
-      cardBadge.textContent = 'STARTING...';
+      cardBadge.textContent = 'STARTING';
       cardBadge.className = 'badge badge-warning';
     } else if (isStopping) {
-      cardBadge.textContent = 'STOPPING...';
+      cardBadge.textContent = 'STOPPING';
       cardBadge.className = 'badge badge-warning';
     } else if (isError) {
       cardBadge.textContent = 'ERROR';
@@ -306,6 +328,13 @@ export function syncDatabaseCardState(id, status) {
     }
   }
 
+  if (state.selectedEntityKind === 'database' && Number(state.selectedDatabaseId) === Number(id)) {
+    state.lastWsBannerSig = null;
+    if (typeof window.renderWebsiteWorkspaceHeader === 'function') {
+      window.renderWebsiteWorkspaceHeader();
+    }
+  }
+
   if (isRunning) {
     renderSingleDatabasePipeline(id, 'healthy', 'success', 'Online');
   } else if (isStarting) {
@@ -320,41 +349,48 @@ export function syncDatabaseCardState(id, status) {
 }
 
 export async function toggleDatabaseState(id) {
-  const dbIndex = (state.databases || []).findIndex((d) => d.id === Number(id));
-  const currentDb = dbIndex !== -1 ? state.databases[dbIndex] : null;
+  const numId = Number(id);
+  const currentDb = (state.databases || []).find((d) => d.id === numId);
   if (!currentDb) return;
 
   const isCurrentlyRunning = currentDb.status === 'running';
+  state.pendingLifecycleDatabases?.add(numId);
 
   if (!isCurrentlyRunning) {
     currentDb.status = 'starting';
-    syncDatabaseCardState(id, 'starting');
+    syncOverviewResourceStatus('database', numId, 'starting');
+    syncDatabaseCardState(numId, 'starting');
 
-    const startPromise = api(`/api/databases/${id}/start`, { method: 'POST', timeoutMs: 25000 });
+    const startPromise = api(`/api/databases/${numId}/start`, { method: 'POST', timeoutMs: 25000 });
 
-    renderSingleDatabasePipeline(id, 'sandbox', 'running', 'CHECKING PORT');
+    renderSingleDatabasePipeline(numId, 'sandbox', 'running', 'CHECKING PORT');
     let t1, t2, t3, t4, t5;
-    t1 = setTimeout(() => renderSingleDatabasePipeline(id, 'initdb', 'running', 'DATA CLUSTER'), 1400);
-    t2 = setTimeout(() => renderSingleDatabasePipeline(id, 'security', 'running', 'SECURITY RULES'), 2800);
-    t3 = setTimeout(() => renderSingleDatabasePipeline(id, 'spawning', 'running', 'SPAWNING ENGINE'), 4200);
+    t1 = setTimeout(() => renderSingleDatabasePipeline(numId, 'initdb', 'running', 'DATA CLUSTER'), 1400);
+    t2 = setTimeout(() => renderSingleDatabasePipeline(numId, 'security', 'running', 'SECURITY RULES'), 2800);
+    t3 = setTimeout(() => renderSingleDatabasePipeline(numId, 'spawning', 'running', 'SPAWNING ENGINE'), 4200);
 
     try {
       const updatedDb = await startPromise;
+      const latestDb = (state.databases || []).find((d) => d.id === numId) || currentDb;
       if (updatedDb && updatedDb.id) {
-        Object.assign(currentDb, updatedDb);
+        Object.assign(latestDb, updatedDb);
       }
+      latestDb.status = updatedDb?.status || 'running';
+      syncOverviewResourceStatus('database', numId, latestDb.status, latestDb.pid ?? null);
+      syncDatabaseCardState(numId, latestDb.status);
 
       t4 = setTimeout(() => {
-        renderSingleDatabasePipeline(id, 'healthy', 'running', 'VERIFYING HEALTH');
+        renderSingleDatabasePipeline(numId, 'healthy', 'running', 'VERIFYING HEALTH');
       }, 5600);
 
       t5 = setTimeout(() => {
-        currentDb.status = 'running';
-        syncDatabaseCardState(id, 'running');
-        renderSingleDatabasePipeline(id, 'healthy', 'success', 'ONLINE (READY)');
-        toast(`PostgreSQL database '${currentDb.name || '#' + id}' is online and ready!`, 'success');
+        const activeDb = (state.databases || []).find((d) => d.id === numId);
+        if (activeDb) activeDb.status = 'running';
+        syncOverviewResourceStatus('database', numId, 'running');
+        syncDatabaseCardState(numId, 'running');
+        renderSingleDatabasePipeline(numId, 'healthy', 'success', 'ONLINE (READY)');
+        toast(`PostgreSQL database '${(activeDb || latestDb).name || '#' + numId}' is online and ready!`, 'success');
       }, 7000);
-
     } catch (err) {
       clearTimeout(t1);
       clearTimeout(t2);
@@ -362,37 +398,92 @@ export async function toggleDatabaseState(id) {
       clearTimeout(t4);
       clearTimeout(t5);
       currentDb.status = 'error';
-      syncDatabaseCardState(id, 'error');
-      renderSingleDatabasePipeline(id, 'spawning', 'failed', 'START FAILED');
+      syncOverviewResourceStatus('database', numId, 'error', null);
+      syncDatabaseCardState(numId, 'error');
+      renderSingleDatabasePipeline(numId, 'spawning', 'failed', 'START FAILED');
       toast(`Failed to start database: ${err.message}`, 'error');
     }
   } else {
     currentDb.status = 'stopping';
-    syncDatabaseCardState(id, 'stopping');
-    renderSingleDatabasePipeline(id, 'spawning', 'running', 'STOPPING ENGINE');
+    syncOverviewResourceStatus('database', numId, 'stopping');
+    syncDatabaseCardState(numId, 'stopping');
+    renderSingleDatabasePipeline(numId, 'spawning', 'running', 'STOPPING ENGINE');
 
     try {
-      const updatedDb = await api(`/api/databases/${id}/stop`, { method: 'POST', timeoutMs: 15000 });
+      const updatedDb = await api(`/api/databases/${numId}/stop`, { method: 'POST', timeoutMs: 15000 });
+      const latestDb = (state.databases || []).find((d) => d.id === numId) || currentDb;
       if (updatedDb && updatedDb.id) {
-        Object.assign(currentDb, updatedDb);
+        Object.assign(latestDb, updatedDb);
       }
-
-      setTimeout(() => {
-        currentDb.status = 'stopped';
-        syncDatabaseCardState(id, 'stopped');
-        renderSingleDatabasePipeline(id, 'sandbox', 'idle', 'IDLE');
-        toast(`Database '${currentDb.name || '#' + id}' stopped successfully!`, 'info');
-      }, 1400);
-
+      latestDb.status = updatedDb?.status || 'stopped';
+      syncOverviewResourceStatus('database', numId, latestDb.status, null);
+      syncDatabaseCardState(numId, latestDb.status);
+      renderSingleDatabasePipeline(numId, 'sandbox', 'idle', 'IDLE');
+      toast(`Database '${latestDb.name || '#' + numId}' stopped successfully!`, 'info');
     } catch (err) {
       currentDb.status = 'error';
-      syncDatabaseCardState(id, 'error');
-      renderSingleDatabasePipeline(id, 'spawning', 'failed', 'STOP FAILED');
+      syncOverviewResourceStatus('database', numId, 'error', null);
+      syncDatabaseCardState(numId, 'error');
+      renderSingleDatabasePipeline(numId, 'spawning', 'failed', 'STOP FAILED');
       toast(`Failed to stop database: ${err.message}`, 'error');
     }
   }
 
-  await loadDatabases();
+  state.pendingLifecycleDatabases?.delete(numId);
+  await loadDatabases(true);
+  if (state.currentView === 'databases') {
+    renderDatabasesList();
+  }
+  if (state.selectedEntityKind === 'database' && Number(state.selectedDatabaseId) === numId) {
+    state.lastWsBannerSig = null;
+    if (typeof window.renderWebsiteWorkspaceHeader === 'function') window.renderWebsiteWorkspaceHeader();
+    if (state.currentView === 'deployments' && typeof window.loadDeploymentsView === 'function') {
+      void window.loadDeploymentsView();
+    }
+  }
+}
+
+export async function restartDatabase(id) {
+  const numId = Number(id);
+  const currentDb = (state.databases || []).find((d) => d.id === numId);
+  if (!currentDb) return;
+
+  state.pendingLifecycleDatabases?.add(numId);
+  currentDb.status = 'starting';
+  syncOverviewResourceStatus('database', numId, 'starting');
+  syncDatabaseCardState(numId, 'starting');
+  renderSingleDatabasePipeline(numId, 'spawning', 'running', 'RESTARTING ENGINE');
+
+  try {
+    const updatedDb = await api(`/api/databases/${numId}/restart`, { method: 'POST', timeoutMs: 25000 });
+    const latestDb = (state.databases || []).find((d) => d.id === numId) || currentDb;
+    if (updatedDb && updatedDb.id) {
+      Object.assign(latestDb, updatedDb);
+    }
+    latestDb.status = updatedDb?.status || 'running';
+    syncOverviewResourceStatus('database', numId, latestDb.status, latestDb.pid ?? null);
+    syncDatabaseCardState(numId, latestDb.status);
+    toast(`PostgreSQL database '${latestDb.name || '#' + numId}' restarted!`, 'success');
+  } catch (err) {
+    currentDb.status = 'error';
+    syncOverviewResourceStatus('database', numId, 'error', null);
+    syncDatabaseCardState(numId, 'error');
+    renderSingleDatabasePipeline(numId, 'spawning', 'failed', 'RESTART FAILED');
+    toast(`Failed to restart database: ${err.message}`, 'error');
+  }
+
+  state.pendingLifecycleDatabases?.delete(numId);
+  await loadDatabases(true);
+  if (state.currentView === 'databases') {
+    renderDatabasesList();
+  }
+  if (state.selectedEntityKind === 'database' && Number(state.selectedDatabaseId) === numId) {
+    state.lastWsBannerSig = null;
+    if (typeof window.renderWebsiteWorkspaceHeader === 'function') window.renderWebsiteWorkspaceHeader();
+    if (state.currentView === 'deployments' && typeof window.loadDeploymentsView === 'function') {
+      void window.loadDeploymentsView();
+    }
+  }
 }
 
 // Bind search and status filters
@@ -411,3 +502,4 @@ window.renderSingleDatabasePipeline = renderSingleDatabasePipeline;
 window.renderDatabasePipeline = renderDatabasePipeline;
 window.syncDatabaseCardState = syncDatabaseCardState;
 window.toggleDatabaseState = toggleDatabaseState;
+window.restartDatabase = restartDatabase;

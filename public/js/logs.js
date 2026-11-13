@@ -3,18 +3,123 @@
  * SSE stream receiver, level filters, live autoscroll, and log exporter
  */
 
-import { state, escapeHtml, copyTextToClipboard, getSelectedProject } from './state.js';
+import { state, escapeHtml, copyTextToClipboard, getSelectedProject, getSelectedDatabase } from './state.js';
 import { api, toast } from './api.js';
 import { navigateTo } from './workspace.js';
+
+let dbLogPollTimer = null;
+
+function stopDbLogPoller() {
+  if (dbLogPollTimer !== null) {
+    clearInterval(dbLogPollTimer);
+    dbLogPollTimer = null;
+  }
+}
+
+async function fetchDatabaseLogLines(db) {
+  const res = await api(`/api/databases/${db.id}/logs`, { noCache: true });
+  if (Array.isArray(res?.entries) && res.entries.length > 0) {
+    return res.entries.map((e, idx) => ({
+      id: e.id || (1000000 + idx),
+      database_id: db.id,
+      ts: e.ts || Date.now(),
+      level: e.level || 'info',
+      channel: e.channel || 'postgres',
+      message: e.message || '',
+    }));
+  }
+  const raw = typeof res?.logs === 'string' ? res.logs : '';
+  const now = Date.now();
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line, idx) => {
+      const upper = line.toUpperCase();
+      let level = 'info';
+      if (upper.includes('FATAL:') || upper.includes('PANIC:') || upper.includes('ERROR:')) level = 'error';
+      else if (upper.includes('WARNING:')) level = 'warn';
+      return {
+        id: 2000000 + idx,
+        database_id: db.id,
+        ts: now,
+        level,
+        channel: 'postgres',
+        message: line,
+      };
+    });
+}
 
 // ============================================================================
 // View 7: Real-Time Live Logs
 // ============================================================================
 async function loadLogsView() {
-  const p = getSelectedProject();
-  // Clear any previous logs so project terminals never show cross-project or stale logs
-  state.logLines = [];
   const terminal = document.getElementById('log-terminal-output');
+  const titleEl = document.getElementById('logs-view-title');
+  const descEl = document.getElementById('logs-view-desc');
+  state.logLines = [];
+
+  if (state.selectedEntityKind === 'database') {
+    if (state.logEventSource) {
+      state.logEventSource.close();
+      state.logEventSource = null;
+    }
+    stopDbLogPoller();
+
+    const db = getSelectedDatabase();
+    if (titleEl) titleEl.textContent = db ? `${db.name} — Logs` : 'Database Logs';
+    if (descEl) descEl.textContent = 'PostgreSQL server logs and container engine lifecycle output (postgresql.log)';
+
+    if (!db) {
+      if (terminal) {
+        terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">--:--:--</span><span class="log-lvl-info">Select a managed database to view its PostgreSQL logs.</span></div>`;
+      }
+      return;
+    }
+
+    if (terminal) {
+      terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">Loading PostgreSQL logs for ${escapeHtml(db.name)}...</span></div>`;
+    }
+
+    try {
+      state.logLines = await fetchDatabaseLogLines(db);
+    } catch (err) {
+      if (terminal) {
+        terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-error">Failed to load PostgreSQL logs: ${escapeHtml(err.message)}</span></div>`;
+      }
+      return;
+    }
+    renderTerminalLogs();
+
+    dbLogPollTimer = setInterval(async () => {
+      if (state.currentView !== 'logs' || state.selectedEntityKind !== 'database') {
+        stopDbLogPoller();
+        return;
+      }
+      if (document.hidden) return;
+      const activeDb = getSelectedDatabase();
+      if (!activeDb || activeDb.id !== db.id) {
+        stopDbLogPoller();
+        return;
+      }
+      try {
+        const nextLines = await fetchDatabaseLogLines(activeDb);
+        const prevLast = state.logLines[state.logLines.length - 1]?.message || '';
+        const nextLast = nextLines[nextLines.length - 1]?.message || '';
+        if (nextLines.length !== state.logLines.length || prevLast !== nextLast) {
+          state.logLines = nextLines;
+          renderTerminalLogs();
+        }
+      } catch (_) {}
+    }, 2500);
+    return;
+  }
+
+  stopDbLogPoller();
+  if (titleEl) titleEl.textContent = 'App Logs';
+  if (descEl) descEl.textContent = 'Live application console output (stdout & stderr)';
+
+  const p = getSelectedProject();
   if (!p) {
     if (state.logEventSource) {
       state.logEventSource.close();
@@ -81,27 +186,34 @@ function renderTerminalLogs() {
   const terminal = document.getElementById('log-terminal-output');
   if (!terminal) return;
 
-  const p = getSelectedProject();
+  const isDb = state.selectedEntityKind === 'database';
+  const db = isDb ? getSelectedDatabase() : null;
+  const p = !isDb ? getSelectedProject() : null;
   const lvlFilter = document.getElementById('log-level-filter')?.value || '';
   const q = (document.getElementById('log-search-input')?.value || '').toLowerCase();
 
   const filtered = state.logLines.filter((l) => {
-    if (p && l.project_id !== p.id) return false;
-    if (l.channel !== 'app') return false;
+    if (isDb) {
+      if (db && l.database_id !== db.id) return false;
+    } else {
+      if (p && l.project_id !== p.id) return false;
+      if (l.channel !== 'app') return false;
+    }
     if (lvlFilter && l.level !== lvlFilter) return false;
     if (q && !(l.message || '').toLowerCase().includes(q)) return false;
     return true;
   });
 
   if (!filtered.length) {
+    const targetName = isDb ? (db?.name || 'database') : (p?.name || 'application');
     const filterNote = (lvlFilter || q)
-      ? `No app log entries match filter (${[lvlFilter, q].filter(Boolean).join(', ')}).`
-      : `Waiting for app logs from ${p?.name || 'application'}...`;
+      ? `No log entries match filter (${[lvlFilter, q].filter(Boolean).join(', ')}).`
+      : `Waiting for logs from ${targetName}...`;
     terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
     return;
   }
 
-  terminal.innerHTML = filtered.map((l) => formatLogLine(l, false)).join('');
+  terminal.innerHTML = filtered.map((l) => formatLogLine(l, isDb)).join('');
   if (document.getElementById('log-autoscroll')?.checked) {
     terminal.scrollTop = terminal.scrollHeight;
   }
@@ -111,17 +223,23 @@ function appendTerminalLogs(newLines) {
   const terminal = document.getElementById('log-terminal-output');
   if (!terminal) return;
 
-  const p = getSelectedProject();
+  const isDb = state.selectedEntityKind === 'database';
+  const db = isDb ? getSelectedDatabase() : null;
+  const p = !isDb ? getSelectedProject() : null;
   const lvlFilter = document.getElementById('log-level-filter')?.value || '';
   const q = (document.getElementById('log-search-input')?.value || '').toLowerCase();
 
   let batchHtml = '';
   for (const l of newLines) {
-    if (p && l.project_id !== p.id) continue;
-    if (l.channel !== 'app') continue;
+    if (isDb) {
+      if (db && l.database_id !== db.id) continue;
+    } else {
+      if (p && l.project_id !== p.id) continue;
+      if (l.channel !== 'app') continue;
+    }
     if (lvlFilter && l.level !== lvlFilter) continue;
     if (q && !(l.message || '').toLowerCase().includes(q)) continue;
-    batchHtml += formatLogLine(l, false);
+    batchHtml += formatLogLine(l, isDb);
   }
 
   if (batchHtml) {
@@ -222,6 +340,26 @@ document.getElementById('logs-copy-btn')?.addEventListener('click', async () => 
 
 // Download logs
 document.getElementById('logs-download-btn')?.addEventListener('click', () => {
+  if (state.selectedEntityKind === 'database') {
+    const db = getSelectedDatabase();
+    if (!db) {
+      toast('Select a database first to download its logs.', 'info');
+      return;
+    }
+    const text = (state.logLines || [])
+      .map((l) => (l.channel ? `[${l.channel}] ${l.message}` : l.message))
+      .join('\n');
+    const blob = new Blob([text || 'No logs recorded yet.\n'], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(db.name || 'postgres').replace(/[^a-zA-Z0-9._-]+/g, '-')}-postgresql.log`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
   const p = getSelectedProject();
   if (!p) {
     toast('Select an app first to download its logs.', 'info');

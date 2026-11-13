@@ -17,8 +17,7 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.14.5">
-  <link rel="stylesheet" href="/style.css?v=3.14.6">
+  <link rel="stylesheet" href="/style.css?v=3.15.0">
 </head>
 
 <body>
@@ -657,8 +656,6 @@
         <section id="view-deployments" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
-              <h1 id="deployments-view-title">Deployments Pipeline</h1>
-              <p id="deployments-view-desc">Automated zero-downtime deployment pipelines and operation history</p>
               <h1 id="deployments-view-title">Overview</h1>
               <p id="deployments-view-desc">Live resource usage, pipeline status, and last 5 deployment records</p>
             </div>
@@ -736,7 +733,6 @@
               </div>
               <div class="app-usage-net-chart" id="usage-net-chart"></div>
               <div class="app-usage-sub app-net-footer">
-                <span id="usage-net-iface">App Network</span>
                 <span id="usage-net-iface"></span>
                 <span id="usage-net-totals" class="app-net-totals">↓ 0 B ↑ 0 B</span>
               </div>
@@ -777,7 +773,7 @@
           </div>
 
           <!-- Deployments History Table -->
-          <div class="card deployments-records-card">
+          <div class="card deployments-records-card" id="deployments-records-card">
             <div class="card-header deployments-records-header">
               <div class="deployments-records-title-group">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -815,6 +811,15 @@
               </div>
               <div class="pagination-bar" id="deployments-pagination"></div>
             </div>
+          </div>
+
+          <!-- Database Connection & Cluster Overview (visible inside Database workspace Overview) -->
+          <div class="card" id="db-overview-details-card" style="display: none;">
+            <div class="card-header">
+              <span class="card-title">PostgreSQL Cluster &amp; Endpoint</span>
+              <span class="badge badge-neutral" id="db-overview-access-badge">LOCALHOST ONLY</span>
+            </div>
+            <div class="card-body" id="db-overview-details-body"></div>
           </div>
         </section>
 
@@ -926,8 +931,8 @@
         <section id="view-logs" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
-              <h1>App Logs</h1>
-              <p>Live application console output (stdout &amp; stderr)</p>
+              <h1 id="logs-view-title">App Logs</h1>
+              <p id="logs-view-desc">Live application console output (stdout &amp; stderr)</p>
             </div>
             <div class="view-actions">
               <button class="btn btn-secondary btn-sm" id="logs-copy-btn" title="Copy all logs to clipboard">
@@ -1859,6 +1864,7 @@
                 <option value="env">Environment (.env)</option>
                 <option value="backup">Backups &amp; Restore</option>
                 <option value="website">Website Settings</option>
+                <option value="database">Database Events</option>
                 <option value="git">Git &amp; Webhooks</option>
                 <option value="domains">Domains &amp; SSL</option>
               </select>
@@ -3188,8 +3194,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.14.5"></script>
-  <script type="module" src="/app.js?v=3.14.6"></script>
+  <script type="module" src="/app.js?v=3.15.0"></script>
 </body>
 
 </html>

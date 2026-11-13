@@ -195,6 +195,8 @@ pub(crate) fn row_to_audit_item(r: &rusqlite::Row, default_target: Option<String
 pub(crate) struct AuditQuery {
     #[serde(rename = "projectId")]
     project_id: Option<i64>,
+    #[serde(rename = "databaseId")]
+    database_id: Option<i64>,
     limit: Option<usize>,
 }
 
@@ -203,10 +205,21 @@ pub(crate) async fn audit_handler(
     headers: HeaderMap,
     Query(q): Query<AuditQuery>,
 ) -> Result<Response, (StatusCode, String)> {
-    let u = verify_power(&state, &headers, "audit", q.project_id)?;
+    let (u, db_opt) = if let Some(db_id) = q.database_id {
+        let (user, db) = crate::api::databases::get_authorized_database(
+            &state,
+            &headers,
+            &["databases", "databases_manage", "audit"],
+            db_id,
+        )?;
+        (user, Some(db))
+    } else {
+        (verify_power(&state, &headers, "audit", q.project_id)?, None)
+    };
     let max_limit = q.limit.unwrap_or(500).min(1000);
     let cache_key = format!(
-        "audit:p{}:u{}:l{}",
+        "audit:d{}:p{}:u{}:l{}",
+        q.database_id.unwrap_or(0),
         q.project_id.unwrap_or(0),
         u.id,
         max_limit
@@ -218,7 +231,28 @@ pub(crate) async fn audit_handler(
     let conn = state.db.lock().unwrap();
 
     let mut list = Vec::new();
-    if let Some(pid) = q.project_id {
+    if let Some(db) = db_opt {
+        let db_tag = format!("DB #{}", db.id);
+        let sql = format!(
+            "SELECT id, project_id, ts, actor, action, target, detail, ip
+             FROM audit
+             WHERE LOWER(COALESCE(target, '')) = LOWER(?1)
+                OR (LOWER(COALESCE(target, '')) = LOWER(?2) AND action LIKE 'database.%')
+             ORDER BY ts DESC, id DESC LIMIT {}",
+            max_limit
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let rows = stmt
+            .query_map(rusqlite::params![db_tag, db.name], |r| {
+                row_to_audit_item(r, Some(db.name.clone()))
+            })
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        for r in rows.flatten() {
+            list.push(r);
+        }
+    } else if let Some(pid) = q.project_id {
         let p_info: Option<(String, String)> = conn
             .query_row("SELECT name, slug FROM projects WHERE id = ?", rusqlite::params![pid], |r| {
                 Ok((r.get(0)?, r.get(1)?))

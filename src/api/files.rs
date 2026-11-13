@@ -15,24 +15,24 @@ use super::common::*;
 #[derive(Deserialize)]
 pub(crate) struct FilesQuery {
     #[serde(default)]
-    path: String,
+    pub(crate) path: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct FileWritePayload {
-    path: String,
-    content: String,
+    pub(crate) path: String,
+    pub(crate) content: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct FileMkdirPayload {
-    path: String,
+    pub(crate) path: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct FileRenamePayload {
-    old_path: String,
-    new_path: String,
+    pub(crate) old_path: String,
+    pub(crate) new_path: String,
 }
 
 pub(crate) fn service_root(p: &crate::projects::Project) -> Result<std::path::PathBuf, (StatusCode, String)> {
@@ -135,7 +135,7 @@ pub(crate) fn touches_dotenv_file(rel: &str) -> bool {
     })
 }
 
-fn ensure_file_env_access(actor: &User, paths: &[&str]) -> Result<(), (StatusCode, String)> {
+pub(crate) fn ensure_file_env_access(actor: &User, paths: &[&str]) -> Result<(), (StatusCode, String)> {
     if actor.has_power("env") {
         return Ok(());
     }
@@ -148,16 +148,13 @@ fn ensure_file_env_access(actor: &User, paths: &[&str]) -> Result<(), (StatusCod
     Ok(())
 }
 
-pub(crate) async fn files_list_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-    Query(q): Query<FilesQuery>,
+/// List directory entries within `root`, enforcing canonical confinement and filtering escaping symlinks.
+pub(crate) async fn list_entries_in_root(
+    root: &std::path::Path,
+    rel_path: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (_actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
-    let root = service_root(&p)?;
-    let dir = safe_join(&root, &q.path)?;
-    let canon_root = ensure_existing_within_root(&root, &dir).await?;
+    let dir = safe_join(root, rel_path)?;
+    let canon_root = ensure_existing_within_root(root, &dir).await?;
     let mut entries = Vec::new();
     let mut rd = tokio::fs::read_dir(&dir)
         .await
@@ -193,20 +190,18 @@ pub(crate) async fn files_list_handler(
             a["name"].as_str().unwrap_or("").to_lowercase().cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
         })
     });
-    Ok(Json(serde_json::json!({ "path": q.path, "entries": entries })))
+    Ok(Json(serde_json::json!({ "path": rel_path, "entries": entries })))
 }
 
-pub(crate) async fn files_read_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-    Query(q): Query<FilesQuery>,
+/// Read UTF-8 file contents (up to 2 MB) confined within `root`.
+pub(crate) async fn read_file_in_root(
+    actor: &User,
+    root: &std::path::Path,
+    rel_path: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
-    ensure_file_env_access(&actor, &[&q.path])?;
-    let root = service_root(&p)?;
-    let file = safe_join(&root, &q.path)?;
-    ensure_existing_within_root(&root, &file).await?;
+    ensure_file_env_access(actor, &[rel_path])?;
+    let file = safe_join(root, rel_path)?;
+    ensure_existing_within_root(root, &file).await?;
     let meta = tokio::fs::metadata(&file)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
@@ -221,23 +216,25 @@ pub(crate) async fn files_read_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let content = String::from_utf8(bytes)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Binary file cannot be displayed".to_string()))?;
-    Ok(Json(serde_json::json!({ "path": q.path, "content": content })))
+    Ok(Json(serde_json::json!({ "path": rel_path, "content": content })))
 }
 
-pub(crate) async fn files_write_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-    Json(payload): Json<FileWritePayload>,
+/// Write a file confined within `root` and append an audit record.
+pub(crate) async fn write_file_in_root(
+    state: &AppState,
+    actor: &User,
+    audit_project_id: Option<i64>,
+    audit_target: &str,
+    audit_action: &str,
+    root: &std::path::Path,
+    payload: FileWritePayload,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
-    ensure_file_env_access(&actor, &[&payload.path])?;
-    let root = service_root(&p)?;
-    let file = safe_join(&root, &payload.path)?;
+    ensure_file_env_access(actor, &[&payload.path])?;
+    let file = safe_join(root, &payload.path)?;
     if file == root {
         return Err((StatusCode::BAD_REQUEST, "Invalid file path".into()));
     }
-    ensure_ancestor_within_root(&root, &file).await?;
+    ensure_ancestor_within_root(root, &file).await?;
     if let Some(parent) = file.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
@@ -245,48 +242,48 @@ pub(crate) async fn files_write_handler(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     log_audit_project(
-        &state,
-        Some(id),
+        state,
+        audit_project_id,
         &actor.username,
-        "file.write",
-        Some(&p.name),
+        audit_action,
+        Some(audit_target),
         Some(&format!("Saved file '{}'", payload.path)),
     );
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-pub(crate) async fn files_mkdir_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-    Json(payload): Json<FileMkdirPayload>,
+/// Create a directory (and missing parents) confined within `root`.
+pub(crate) async fn mkdir_in_root(
+    actor: &User,
+    root: &std::path::Path,
+    payload: FileMkdirPayload,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
-    ensure_file_env_access(&actor, &[&payload.path])?;
-    let root = service_root(&p)?;
-    let dir = safe_join(&root, &payload.path)?;
-    ensure_ancestor_within_root(&root, &dir).await?;
+    ensure_file_env_access(actor, &[&payload.path])?;
+    let dir = safe_join(root, &payload.path)?;
+    ensure_ancestor_within_root(root, &dir).await?;
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-pub(crate) async fn files_delete_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-    Query(q): Query<FilesQuery>,
+/// Delete a file, symlink, or directory confined within `root` and append an audit record.
+pub(crate) async fn delete_in_root(
+    state: &AppState,
+    actor: &User,
+    audit_project_id: Option<i64>,
+    audit_target: &str,
+    audit_action: &str,
+    root: &std::path::Path,
+    rel_path: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
-    ensure_file_env_access(&actor, &[&q.path])?;
-    let root = service_root(&p)?;
-    let target = safe_join(&root, &q.path)?;
+    ensure_file_env_access(actor, &[rel_path])?;
+    let target = safe_join(root, rel_path)?;
     if target == root {
-        return Err((StatusCode::BAD_REQUEST, "Cannot delete the service root".into()));
+        return Err((StatusCode::BAD_REQUEST, "Cannot delete the workspace root".into()));
     }
     if let Some(parent) = target.parent() {
-        ensure_existing_within_root(&root, parent).await?;
+        ensure_existing_within_root(root, parent).await?;
     }
     let meta = tokio::fs::symlink_metadata(&target)
         .await
@@ -294,40 +291,42 @@ pub(crate) async fn files_delete_handler(
     let res = if meta.file_type().is_symlink() {
         tokio::fs::remove_file(&target).await
     } else if meta.is_dir() {
-        ensure_existing_within_root(&root, &target).await?;
+        ensure_existing_within_root(root, &target).await?;
         tokio::fs::remove_dir_all(&target).await
     } else {
-        ensure_existing_within_root(&root, &target).await?;
+        ensure_existing_within_root(root, &target).await?;
         tokio::fs::remove_file(&target).await
     };
     res.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     log_audit_project(
-        &state,
-        Some(id),
+        state,
+        audit_project_id,
         &actor.username,
-        "file.delete",
-        Some(&p.name),
-        Some(&format!("Deleted '{}'", q.path)),
+        audit_action,
+        Some(audit_target),
+        Some(&format!("Deleted '{}'", rel_path)),
     );
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-pub(crate) async fn files_upload_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-    Query(q): Query<FilesQuery>,
+/// Upload multipart files confined within `root` and append an audit record.
+pub(crate) async fn upload_in_root(
+    state: &AppState,
+    actor: &User,
+    audit_project_id: Option<i64>,
+    audit_target: &str,
+    audit_action: &str,
+    root: &std::path::Path,
+    rel_path: &str,
     mut multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
-    ensure_file_env_access(&actor, &[&q.path])?;
-    let root = service_root(&p)?;
-    let target_dir = safe_join(&root, &q.path)?;
-    ensure_ancestor_within_root(&root, &target_dir).await?;
+    ensure_file_env_access(actor, &[rel_path])?;
+    let target_dir = safe_join(root, rel_path)?;
+    ensure_ancestor_within_root(root, &target_dir).await?;
     tokio::fs::create_dir_all(&target_dir)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    ensure_existing_within_root(&root, &target_dir).await?;
+    ensure_existing_within_root(root, &target_dir).await?;
 
     let mut uploaded = Vec::new();
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -335,11 +334,10 @@ pub(crate) async fn files_upload_handler(
             Some(name) if !name.trim().is_empty() => name.to_string(),
             _ => continue,
         };
-        // Normalize any Windows/Unix slashes for directory uploads
         let normalized = file_name.replace('\\', "/");
-        ensure_file_env_access(&actor, &[&normalized])?;
+        ensure_file_env_access(actor, &[&normalized])?;
         let target_file = safe_join(&target_dir, &normalized)?;
-        ensure_ancestor_within_root(&root, &target_file).await?;
+        ensure_ancestor_within_root(root, &target_file).await?;
 
         if let Some(parent) = target_file.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
@@ -355,14 +353,150 @@ pub(crate) async fn files_upload_handler(
         uploaded.push(normalized);
     }
     log_audit_project(
-        &state,
-        Some(id),
+        state,
+        audit_project_id,
         &actor.username,
-        "file.upload",
-        Some(&p.name),
-        Some(&format!("Uploaded {} file(s) into '{}'", uploaded.len(), q.path)),
+        audit_action,
+        Some(audit_target),
+        Some(&format!("Uploaded {} file(s) into '{}'", uploaded.len(), rel_path)),
     );
     Ok(Json(serde_json::json!({ "ok": true, "uploaded": uploaded })))
+}
+
+/// Download a file confined within `root` as an attachment response.
+pub(crate) async fn download_in_root(
+    actor: &User,
+    root: &std::path::Path,
+    rel_path: &str,
+) -> Result<Response, (StatusCode, String)> {
+    ensure_file_env_access(actor, &[rel_path])?;
+    let file = safe_join(root, rel_path)?;
+    ensure_existing_within_root(root, &file).await?;
+    let meta = tokio::fs::metadata(&file)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+    if !meta.is_file() {
+        return Err((StatusCode::BAD_REQUEST, "Not a file".into()));
+    }
+    let file_name = std::path::Path::new(rel_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", file_name.replace('"', "\\\"").replace(['\r', '\n'], "")),
+        )
+        .body(Body::from(bytes))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+/// Rename/move a file or folder confined within `root` and append an audit record.
+pub(crate) async fn rename_in_root(
+    state: &AppState,
+    actor: &User,
+    audit_project_id: Option<i64>,
+    audit_target: &str,
+    audit_action: &str,
+    root: &std::path::Path,
+    payload: FileRenamePayload,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    ensure_file_env_access(actor, &[&payload.old_path, &payload.new_path])?;
+    let old_target = safe_join(root, &payload.old_path)?;
+    let new_target = safe_join(root, &payload.new_path)?;
+    if old_target == root || new_target == root {
+        return Err((StatusCode::BAD_REQUEST, "Invalid path".into()));
+    }
+    if let Some(parent) = old_target.parent() {
+        ensure_existing_within_root(root, parent).await?;
+    }
+    ensure_ancestor_within_root(root, &new_target).await?;
+    if let Some(parent) = new_target.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    tokio::fs::rename(&old_target, &new_target)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    log_audit_project(
+        state,
+        audit_project_id,
+        &actor.username,
+        audit_action,
+        Some(audit_target),
+        Some(&format!("Renamed '{}' to '{}'", payload.old_path, payload.new_path)),
+    );
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub(crate) async fn files_list_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (_actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
+    let root = service_root(&p)?;
+    list_entries_in_root(&root, &q.path).await
+}
+
+pub(crate) async fn files_read_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
+    let root = service_root(&p)?;
+    read_file_in_root(&actor, &root, &q.path).await
+}
+
+pub(crate) async fn files_write_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileWritePayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    let root = service_root(&p)?;
+    write_file_in_root(&state, &actor, Some(id), &p.name, "file.write", &root, payload).await
+}
+
+pub(crate) async fn files_mkdir_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Json(payload): Json<FileMkdirPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    let root = service_root(&p)?;
+    mkdir_in_root(&actor, &root, payload).await
+}
+
+pub(crate) async fn files_delete_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    let root = service_root(&p)?;
+    delete_in_root(&state, &actor, Some(id), &p.name, "file.delete", &root, &q.path).await
+}
+
+pub(crate) async fn files_upload_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+    Query(q): Query<FilesQuery>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
+    let root = service_root(&p)?;
+    upload_in_root(&state, &actor, Some(id), &p.name, "file.upload", &root, &q.path, multipart).await
 }
 
 pub(crate) async fn files_download_handler(
@@ -372,32 +506,8 @@ pub(crate) async fn files_download_handler(
     Query(q): Query<FilesQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let (actor, p) = get_authorized_project_any(&state, &headers, &["files", "files_write"], id)?;
-    ensure_file_env_access(&actor, &[&q.path])?;
     let root = service_root(&p)?;
-    let file = safe_join(&root, &q.path)?;
-    ensure_existing_within_root(&root, &file).await?;
-    let meta = tokio::fs::metadata(&file)
-        .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
-    if !meta.is_file() {
-        return Err((StatusCode::BAD_REQUEST, "Not a file".into()));
-    }
-    let file_name = std::path::Path::new(&q.path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("download");
-    let bytes = tokio::fs::read(&file)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let res = Response::builder()
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", file_name.replace('"', "\\\"").replace(['\r', '\n'], "")),
-        )
-        .body(Body::from(bytes))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(res)
+    download_in_root(&actor, &root, &q.path).await
 }
 
 pub(crate) async fn files_rename_handler(
@@ -407,32 +517,8 @@ pub(crate) async fn files_rename_handler(
     Json(payload): Json<FileRenamePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let (actor, p) = get_authorized_project(&state, &headers, "files_write", id)?;
-    ensure_file_env_access(&actor, &[&payload.old_path, &payload.new_path])?;
     let root = service_root(&p)?;
-    let old_target = safe_join(&root, &payload.old_path)?;
-    let new_target = safe_join(&root, &payload.new_path)?;
-    if old_target == root || new_target == root {
-        return Err((StatusCode::BAD_REQUEST, "Invalid path".into()));
-    }
-    if let Some(parent) = old_target.parent() {
-        ensure_existing_within_root(&root, parent).await?;
-    }
-    ensure_ancestor_within_root(&root, &new_target).await?;
-    if let Some(parent) = new_target.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    tokio::fs::rename(&old_target, &new_target)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    log_audit_project(
-        &state,
-        Some(id),
-        &actor.username,
-        "file.rename",
-        Some(&p.name),
-        Some(&format!("Renamed '{}' to '{}'", payload.old_path, payload.new_path)),
-    );
-    Ok(Json(serde_json::json!({ "ok": true })))
+    rename_in_root(&state, &actor, Some(id), &p.name, "file.rename", &root, payload).await
 }
 
 #[cfg(test)]

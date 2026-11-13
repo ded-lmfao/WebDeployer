@@ -4,9 +4,8 @@
  */
 
 import { icon, FILE_KINDS } from './icons.js';
-import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard } from './state.js';
+import { state, escapeHtml, formatDate, showConfirmDialog, showPromptDialog, copyTextToClipboard, getFilesEntityContext } from './state.js';
 import { api, toast } from './api.js';
-import { getSelectedProject } from './websites.js';
 
 // Re-export editor submodule so imports from './files.js' remain 100% compatible
 export * from './files_editor.js';
@@ -102,11 +101,11 @@ export function getFileMeta(entry) {
 }
 
 export async function loadFilesView() {
-  const p = getSelectedProject();
-  if (!p) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
 
-  if (state.filesProjectId !== p.id) {
-    state.filesProjectId = p.id;
+  if (state.filesProjectId !== ctx.key) {
+    state.filesProjectId = ctx.key;
     state.filesPath = '';
     state.filesFilter = '';
     filesCloseEditor(true);
@@ -119,7 +118,7 @@ export async function loadFilesView() {
   const refreshBtn = document.getElementById('files-refresh-btn');
 
   if (viewTitle) {
-    viewTitle.textContent = `${p.name} — Files & Storage`;
+    viewTitle.textContent = `${ctx.name} — Files & Storage`;
   }
 
   if (refreshBtn) {
@@ -130,7 +129,7 @@ export async function loadFilesView() {
   const parts = state.filesPath ? state.filesPath.split('/').filter(Boolean) : [];
   let crumbHtml = `<a href="javascript:void(0)" class="file-crumb-item ${parts.length === 0 ? 'active' : ''}" onclick="filesGo('')">
     ${icon('folder-open', { size: 14 })}
-    <span>app</span>
+    <span>${escapeHtml(ctx.rootLabel)}</span>
   </a>`;
 
   let acc = '';
@@ -146,16 +145,15 @@ export async function loadFilesView() {
 
   const dropPathLabel = document.getElementById('file-drop-path-label');
   if (dropPathLabel) {
-    dropPathLabel.textContent = `Uploading to /app${state.filesPath ? '/' + state.filesPath : ''}`;
+    dropPathLabel.textContent = `Uploading to /${ctx.rootLabel}${state.filesPath ? '/' + state.filesPath : ''}`;
   }
 
-  const canWriteFiles = hasPower('files_write');
   document.querySelectorAll('.files-write-only').forEach((el) => {
-    el.style.display = canWriteFiles ? '' : 'none';
+    el.style.display = ctx.canWrite ? '' : 'none';
   });
 
   try {
-    const res = await api(`/api/projects/${p.id}/files?path=${encodeURIComponent(state.filesPath)}`, { noCache: true });
+    const res = await api(`${ctx.baseUrl}?path=${encodeURIComponent(state.filesPath)}`, { noCache: true });
     state.filesCachedEntries = res.entries || [];
     renderFilesTable();
     setupFileDropzone();
@@ -172,6 +170,7 @@ export function renderFilesTable() {
   const countBadge = document.getElementById('files-count-badge');
   if (!tableBody) return;
 
+  const canWriteFiles = !!getFilesEntityContext()?.canWrite;
   const q = (state.filesFilter || '').toLowerCase().trim();
   const filtered = state.filesCachedEntries.filter((e) => {
     if (!q) return true;
@@ -247,9 +246,9 @@ export function renderFilesTable() {
         <td style="padding: 8px 16px; text-align: right;">
           <div class="file-actions-cell">
             ${meta.isEditable ? `
-              <button class="file-btn-action" onclick="filesOpen('${safeFull}')" title="${hasPower('files_write') ? 'Edit in code editor' : 'View in code viewer'}">
-                ${icon(hasPower('files_write') ? 'edit' : 'eye', { size: 13 })}
-                <span>${hasPower('files_write') ? 'Edit' : 'View'}</span>
+              <button class="file-btn-action" onclick="filesOpen('${safeFull}')" title="${canWriteFiles ? 'Edit in code editor' : 'View in code viewer'}">
+                ${icon(canWriteFiles ? 'edit' : 'eye', { size: 13 })}
+                <span>${canWriteFiles ? 'Edit' : 'View'}</span>
               </button>
             ` : ''}
             ${!e.is_dir ? `
@@ -258,7 +257,7 @@ export function renderFilesTable() {
                 <span>Download</span>
               </button>
             ` : ''}
-            ${hasPower('files_write') ? `
+            ${canWriteFiles ? `
               <button class="file-btn-action" onclick="filesRename('${safeFull}')" title="Rename item">
                 ${icon('pencil', { size: 13 })}
               </button>
@@ -309,7 +308,9 @@ export function filesGoUp() {
 }
 
 export function filesCopyCurrentPath() {
-  const fullVirtual = `/app${state.filesPath ? '/' + state.filesPath : ''}`;
+  const ctx = getFilesEntityContext();
+  const rootLabel = ctx ? ctx.rootLabel : 'app';
+  const fullVirtual = `/${rootLabel}${state.filesPath ? '/' + state.filesPath : ''}`;
   navigator.clipboard.writeText(fullVirtual).then(() => {
     toast(`Copied path: ${fullVirtual}`, 'success');
   }).catch(() => {
@@ -318,9 +319,9 @@ export function filesCopyCurrentPath() {
 }
 
 export function filesDownload(path) {
-  const p = getSelectedProject();
-  if (!p) return;
-  const url = `/api/projects/${p.id}/files/download?path=${encodeURIComponent(path)}`;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
+  const url = `${ctx.baseUrl}/download?path=${encodeURIComponent(path)}`;
   const a = document.createElement('a');
   a.href = url;
   a.download = path.split('/').pop() || 'download';
@@ -336,8 +337,8 @@ export function filesDownloadCurrent() {
 }
 
 export async function filesRename(path) {
-  const p = getSelectedProject();
-  if (!p) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
 
   const currentName = path.split('/').pop();
   const parentPath = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
@@ -356,7 +357,7 @@ export async function filesRename(path) {
   const newPath = filesJoin(parentPath, newName);
 
   try {
-    await api(`/api/projects/${p.id}/files/rename`, {
+    await api(`${ctx.baseUrl}/rename`, {
       method: 'POST',
       body: { old_path: path, new_path: newPath },
     });
@@ -373,19 +374,19 @@ export async function filesRename(path) {
 }
 
 export async function filesNewFile() {
-  const p = getSelectedProject();
-  if (!p) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
   const input = await showPromptDialog({
     title: 'New File',
-    message: `Create a file in /app${state.filesPath ? '/' + state.filesPath : ''}:`,
-    placeholder: 'e.g. .env, config.json, or start.sh',
+    message: `Create a file in /${ctx.rootLabel}${state.filesPath ? '/' + state.filesPath : ''}:`,
+    placeholder: ctx.kind === 'database' ? 'e.g. notes.sql or custom.conf' : 'e.g. .env, config.json, or start.sh',
     confirmText: 'Create File',
   });
   const name = (input || '').trim();
   if (!name) return;
   const path = filesJoin(state.filesPath, name);
   try {
-    await api(`/api/projects/${p.id}/files/content`, { method: 'PUT', body: { path, content: '' } });
+    await api(`${ctx.baseUrl}/content`, { method: 'PUT', body: { path, content: '' } });
     toast(`Created ${name}`, 'success');
     await loadFilesView();
     await filesOpen(path);
@@ -395,18 +396,18 @@ export async function filesNewFile() {
 }
 
 export async function filesNewFolder() {
-  const p = getSelectedProject();
-  if (!p) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
   const input = await showPromptDialog({
     title: 'New Folder',
-    message: `Create a subfolder in /app${state.filesPath ? '/' + state.filesPath : ''}:`,
+    message: `Create a subfolder in /${ctx.rootLabel}${state.filesPath ? '/' + state.filesPath : ''}:`,
     placeholder: 'e.g. config, assets, or src',
     confirmText: 'Create Folder',
   });
   const name = (input || '').trim();
   if (!name) return;
   try {
-    await api(`/api/projects/${p.id}/files/mkdir`, { method: 'POST', body: { path: filesJoin(state.filesPath, name) } });
+    await api(`${ctx.baseUrl}/mkdir`, { method: 'POST', body: { path: filesJoin(state.filesPath, name) } });
     toast(`Folder "${name}" created`, 'success');
     await loadFilesView();
   } catch (err) {
@@ -415,8 +416,8 @@ export async function filesNewFolder() {
 }
 
 export async function filesDelete(path) {
-  const p = getSelectedProject();
-  if (!p) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx) return;
   const itemName = path.split('/').pop();
   const ok = await showConfirmDialog({
     title: 'Delete File or Folder',
@@ -426,7 +427,7 @@ export async function filesDelete(path) {
   });
   if (!ok) return;
   try {
-    await api(`/api/projects/${p.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    await api(`${ctx.baseUrl}?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
     toast(`Deleted ${itemName}`, 'success');
     if (state.filesOpenPath === path) filesCloseEditor(true);
     await loadFilesView();
@@ -436,8 +437,8 @@ export async function filesDelete(path) {
 }
 
 export async function uploadFileList(files) {
-  const p = getSelectedProject();
-  if (!p || !files || !files.length) return;
+  const ctx = getFilesEntityContext();
+  if (!ctx || !files || !files.length) return;
 
   const formData = new FormData();
   for (let i = 0; i < files.length; i++) {
@@ -448,7 +449,7 @@ export async function uploadFileList(files) {
   try {
     toast(`Uploading ${files.length} file(s)...`, 'info');
     const pathParam = encodeURIComponent(state.filesPath || '');
-    const res = await fetch(`/api/projects/${p.id}/files/upload?path=${pathParam}`, {
+    const res = await fetch(`${ctx.baseUrl}/upload?path=${pathParam}`, {
       method: 'POST',
       headers: {
         'x-csrf-token': state.csrf || '',
@@ -467,7 +468,8 @@ export async function uploadFileList(files) {
 }
 
 export async function handleFilesUpload(e) {
-  if (!hasPower('files_write')) {
+  const ctx = getFilesEntityContext();
+  if (!ctx?.canWrite) {
     if (e.target) e.target.value = '';
     return;
   }
@@ -479,7 +481,7 @@ export async function handleFilesUpload(e) {
 }
 
 export async function handleFolderUpload(e) {
-  if (!hasPower('files_write')) {
+  if (!getFilesEntityContext()?.canWrite) {
     if (e.target) e.target.value = '';
     return;
   }
@@ -499,7 +501,7 @@ export function setupFileDropzone() {
   let dragCounter = 0;
 
   dropzone.addEventListener('dragenter', (e) => {
-    if (state.filesOpenPath || !hasPower('files_write')) return;
+    if (state.filesOpenPath || !getFilesEntityContext()?.canWrite) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter++;
@@ -508,14 +510,14 @@ export function setupFileDropzone() {
   });
 
   dropzone.addEventListener('dragover', (e) => {
-    if (state.filesOpenPath || !hasPower('files_write')) return;
+    if (state.filesOpenPath || !getFilesEntityContext()?.canWrite) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
   });
 
   dropzone.addEventListener('dragleave', (e) => {
-    if (state.filesOpenPath || !hasPower('files_write')) return;
+    if (state.filesOpenPath || !getFilesEntityContext()?.canWrite) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter--;
@@ -532,7 +534,7 @@ export function setupFileDropzone() {
     dragCounter = 0;
     if (overlay) overlay.style.display = 'none';
     dropzone.classList.remove('drag-active');
-    if (!hasPower('files_write')) return;
+    if (!getFilesEntityContext()?.canWrite) return;
 
     const dt = e.dataTransfer;
     if (dt && dt.files && dt.files.length) {

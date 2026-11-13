@@ -140,6 +140,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/databases/:id/link", post(link_database_handler))
         .route("/api/databases/:id/unlink", post(unlink_database_handler))
         .route("/api/databases/:id/logs", get(get_database_logs_handler))
+        .route("/api/databases/:id/usage", get(database_usage_handler))
+        .route("/api/databases/:id/files", get(db_files_list_handler).delete(db_files_delete_handler))
+        .route("/api/databases/:id/files/content", get(db_files_read_handler).put(db_files_write_handler))
+        .route("/api/databases/:id/files/download", get(db_files_download_handler))
+        .route("/api/databases/:id/files/rename", post(db_files_rename_handler))
+        .route("/api/databases/:id/files/mkdir", post(db_files_mkdir_handler))
+        .route(
+            "/api/databases/:id/files/upload",
+            post(db_files_upload_handler).layer(DefaultBodyLimit::max(500 * 1024 * 1024)),
+        )
         .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
         // Static assets fallback
         .fallback(axum_static_fallback)

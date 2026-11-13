@@ -3,8 +3,37 @@
  * Start, stop, restart, auto-deployment redirects, and maintenance mode toggling.
  */
 
-import { state } from './state.js';
+import { state, syncOverviewResourceStatus } from './state.js';
 import { api, toast } from './api.js';
+
+function applyProjectLifecycleState(proj, status, pid = undefined) {
+  if (!proj) return;
+  proj.app_status = status;
+  if (status === 'stopped' || status === 'maintenance') {
+    proj.app_pid = null;
+    if (proj.status && typeof proj.status === 'object') {
+      proj.status = { ...proj.status, running: false, pid: null };
+    }
+  } else if (status === 'running') {
+    if (pid !== undefined) proj.app_pid = pid;
+    if (proj.status && typeof proj.status === 'object') {
+      proj.status = { ...proj.status, running: true, pid: pid !== undefined ? pid : proj.status.pid };
+    }
+  }
+  syncOverviewResourceStatus('project', proj.id, status, pid);
+}
+
+function renderLifecycleViewsNow() {
+  state.lastWsBannerSig = null;
+  if (state.currentView === 'projects' && window.renderProjectsList) window.renderProjectsList();
+  if (state.currentView === 'services' && window.renderServicesList) window.renderServicesList();
+  if (state.currentView === 'databases' && window.renderDatabasesList) window.renderDatabasesList();
+  const wsTabs = window.WEBSITE_WORKSPACE_TABS || new Set(['overview', 'deployments', 'releases', 'env', 'files', 'domains', 'backups', 'logs', 'audit', 'settings']);
+  if (wsTabs.has(state.currentView) && window.renderWebsiteWorkspaceHeader) {
+    state.lastWsBannerSig = null;
+    window.renderWebsiteWorkspaceHeader();
+  }
+}
 
 function setActionButtonsLoading(projectId, activeAction) {
   const allBtns = document.querySelectorAll(
@@ -31,15 +60,13 @@ function setActionButtonsLoading(projectId, activeAction) {
 }
 
 export async function refreshCurrentViewsAfterLifecycle() {
-  state.lastWsBannerSig = null;
+  renderLifecycleViewsNow();
   if (window.loadProjects) await window.loadProjects(true);
-  if (state.currentView === 'projects' && window.renderProjectsList) window.renderProjectsList();
-  if (state.currentView === 'services' && window.renderServicesList) window.renderServicesList();
-  if (state.currentView === 'overview' && window.loadOverview) await window.loadOverview();
-  const wsTabs = window.WEBSITE_WORKSPACE_TABS || new Set(['overview', 'deployments', 'releases', 'env', 'files', 'domains', 'backups', 'logs', 'audit', 'settings']);
-  if (wsTabs.has(state.currentView) && window.renderWebsiteWorkspaceHeader) {
-    state.lastWsBannerSig = null;
-    window.renderWebsiteWorkspaceHeader();
+  renderLifecycleViewsNow();
+  if (state.currentView === 'overview' && window.loadOverview) {
+    await window.loadOverview();
+  } else if (state.currentView === 'deployments' && window.loadDeploymentsView) {
+    await window.loadDeploymentsView();
   }
 }
 
@@ -54,10 +81,11 @@ export function handleAutoDeployedRedirect(res, projectId) {
 
 export async function startProject(projectId) {
   setActionButtonsLoading(projectId, 'start');
+  state.pendingLifecycleProjects?.add(projectId);
 
   const proj = state.projects.find((x) => x.id === projectId);
   if (proj) {
-    proj.app_status = 'starting';
+    applyProjectLifecycleState(proj, 'starting');
     if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
       window.renderSingleServicePipeline(projectId, 'source', 'running', 'CHECKING FILES & PORT');
       setTimeout(() => {
@@ -73,7 +101,7 @@ export async function startProject(projectId) {
     const res = await api(`/api/projects/${projectId}/start`, { method: 'POST' });
     if (handleAutoDeployedRedirect(res, projectId)) return;
     if (proj) {
-      proj.app_status = 'running';
+      applyProjectLifecycleState(proj, 'running', res?.pid);
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
         window.renderSingleServicePipeline(projectId, 'online', 'success', '');
       }
@@ -81,24 +109,27 @@ export async function startProject(projectId) {
     toast('Process started successfully.', 'success');
   } catch (err) {
     if (proj) {
-      proj.app_status = 'stopped';
+      applyProjectLifecycleState(proj, 'stopped', null);
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
         window.renderSingleServicePipeline(projectId, 'daemon', 'failed', 'START FAILED');
       }
     }
     toast(`Start failed: ${err.message}`, 'error');
   } finally {
-    state.lastWsBannerSig = null;
+    state.pendingLifecycleProjects?.delete(projectId);
     await refreshCurrentViewsAfterLifecycle();
   }
 }
 
 export async function stopProject(projectId) {
   setActionButtonsLoading(projectId, 'stop');
+  state.pendingLifecycleProjects?.add(projectId);
 
   const proj = state.projects.find((x) => x.id === projectId);
+  const prevStatus = proj?.app_status || 'running';
+  const prevPid = proj?.app_pid ?? null;
   if (proj) {
-    proj.app_status = 'stopping';
+    applyProjectLifecycleState(proj, 'stopping');
     if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
       window.renderSingleServicePipeline(projectId, 'daemon', 'running', 'STOPPING...');
     }
@@ -107,7 +138,7 @@ export async function stopProject(projectId) {
   try {
     await api(`/api/projects/${projectId}/stop`, { method: 'POST' });
     if (proj) {
-      proj.app_status = 'stopped';
+      applyProjectLifecycleState(proj, 'stopped', null);
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
         window.renderSingleServicePipeline(projectId, 'source', 'idle', 'STOPPED');
       }
@@ -115,48 +146,57 @@ export async function stopProject(projectId) {
     toast('Process stopped successfully.', 'info');
   } catch (err) {
     if (proj) {
-      proj.app_status = 'running';
+      applyProjectLifecycleState(proj, prevStatus, prevPid);
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
         window.renderSingleServicePipeline(projectId, 'online', 'success', '');
       }
     }
     toast(`Stop failed: ${err.message}`, 'error');
   } finally {
-    state.lastWsBannerSig = null;
+    state.pendingLifecycleProjects?.delete(projectId);
     await refreshCurrentViewsAfterLifecycle();
   }
 }
 
 export async function toggleMaintenanceMode(projectId) {
+  state.pendingLifecycleProjects?.add(projectId);
   try {
     const res = await api(`/api/projects/${projectId}/maintenance`, { method: 'POST', body: {} });
+    const proj = state.projects.find((x) => x.id === projectId);
+    const nextStatus = res?.app_status || (res?.maintenance ? 'maintenance' : 'stopped');
+    if (proj) {
+      applyProjectLifecycleState(proj, nextStatus, res?.pid ?? (nextStatus === 'running' ? proj.app_pid : null));
+    }
     if (res && res.maintenance) {
       toast('Maintenance Mode enabled — visitors now see the Under Maintenance page.', 'warning');
     } else {
       toast('Maintenance Mode disabled — live website resumed!', 'success');
     }
-    state.lastWsBannerSig = null;
-    await refreshCurrentViewsAfterLifecycle();
   } catch (err) {
     toast(`Maintenance toggle failed: ${err.message}`, 'error');
+  } finally {
+    state.pendingLifecycleProjects?.delete(projectId);
+    await refreshCurrentViewsAfterLifecycle();
   }
 }
 
 export async function restartProject(projectId) {
   setActionButtonsLoading(projectId, 'restart');
+  state.pendingLifecycleProjects?.add(projectId);
 
   const proj = state.projects.find((x) => x.id === projectId);
-  if (proj) proj.app_status = 'starting';
+  if (proj) applyProjectLifecycleState(proj, 'starting');
 
   try {
     const res = await api(`/api/projects/${projectId}/restart`, { method: 'POST' });
     if (handleAutoDeployedRedirect(res, projectId)) return;
-    if (proj) proj.app_status = 'running';
+    if (proj) applyProjectLifecycleState(proj, 'running', res?.pid);
     toast('Application restarted successfully.', 'success');
   } catch (err) {
+    if (proj) applyProjectLifecycleState(proj, 'stopped', null);
     toast(`Restart failed: ${err.message}`, 'error');
   } finally {
-    state.lastWsBannerSig = null;
+    state.pendingLifecycleProjects?.delete(projectId);
     await refreshCurrentViewsAfterLifecycle();
   }
 }

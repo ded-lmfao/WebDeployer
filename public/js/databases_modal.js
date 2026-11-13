@@ -298,6 +298,13 @@ export async function handleUpdateDatabaseAccessSubmit(e) {
     document.getElementById('modal-database-access')?.classList.remove('active');
     if (window.loadDatabases) await window.loadDatabases();
     if (window.renderDatabasesList) window.renderDatabasesList();
+    if (window.renderWebsiteWorkspaceHeader) {
+      if (window.state) window.state.lastWsBannerSig = null;
+      window.renderWebsiteWorkspaceHeader();
+    }
+    if (window.state?.selectedEntityKind === 'database' && Number(window.state.selectedDatabaseId) === id && window.state.currentView === 'deployments' && window.loadDeploymentsView) {
+      void window.loadDeploymentsView();
+    }
   } catch (err) {
     toast(`Failed to update access: ${err.message}`, 'error');
   }
@@ -316,8 +323,15 @@ export async function deleteDatabase(id, name) {
     toast(`Deleting database '${name}'...`, 'info');
     await api(`/api/databases/${id}`, { method: 'DELETE' });
     toast(`Database '${name}' deleted successfully!`, 'success');
+    const wasInsideDb = window.state?.selectedEntityKind === 'database' && Number(window.state.selectedDatabaseId) === Number(id);
     if (window.loadDatabases) await window.loadDatabases();
-    if (window.renderDatabasesList) window.renderDatabasesList();
+    if (wasInsideDb && window.state) {
+      window.state.selectedDatabaseId = null;
+      window.state.selectedEntityKind = 'project';
+      if (typeof window.navigateTo === 'function') window.navigateTo('databases');
+    } else if (window.renderDatabasesList) {
+      window.renderDatabasesList();
+    }
   } catch (err) {
     toast(`Failed to delete database: ${err.message}`, 'error');
   }
