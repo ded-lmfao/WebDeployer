@@ -209,7 +209,7 @@ async function loadDatabaseOverviewSection(db) {
     stageStatus = 'failed';
     if (badge) { badge.textContent = 'Error'; badge.className = 'badge badge-danger'; }
   } else {
-    if (badge) { badge.textContent = 'Stopped'; badge.className = 'badge badge-neutral'; }
+    if (badge) { badge.textContent = 'Stopped'; badge.className = 'badge badge-danger'; }
   }
   renderPipelineStages('main-pipeline-track', stage, stageStatus, null, DB_PIPELINE_STAGES);
   if (isRunning) {
@@ -268,8 +268,7 @@ async function loadDatabaseOverviewSection(db) {
           <code style="font-size: 12px; color: var(--text-main); word-break: break-all;">${escapeHtml(psqlCmd)}</code>
         </div>
         <div style="display: flex; gap: 6px; flex-shrink: 0;">
-          ${canCreds ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${db.id})">Connection</button>` : ''}
-          ${canManage ? `<button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${db.id})">Access</button>` : ''}
+          ${canCreds ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${db.id})" title="Connection Strings &amp; Credentials">Creds</button>` : ''}
           <button class="btn btn-secondary btn-sm" onclick="switchWebsiteTab('logs')">Logs</button>
           <button class="btn btn-secondary btn-sm" onclick="switchWebsiteTab('files')">Files</button>
         </div>
@@ -305,7 +304,7 @@ async function loadDeploymentsView() {
   }
   if (depDesc) {
     depDesc.textContent = isService
-      ?'Live resource usage, service lifecycle pipeline, and last 5 deployment records'
+      ? 'Live resource usage, service lifecycle pipeline, and last 5 deployment records'
       : 'Live resource usage, deployment pipeline, and last 5 deployment records';
   }
 

@@ -76,6 +76,42 @@ pub struct UpdateDatabaseAccessInput {
     pub domain: Option<String>,
 }
 
+pub fn encode_uri_userinfo_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+pub fn build_postgres_url(
+    db_user: &str,
+    raw_pass: &str,
+    host: &str,
+    port: u16,
+    db_name: &str,
+    external_ssl: bool,
+) -> String {
+    let enc_user = encode_uri_userinfo_component(db_user);
+    let enc_pass = encode_uri_userinfo_component(raw_pass);
+    let enc_db = encode_uri_userinfo_component(db_name);
+    if external_ssl {
+        format!(
+            "postgresql://{}:{}@{}:{}/{}?sslmode=prefer",
+            enc_user, enc_pass, host, port, enc_db
+        )
+    } else {
+        format!(
+            "postgresql://{}:{}@{}:{}/{}",
+            enc_user, enc_pass, host, port, enc_db
+        )
+    }
+}
+
 pub struct Databases {
     db: DbPool,
     vault: Arc<Vault>,
@@ -146,13 +182,13 @@ impl Databases {
                 let updated_at: i64 = r.get(17)?;
 
                 let raw_pass = self.vault.decrypt(&enc_pass).unwrap_or(enc_pass);
-                let internal_url = format!("postgresql://{}:{}@127.0.0.1:{}/{}", db_user, raw_pass, port, db_name);
+                let internal_url = build_postgres_url(&db_user, &raw_pass, "127.0.0.1", port, &db_name, false);
                 let host = if !domain.trim().is_empty() {
                     domain.trim()
                 } else {
                     &self.public_ip
                 };
-                let external_url = format!("postgresql://{}:{}@{}:{}/{}?sslmode=prefer", db_user, raw_pass, host, port, db_name);
+                let external_url = build_postgres_url(&db_user, &raw_pass, host, port, &db_name, true);
                 let psql_command = format!("psql -h {} -p {} -U {} -d {}", host, port, db_user, db_name);
 
                 Ok(ManagedDatabase {
@@ -415,6 +451,7 @@ impl Databases {
         self.start(id).await
     }
 
+    #[allow(dead_code)] // Database network access & domain are locked once created; retained only for legacy schema compatibility
     pub async fn update_access(&self, id: i64, input: UpdateDatabaseAccessInput) -> Result<(), String> {
         let db_rec = self.get(id)?.ok_or_else(|| "Database not found".to_string())?;
         let allowed_ips = input.allowed_ips.unwrap_or_default().trim().to_string();

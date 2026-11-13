@@ -8,6 +8,7 @@
    ========================================================================== */
 
 :root {
+  color-scheme: dark;
   --bg-canvas: #0b101d;
   --bg-sidebar: #070b14;
   --bg-header: #0b101d;
@@ -84,6 +85,13 @@ html, body {
 }
 
 ::selection { background: rgba(79, 142, 247, 0.32); color: #eef1f7; }
+
+html,
+input,
+textarea,
+select {
+  color-scheme: dark;
+}
 
 * { scrollbar-width: thin; scrollbar-color: rgba(238, 241, 247, 0.14) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }

@@ -173,7 +173,7 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
 
     let cache_control = if is_html {
         "no-cache, must-revalidate, private"
-    } else if has_version_query {
+    } else if is_vendor && has_version_query {
         "public, max-age=31536000, immutable"
     } else if is_vendor {
         "public, max-age=604800, stale-while-revalidate=86400"
@@ -274,7 +274,7 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
     let cache_control = if is_html {
         "no-store, no-cache, must-revalidate, private"
-    } else if has_version_query {
+    } else if is_vendor && has_version_query {
         "public, max-age=31536000, immutable"
     } else if is_vendor {
         "public, max-age=604800, stale-while-revalidate=86400"

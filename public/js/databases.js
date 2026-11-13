@@ -170,7 +170,7 @@ export function renderDatabasesList() {
     const isStopping = d.status === 'stopping';
     const isError = d.status === 'error';
 
-    let statusBadgeCls = 'badge-neutral';
+    let statusBadgeCls = 'badge-danger';
     let statusText = 'Stopped';
     if (isRunning) {
       statusBadgeCls = 'badge-success';
@@ -205,15 +205,12 @@ export function renderDatabasesList() {
     const hostOrDomain = d.domain ? d.domain : (d.host || '127.0.0.1');
     const psqlCmd = d.psqlCommand || d.psql_command || `psql -h ${hostOrDomain} -p ${d.port || 5432} -U ${dbUser} -d ${dbName}`;
     const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === d.id || x.database_id === d.id));
-    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+    const diskStr = d.diskFormatted || d.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted;
     const pidFromContainer = (d.containerId || d.container_id || '').startsWith('pid-')
       ? Number((d.containerId || d.container_id).slice(4))
       : null;
     const pidVal = isRunning ? (d.pid || resItem?.pid || pidFromContainer || null) : null;
-    const linkedName = d.linkedProjectName || d.linked_project_name;
-    const subTitle = linkedName
-      ? `PostgreSQL &bull; ${escapeHtml(linkedName)}`
-      : `PostgreSQL Cluster &bull; ${d.port || 5432}`;
+    const subTitle = 'PostgreSQL Cluster';
 
     return `
       <div class="project-card database-card" id="database-card-${d.id}" style="cursor: pointer;" onclick="openDatabaseWorkspace(${d.id}, 'deployments')">
@@ -253,15 +250,16 @@ export function renderDatabasesList() {
         </div>
 
         <!-- Actions Footer -->
-        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 2px;">
+        <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; margin-top: 2px;">
           <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             ${hasAnyPower(['databases', 'databases_manage']) ? `
               <button class="btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm" id="btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" ${(isStarting || isStopping) ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11.5px;" title="${isRunning ? 'Stop Database' : 'Start Database'}">
                 <span>${isRunning ? 'Stop' : isStarting ? 'Starting' : isStopping ? 'Stopping' : 'Start'}</span>
               </button>
+              <button class="btn btn-secondary btn-sm" onclick="openDatabaseWorkspace(${d.id}, 'files')" style="padding: 4px 10px; font-size: 11.5px;" title="Cluster Files (Read-Only)">Files</button>
+              <button class="btn btn-secondary btn-sm" onclick="openDatabaseWorkspace(${d.id}, 'logs')" style="padding: 4px 10px; font-size: 11.5px;" title="PostgreSQL Logs">Logs</button>
             ` : ''}
-            ${hasAnyPower(['databases_manage', 'env']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings & Password">Connection</button>` : ''}
-            ${hasPower('databases_manage') ? `<button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Network Access & Domain">Access</button>` : ''}
+            ${hasAnyPower(['databases_manage', 'env']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings &amp; Credentials">Creds</button>` : ''}
           </div>
           <button class="btn btn-primary btn-sm" onclick="openDatabaseWorkspace(${d.id}, 'deployments')" style="padding: 4px 12px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
             Manage &rarr;
@@ -299,7 +297,7 @@ export function syncDatabaseCardState(id, status) {
       cardBadge.className = 'badge badge-danger';
     } else {
       cardBadge.textContent = 'Stopped';
-      cardBadge.className = 'badge badge-neutral';
+      cardBadge.className = 'badge badge-danger';
     }
   }
 

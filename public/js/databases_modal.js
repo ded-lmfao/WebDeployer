@@ -40,7 +40,7 @@ export function openCreateDatabaseModal() {
 }
 
 export function generateRandomDbPassword(targetInputId) {
-  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_=+';
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789-_.~';
   const array = new Uint8Array(24);
   window.crypto.getRandomValues(array);
   let pass = '';
@@ -231,7 +231,11 @@ export async function showDatabaseLogs(id) {
   if (badge) {
     const st = db?.status ? String(db.status) : '';
     badge.textContent = st ? (st.charAt(0).toUpperCase() + st.slice(1)) : 'Logs';
-    badge.className = db?.status === 'running' ? 'badge badge-success' : (db?.status === 'error' ? 'badge badge-danger' : 'badge badge-neutral');
+    badge.className = db?.status === 'running'
+      ? 'badge badge-success'
+      : (db?.status === 'starting' || db?.status === 'stopping')
+        ? 'badge badge-warning'
+        : (st ? 'badge badge-danger' : 'badge badge-neutral');
   }
 
   pre.textContent = 'Loading PostgreSQL server logs';
@@ -256,58 +260,6 @@ export function copyDatabaseLogs() {
   const pre = document.getElementById('db-logs-content');
   if (pre) {
     void copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard.');
-  }
-}
-
-export function openDatabaseAccessModal(id) {
-  const db = (state.databases || []).find((d) => d.id === Number(id));
-  if (!db) return;
-
-  const modal = document.getElementById('modal-database-access');
-  if (!modal) return;
-
-  const idEl = document.getElementById('db-access-id');
-  if (idEl) idEl.value = db.id;
-  const domInput = document.getElementById('db-access-domain');
-  if (domInput) domInput.value = db.domain || '';
-  const accInput = document.getElementById('db-access-mode');
-  if (accInput) accInput.value = db.accessMode || db.access_mode || 'local';
-  const ipsInput = document.getElementById('db-access-allowed-ips');
-  if (ipsInput) ipsInput.value = db.allowedIps || db.allowed_ips || '';
-  toggleDatabaseAccessIpFields('db-access-mode', 'db-access-allowed-ips-wrap');
-
-  modal.classList.add('active');
-}
-
-export async function handleUpdateDatabaseAccessSubmit(e) {
-  e.preventDefault();
-  const id = Number(document.getElementById('db-access-id')?.value);
-  const domain = document.getElementById('db-access-domain')?.value.trim() || '';
-  const access_mode = document.getElementById('db-access-mode')?.value || 'local';
-  const allowed_ips = document.getElementById('db-access-allowed-ips')?.value.trim() || '';
-
-  try {
-    await api(`/api/databases/${id}/access`, {
-      method: 'PUT',
-      body: {
-        accessMode: access_mode,
-        allowedIps: allowed_ips,
-        domain: domain,
-      },
-    });
-    toast('Network access and domain settings updated.', 'success');
-    document.getElementById('modal-database-access')?.classList.remove('active');
-    if (window.loadDatabases) await window.loadDatabases();
-    if (window.renderDatabasesList) window.renderDatabasesList();
-    if (window.renderWebsiteWorkspaceHeader) {
-      if (window.state) window.state.lastWsBannerSig = null;
-      window.renderWebsiteWorkspaceHeader();
-    }
-    if (window.state?.selectedEntityKind === 'database' && Number(window.state.selectedDatabaseId) === id && window.state.currentView === 'deployments' && window.loadDeploymentsView) {
-      void window.loadDeploymentsView();
-    }
-  } catch (err) {
-    toast(`Failed to update access: ${err.message}`, 'error');
   }
 }
 
@@ -354,8 +306,6 @@ window.showDatabaseDetails = showDatabaseDetails;
 window.showDatabaseLogs = showDatabaseLogs;
 window.refreshCurrentDatabaseLogs = refreshCurrentDatabaseLogs;
 window.copyDatabaseLogs = copyDatabaseLogs;
-window.openDatabaseAccessModal = openDatabaseAccessModal;
-window.handleUpdateDatabaseAccessSubmit = handleUpdateDatabaseAccessSubmit;
 window.deleteDatabase = deleteDatabase;
 window.copyElementValue = copyElementValue;
 

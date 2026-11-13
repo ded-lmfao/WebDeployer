@@ -128,6 +128,46 @@ pub(crate) fn format_resource_bytes(bytes: u64) -> String {
     }
 }
 
+pub(crate) fn resolve_workspace_path(raw: &str, cwd: &std::path::Path) -> Option<std::path::PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let p = std::path::Path::new(trimmed);
+    if p.is_absolute() {
+        Some(p.to_path_buf())
+    } else {
+        Some(cwd.join(trimmed.trim_start_matches("./").trim_start_matches(".\\")))
+    }
+}
+
+pub(crate) fn compute_project_disk_formatted(p: &Project, cwd: &std::path::Path) -> (u64, String) {
+    let deploy_dir = resolve_workspace_path(&p.deploy_dir, cwd);
+    let deploy_size = deploy_dir
+        .as_deref()
+        .map(crate::monitor::get_path_disk_size)
+        .unwrap_or(0);
+    let container_dir = cwd.join("data").join("containers").join(&p.slug);
+    let container_size = if deploy_dir.as_ref() != Some(&container_dir) {
+        crate::monitor::get_path_disk_size(&container_dir)
+    } else {
+        0
+    };
+    let bytes = deploy_size.saturating_add(container_size);
+    (bytes, format_resource_bytes(bytes))
+}
+
+pub(crate) fn compute_database_disk_formatted(
+    db: &crate::databases::ManagedDatabase,
+    cwd: &std::path::Path,
+) -> (u64, String) {
+    let bytes = resolve_workspace_path(&db.data_dir, cwd)
+        .as_deref()
+        .map(crate::monitor::get_path_disk_size)
+        .unwrap_or(0);
+    (bytes, format_resource_bytes(bytes))
+}
+
 pub(crate) fn fetch_overview_deployment(
     conn: &rusqlite::Connection,
     status_filter: &str,
@@ -309,16 +349,7 @@ pub(crate) async fn overview_handler(
             "0 MB".to_string()
         };
 
-        let deploy_dir = std::path::Path::new(&p.deploy_dir);
-        let deploy_size = crate::monitor::get_path_disk_size(deploy_dir);
-        let container_dir = cwd.join("data").join("containers").join(&p.slug);
-        let container_size = if container_dir.as_path() != deploy_dir {
-            crate::monitor::get_path_disk_size(&container_dir)
-        } else {
-            0
-        };
-        let disk_bytes = deploy_size.saturating_add(container_size);
-        let disk_fmt = format_resource_bytes(disk_bytes);
+        let (disk_bytes, disk_fmt) = compute_project_disk_formatted(&p, &cwd);
         let disk_pct = ((disk_bytes as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 
         let (last_success, active) = {
@@ -401,9 +432,7 @@ pub(crate) async fn overview_handler(
             "0 MB".to_string()
         };
 
-        let db_dir = std::path::Path::new(&db.data_dir);
-        let db_disk = crate::monitor::get_path_disk_size(db_dir);
-        let db_disk_fmt = format_resource_bytes(db_disk);
+        let (db_disk, db_disk_fmt) = compute_database_disk_formatted(&db, &cwd);
         let db_disk_pct = ((db_disk as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 
         resources.push(ResourceItem {

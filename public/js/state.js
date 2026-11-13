@@ -629,7 +629,7 @@ function getFilesEntityContext() {
       name: db.name,
       rootLabel: 'data',
       baseUrl: `/api/databases/${db.id}/files`,
-      canWrite: hp('databases_manage') || (hp('databases') && hp('files_write')),
+      canWrite: false,
     };
   }
   const p = getSelectedProject();

@@ -145,7 +145,7 @@ function renderProjectsList() {
     const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7) : (p.deployedSha ? p.deployedSha.slice(0, 7) : '');
     const branchText = p.branch || 'main';
 
-    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+    const diskStr = p.diskFormatted || p.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted;
     const pidVal = (isOnline && (p.app_pid || p.status?.pid || resItem?.pid)) ? (p.app_pid || p.status?.pid || resItem?.pid) : null;
 
     let accessBadge = `<span class="badge badge-neutral" style="font-size: 10px;">${icon('lock', { size: 10 })} Localhost</span>`;
@@ -193,12 +193,7 @@ function renderProjectsList() {
       typeName = p.project_type;
     }
 
-    let subTitle = typeName;
-    if (p.slug && p.slug !== p.name.toLowerCase()) {
-      subTitle = `${typeName} &bull; ${escapeHtml(p.slug)}`;
-    } else if (p.branch) {
-      subTitle = `${typeName} &bull; ${escapeHtml(p.branch)}`;
-    }
+    const subTitle = typeName;
 
     return `
       <div class="project-card website-card" id="project-card-${p.id}" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
@@ -214,12 +209,12 @@ function renderProjectsList() {
                 <span>${escapeHtml(p.name)}</span>
               </div>
               <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;" title="${escapeHtml(subTitle)}">
-                ${subTitle}
+                ${escapeHtml(subTitle)}
               </div>
             </div>
           </div>
           <span class="badge ${isOnline ? 'badge-success' : isMaintenance ? 'badge-warning' : 'badge-danger'}" style="flex-shrink: 0; font-size: 11px; font-weight: 500; padding: 2px 8px;">
-            ${isOnline ? 'Online' : isMaintenance ? 'Maintenance' : 'Offline'}
+            ${isOnline ? 'Online' : isMaintenance ? 'Maintenance' : 'Stopped'}
           </span>
         </div>
 

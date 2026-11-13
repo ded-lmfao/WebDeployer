@@ -145,7 +145,7 @@ export function renderServicesList() {
     const isOnline = p.app_status === 'running' || p.status?.running;
     const isBuilding = p.deployStatus?.status === 'in_progress' || p.deployStatus?.status === 'building';
     const statusText = isBuilding ? 'Building' : (isOnline ? 'Online' : 'Stopped');
-    const statusBadgeClass = isBuilding ? 'badge-warning' : (isOnline ? 'badge-success' : 'badge-neutral');
+    const statusBadgeClass = isBuilding ? 'badge-warning' : (isOnline ? 'badge-success' : 'badge-danger');
 
     const pt = (p.project_type || '').toLowerCase();
     const sc = (p.start_cmd || '').toLowerCase();
@@ -187,16 +187,11 @@ export function renderServicesList() {
     const portText = p.port ? `Port ${p.port}` : '';
     const accessText = p.access_mode === 'public' ? 'Public reverse proxy' : (p.access_mode === 'allowlist' || p.access_mode === 'allowed_ips' ? 'IP whitelist' : 'Localhost only');
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
-    const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
+    const diskStr = p.diskFormatted || p.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted;
     const uptimeText = isOnline && p.app_started_at ? formatRelativeTime(p.app_started_at) : '';
     const pidVal = (isOnline && (p.app_pid || p.status?.pid || resItem?.pid)) ? (p.app_pid || p.status?.pid || resItem?.pid) : null;
 
-    let subTitle = typeName;
-    if (p.slug && p.slug !== p.name.toLowerCase()) {
-      subTitle = `${typeName} &bull; ${escapeHtml(p.slug)}`;
-    } else if (!isLocal && p.branch) {
-      subTitle = `${typeName} &bull; ${escapeHtml(p.branch)}`;
-    }
+    const subTitle = typeName;
 
     return `
       <div class="project-card service-card" id="service-card-${p.id}" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
@@ -212,7 +207,7 @@ export function renderServicesList() {
                 <span>${escapeHtml(p.name)}</span>
               </div>
               <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${escapeHtml(subTitle)}">
-                ${subTitle}
+                ${escapeHtml(subTitle)}
               </div>
             </div>
           </div>

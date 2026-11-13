@@ -16,54 +16,15 @@ pub(crate) use backups::*;
 pub(crate) use env::*;
 pub(crate) use git_ops::*;
 
-pub(crate) async fn list_projects_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Response, StatusCode> {
-    let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
-    let cache_key = format!("projects:u{}", user.id);
-
-    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
-        return Ok(res);
-    }
-
-    let mut list = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    list.retain(|p| user.can_access_project(p.id));
-
-    // Enrich projects with real-time process & port listener status (avoid spawning netstat/lsof for stopped sites)
-    for p in &mut list {
-        let pid_alive = p.app_pid.map(crate::runtime::process::is_pid_alive).unwrap_or(false);
-        if pid_alive {
-            p.app_status = "running".to_string();
-        } else if p.app_status == "running" {
-            if let Some(port) = p.port {
-                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
-                    if crate::runtime::process::is_pid_alive(port_pid) {
-                        p.app_pid = Some(port_pid);
-                    }
-                }
-            }
-        }
-    }
-
-    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
+#[derive(serde::Serialize)]
+pub(crate) struct ProjectResponse {
+    #[serde(flatten)]
+    pub(crate) project: Project,
+    #[serde(rename = "diskFormatted")]
+    pub(crate) disk_formatted: String,
 }
 
-pub(crate) async fn get_project_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxPath(id): AxPath<i64>,
-) -> Result<Json<Project>, StatusCode> {
-    let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
-    if !user.can_access_project(id) {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    let mut p = state
-        .projects
-        .get(id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
+fn enrich_project_status(p: &mut Project) {
     let pid_alive = p.app_pid.map(crate::runtime::process::is_pid_alive).unwrap_or(false);
     if pid_alive {
         p.app_status = "running".to_string();
@@ -76,8 +37,58 @@ pub(crate) async fn get_project_handler(
             }
         }
     }
+}
 
-    Ok(Json(p))
+pub(crate) fn to_project_response(mut p: Project, cwd: &std::path::Path) -> ProjectResponse {
+    enrich_project_status(&mut p);
+    let (_, disk_formatted) = crate::api::system::compute_project_disk_formatted(&p, cwd);
+    ProjectResponse {
+        project: p,
+        disk_formatted,
+    }
+}
+
+pub(crate) async fn list_projects_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
+    let cache_key = format!("projects:u{}", user.id);
+
+    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
+        return Ok(res);
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let list: Vec<ProjectResponse> = state
+        .projects
+        .list()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_iter()
+        .filter(|p| user.can_access_project(p.id))
+        .map(|p| to_project_response(p, &cwd))
+        .collect();
+
+    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
+}
+
+pub(crate) async fn get_project_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<i64>,
+) -> Result<Json<ProjectResponse>, StatusCode> {
+    let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
+    if !user.can_access_project(id) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let p = state
+        .projects
+        .get(id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    Ok(Json(to_project_response(p, &cwd)))
 }
 
 fn manage_power_for_kind(kind: &str) -> &'static str {

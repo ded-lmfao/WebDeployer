@@ -150,7 +150,9 @@ export async function loadFilesView() {
   const refreshBtn = document.getElementById('files-refresh-btn');
 
   if (viewTitle) {
-    viewTitle.textContent = `${ctx.name} — Files & Storage`;
+    viewTitle.textContent = ctx.kind === 'database'
+      ? `${ctx.name} — Cluster Files (Read-Only)`
+      : `${ctx.name} — Files & Storage`;
   }
 
   if (refreshBtn) {

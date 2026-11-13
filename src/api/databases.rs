@@ -57,14 +57,12 @@ fn verify_db_files_write(
     headers: &HeaderMap,
     id: i64,
 ) -> Result<(crate::auth::user::User, crate::databases::ManagedDatabase), (StatusCode, String)> {
-    let (user, db) = get_authorized_database(state, headers, &["databases", "databases_manage"], id)?;
-    if !user.has_power("databases_manage") && !(user.has_power("databases") && user.has_power("files_write")) {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Permission denied: Missing 'databases_manage' or 'files_write' privilege".to_string(),
-        ));
-    }
-    Ok((user, db))
+    let _ = get_authorized_database(state, headers, &["databases", "databases_manage"], id)?;
+    Err((
+        StatusCode::FORBIDDEN,
+        "Database files are read-only once created. Delete and recreate the database to change configuration."
+            .to_string(),
+    ))
 }
 
 fn database_root(db: &crate::databases::ManagedDatabase) -> std::path::PathBuf {
@@ -102,6 +100,27 @@ pub(crate) fn redact_db_if_unprivileged(
     db
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DatabaseResponse {
+    #[serde(flatten)]
+    pub(crate) db: crate::databases::ManagedDatabase,
+    pub(crate) disk_formatted: String,
+}
+
+pub(crate) fn to_database_response(
+    db: crate::databases::ManagedDatabase,
+    can_creds: bool,
+    cwd: &std::path::Path,
+) -> DatabaseResponse {
+    let redacted = redact_db_if_unprivileged(db, can_creds);
+    let (_, disk_formatted) = crate::api::system::compute_database_disk_formatted(&redacted, cwd);
+    DatabaseResponse {
+        db: redacted,
+        disk_formatted,
+    }
+}
+
 pub(crate) async fn list_databases_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -114,13 +133,14 @@ pub(crate) async fn list_databases_handler(
         return Ok(res);
     }
 
-    let list: Vec<crate::databases::ManagedDatabase> = state
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let list: Vec<DatabaseResponse> = state
         .databases
         .list()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .into_iter()
         .filter(|db| can_access_db(&user, db))
-        .map(|db| redact_db_if_unprivileged(db, can_creds))
+        .map(|db| to_database_response(db, can_creds, &cwd))
         .collect();
 
     cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
@@ -131,20 +151,21 @@ pub(crate) async fn get_database_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+) -> Result<Json<DatabaseResponse>, (StatusCode, String)> {
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
     let user = verify_db_access(&state, &headers, &["databases", "databases_manage"], &db)?;
     let can_creds = user.has_any_power(&["databases_manage", "env"]);
-    Ok(Json(redact_db_if_unprivileged(db, can_creds)))
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    Ok(Json(to_database_response(db, can_creds, &cwd)))
 }
 
 pub(crate) async fn create_database_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<crate::databases::CreateDatabaseInput>,
-) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+) -> Result<Json<DatabaseResponse>, (StatusCode, String)> {
     let user = verify_power(&state, &headers, "databases_manage", payload.linked_project_id)?;
     let db = state.databases.create(payload)
         .await
@@ -152,7 +173,8 @@ pub(crate) async fn create_database_handler(
     state.cache.invalidate_prefix("databases:");
     state.cache.invalidate_prefix("overview:");
     log_audit(&state, &user.username, "database.create", Some(&db.name), Some(&format!("Created PostgreSQL database '{}' on port {}", db.db_name, db.port)));
-    Ok(Json(db))
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    Ok(Json(to_database_response(db, true, &cwd)))
 }
 
 async fn run_database_lifecycle<F>(
@@ -162,7 +184,7 @@ async fn run_database_lifecycle<F>(
     action_name: &str,
     audit_desc: &str,
     f: F,
-) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)>
+) -> Result<Json<DatabaseResponse>, (StatusCode, String)>
 where
     F: std::future::Future<Output = Result<(), String>>,
 {
@@ -177,14 +199,15 @@ where
     log_audit(state, &user.username, action_name, Some(&format!("DB #{}", id)), Some(audit_desc));
     let updated = state.databases.get(id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    Ok(Json(redact_db_if_unprivileged(updated, can_creds)))
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    Ok(Json(to_database_response(updated, can_creds, &cwd)))
 }
 
 pub(crate) async fn start_database_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+) -> Result<Json<DatabaseResponse>, (StatusCode, String)> {
     run_database_lifecycle(&state, &headers, id, "database.start", "Started database container", state.databases.start(id)).await
 }
 
@@ -192,7 +215,7 @@ pub(crate) async fn stop_database_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+) -> Result<Json<DatabaseResponse>, (StatusCode, String)> {
     run_database_lifecycle(&state, &headers, id, "database.stop", "Stopped database container", state.databases.stop(id)).await
 }
 
@@ -200,7 +223,7 @@ pub(crate) async fn restart_database_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-) -> Result<Json<crate::databases::ManagedDatabase>, (StatusCode, String)> {
+) -> Result<Json<DatabaseResponse>, (StatusCode, String)> {
     run_database_lifecycle(&state, &headers, id, "database.restart", "Restarted database container", state.databases.restart(id)).await
 }
 
@@ -208,17 +231,17 @@ pub(crate) async fn update_database_access_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-    Json(payload): Json<crate::databases::UpdateDatabaseAccessInput>,
+    Json(_payload): Json<crate::databases::UpdateDatabaseAccessInput>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
-    let user = verify_db_access(&state, &headers, &["databases_manage"], &db)?;
-    state.databases.update_access(id, payload).await.map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-    state.cache.invalidate_prefix("databases:");
-    state.cache.invalidate_prefix("overview:");
-    log_audit(&state, &user.username, "database.access", Some(&format!("DB #{}", id)), Some("Updated database network access rules"));
-    Ok(Json(serde_json::json!({ "ok": true })))
+    let _ = verify_db_access(&state, &headers, &["databases_manage"], &db)?;
+    Err((
+        StatusCode::FORBIDDEN,
+        "Database network access and domain are locked once created. Delete and recreate the database to change them."
+            .to_string(),
+    ))
 }
 
 pub(crate) async fn delete_database_handler(
@@ -290,7 +313,7 @@ pub(crate) async fn link_database_handler(
 
     let raw_pass = db.db_password.unwrap_or_default();
     let port_str = db.port.to_string();
-    let internal_url = format!("postgresql://{}:{}@127.0.0.1:{}/{}", db.db_user, raw_pass, port_str, db.db_name);
+    let internal_url = crate::databases::build_postgres_url(&db.db_user, &raw_pass, "127.0.0.1", db.port, &db.db_name, false);
     let entries: [(&str, &str, bool); 6] = [
         (LINKED_DB_ENV_KEYS[0], &internal_url, true),
         (LINKED_DB_ENV_KEYS[1], "127.0.0.1", false),
@@ -531,8 +554,19 @@ pub(crate) async fn db_files_rename_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_pg_log_level, redact_db_if_unprivileged};
-    use crate::databases::ManagedDatabase;
+    use super::{
+        classify_pg_log_level, redact_db_if_unprivileged, redact_pg_url, to_database_response,
+        update_database_access_handler, verify_db_files_write,
+    };
+    use crate::databases::{
+        build_postgres_url, encode_uri_userinfo_component, ManagedDatabase, UpdateDatabaseAccessInput,
+    };
+    use axum::{
+        extract::{Path as AxPath, State},
+        http::{header, HeaderMap, HeaderValue, StatusCode},
+        Json,
+    };
+    use std::sync::Arc;
 
     fn sample_db() -> ManagedDatabase {
         ManagedDatabase {
@@ -574,10 +608,152 @@ mod tests {
     }
 
     #[test]
+    fn test_database_response_includes_disk_formatted() {
+        let tmp = std::env::temp_dir().join(format!("webdep-db-disk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("base.bin"), vec![0u8; 2048]).unwrap();
+
+        let mut db = sample_db();
+        db.data_dir = tmp.to_string_lossy().to_string();
+        let resp = to_database_response(db, false, &tmp);
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["diskFormatted"], "2 KB");
+        assert_eq!(json["name"], "appdb");
+        assert!(json["dbPassword"].is_null());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn test_classify_pg_log_level() {
         assert_eq!(classify_pg_log_level("2026-11-13 LOG: database system is ready"), "info");
         assert_eq!(classify_pg_log_level("2026-11-13 WARNING: deprecated setting"), "warn");
         assert_eq!(classify_pg_log_level("2026-11-13 ERROR: role does not exist"), "error");
         assert_eq!(classify_pg_log_level("2026-11-13 FATAL: password authentication failed"), "error");
+    }
+
+    #[test]
+    fn test_postgres_url_percent_encoding_and_redaction() {
+        assert_eq!(
+            encode_uri_userinfo_component("$AkTcqhCTCqY=DGRRP#kyR6Z"),
+            "%24AkTcqhCTCqY%3DDGRRP%23kyR6Z"
+        );
+        assert_eq!(
+            encode_uri_userinfo_component("Az09-_.~"),
+            "Az09-_.~"
+        );
+        assert_eq!(
+            build_postgres_url(
+                "app_user",
+                "$AkTcqhCTCqY=DGRRP#kyR6Z",
+                "127.0.0.1",
+                5432,
+                "mewzik",
+                false
+            ),
+            "postgresql://app_user:%24AkTcqhCTCqY%3DDGRRP%23kyR6Z@127.0.0.1:5432/mewzik"
+        );
+        let ext = build_postgres_url(
+            "app_user",
+            "p@ss:w/rd?a&b",
+            "db.example.com",
+            5433,
+            "app+1",
+            true,
+        );
+        assert_eq!(
+            ext,
+            "postgresql://app_user:p%40ss%3Aw%2Frd%3Fa%26b@db.example.com:5433/app%2B1?sslmode=prefer"
+        );
+        assert_eq!(
+            redact_pg_url(&ext),
+            "postgresql://app_user:****@db.example.com:5433/app%2B1?sslmode=prefer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_database_access_and_files_writes_locked_after_creation() {
+        let tmp = std::env::temp_dir().join(format!("webdep-db-lock-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let db = crate::db::open_db(&tmp).unwrap();
+        let vault = Arc::new(crate::vault::Vault::new(&tmp).unwrap());
+        let auth = Arc::new(crate::auth::Auth::new(db.clone(), 3600));
+        let projects = Arc::new(crate::projects::Projects::new(db.clone(), vault.clone(), tmp.clone()));
+        let logs = Arc::new(crate::logs::Logs::new(db.clone()));
+        let monitor = Arc::new(crate::monitor::Monitor::new());
+        let caddy = Arc::new(crate::caddy::Caddy::new(&tmp));
+        let runtime = Arc::new(crate::runtime::Runtime::new(db.clone(), (*logs).clone()));
+        let deployer = Arc::new(crate::deployer::Deployer::new(
+            db.clone(),
+            (*logs).clone(),
+            projects.clone(),
+            runtime.clone(),
+            Arc::new(crate::cache::AppCache::new()),
+            tmp.clone(),
+        ));
+        let databases = Arc::new(crate::databases::Databases::new(
+            db.clone(),
+            vault,
+            (*logs).clone(),
+            &tmp,
+        ));
+        let state = crate::api::AppState {
+            db: db.clone(),
+            auth: auth.clone(),
+            projects,
+            logs,
+            monitor,
+            caddy,
+            runtime,
+            deployer,
+            cache: Arc::new(crate::cache::AppCache::new()),
+            databases,
+            updater: Arc::new(crate::updater::Updater::new(tmp.clone())),
+        };
+
+        let admin_id: i64 = {
+            let conn = db.lock().unwrap();
+            let data_dir = tmp.join("db1");
+            conn.execute(
+                "INSERT INTO databases(id, name, engine, db_name, db_user, db_password, port, is_superuser, domain, access_mode, allowed_ips, status, container_id, data_dir, linked_project_id, created_at, updated_at)
+                 VALUES(1, 'mewzik', 'postgres', 'mewzik', 'app_user', 'raw', 5432, 0, '', 'local', '', 'stopped', NULL, ?, NULL, 0, 0)",
+                rusqlite::params![data_dir.to_string_lossy().to_string()],
+            ).unwrap();
+            conn.query_row("SELECT id FROM users ORDER BY id ASC LIMIT 1", [], |r| r.get(0)).unwrap()
+        };
+
+        let sess = auth.create_session(admin_id).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("nd_session={}", sess.id)).unwrap(),
+        );
+
+        let files_err = verify_db_files_write(&state, &headers, 1).expect_err("DB file writes must be locked after creation");
+        assert_eq!(files_err.0, StatusCode::FORBIDDEN);
+        assert!(files_err.1.contains("read-only once created"));
+
+        let access_err = update_database_access_handler(
+            State(state.clone()),
+            headers,
+            AxPath(1),
+            Json(UpdateDatabaseAccessInput {
+                access_mode: "public".to_string(),
+                allowed_ips: None,
+                domain: Some("pg.example.com".to_string()),
+            }),
+        )
+        .await
+        .expect_err("DB access updates must be locked after creation");
+        assert_eq!(access_err.0, StatusCode::FORBIDDEN);
+        assert!(access_err.1.contains("locked once created"));
+
+        drop(state);
+        drop(auth);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

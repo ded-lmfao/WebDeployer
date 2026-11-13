@@ -68,8 +68,8 @@ export function renderGithubTokensRows() {
   const list = state.githubTokensDraft || [{ label: 'Primary Account', token: '', revealed: false }];
   container.innerHTML = list.map((item, idx) => `
     <div class="gh-token-row" data-gh-idx="${idx}" style="display: grid; grid-template-columns: 200px 1fr auto auto; gap: 8px; align-items: center;">
-      <input type="text" class="form-control gh-token-label-input" value="${escapeHtml(item.label || '')}" placeholder="Account label (e.g. Personal, Org)">
-      <input type="${item.revealed ? 'text' : 'password'}" class="form-control env-mono-input gh-token-value-input" value="${escapeHtml(item.token || '')}" placeholder="ghp_token or github_pat_token">
+      <input type="text" class="form-control gh-token-label-input" value="${escapeHtml(item.label || '')}" placeholder="Account label (e.g. Personal, Org)" autocomplete="off">
+      <input type="${item.revealed ? 'text' : 'password'}" class="form-control env-mono-input gh-token-value-input" value="${escapeHtml(item.token || '')}" placeholder="ghp_token or github_pat_token" autocomplete="new-password">
       <button type="button" class="btn btn-secondary btn-sm" onclick="toggleGithubTokenRowReveal(${idx})" style="min-width: 62px;">
         ${item.revealed ? 'Hide' : 'Show'}
       </button>

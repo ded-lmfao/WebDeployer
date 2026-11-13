@@ -218,6 +218,86 @@
 .form-control:hover { border-color: rgba(238, 241, 247, 0.22); }
 .form-control:focus { border-color: var(--accent); outline: 1px solid var(--accent); box-shadow: none; }
 .form-control::placeholder { color: var(--text-dim); }
+.form-control[readonly] {
+  background: rgba(7, 11, 20, 0.55);
+  border-color: rgba(238, 241, 247, 0.08);
+  color: var(--text-normal);
+  cursor: text;
+}
+.form-control[readonly]:hover {
+  border-color: rgba(238, 241, 247, 0.14);
+}
+.form-control[readonly]:focus {
+  border-color: rgba(238, 241, 247, 0.18);
+  outline: none;
+  box-shadow: none;
+}
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+textarea:-webkit-autofill:active,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus,
+select:-webkit-autofill:active,
+.form-control:-webkit-autofill,
+.form-control:-webkit-autofill:hover,
+.form-control:-webkit-autofill:focus,
+.form-control:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #0c1426 inset !important;
+  box-shadow: 0 0 0 1000px #0c1426 inset !important;
+  -webkit-text-fill-color: var(--text-main) !important;
+  background-color: #0c1426 !important;
+  background-image: none !important;
+  color: var(--text-main) !important;
+  caret-color: var(--accent-light) !important;
+  border-color: rgba(79, 142, 247, 0.34);
+  transition: background-color 99999s ease-in-out 0s, color 99999s ease-in-out 0s !important;
+}
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill:focus,
+.form-control:-webkit-autofill:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+input:autofill,
+input:autofill:hover,
+input:autofill:focus,
+input:autofill:active,
+textarea:autofill,
+textarea:autofill:hover,
+textarea:autofill:focus,
+textarea:autofill:active,
+select:autofill,
+select:autofill:hover,
+select:autofill:focus,
+select:autofill:active,
+.form-control:autofill,
+.form-control:autofill:hover,
+.form-control:autofill:focus,
+.form-control:autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #0c1426 inset !important;
+  box-shadow: 0 0 0 1000px #0c1426 inset !important;
+  -webkit-text-fill-color: var(--text-main) !important;
+  background-color: #0c1426 !important;
+  background-image: none !important;
+  color: var(--text-main) !important;
+  caret-color: var(--accent-light) !important;
+  border-color: rgba(79, 142, 247, 0.34);
+  transition: background-color 99999s ease-in-out 0s, color 99999s ease-in-out 0s !important;
+}
+input:autofill:focus,
+textarea:autofill:focus,
+select:autofill:focus,
+.form-control:autofill:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
 textarea.form-control { height: auto; min-height: 80px; padding: 8px 12px; font-family: var(--font-mono); font-size: 12px; resize: vertical; }
 select.form-control { cursor: pointer; }
 select option, .form-control option { background-color: var(--bg-card) !important; color: var(--text-main) !important; }

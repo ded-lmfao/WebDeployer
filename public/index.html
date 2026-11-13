@@ -18,7 +18,8 @@
       pointer-events: none !important;
     }
   </style>
-  <link rel="stylesheet" href="/style.css?v=3.15.0">
+  <meta name="color-scheme" content="dark">
+  <link rel="stylesheet" href="/style.css?v=3.17.0">
 </head>
 
 <body>
@@ -124,23 +125,8 @@
           <button type="submit" class="btn btn-primary btn-login-submit" id="login-2fa-btn">
             <span>Verify &amp; Sign In</span>
           </button>
-          <button type="button" class="btn btn-secondary btn-passkey-sleek" onclick="loginWithPasskey()"
-            style="margin-top: 8px;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
-              <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
-              <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" />
-              <path d="M2 12a10 10 0 0 1 18-6" />
-              <path d="M2 16h.01" />
-              <path d="M21.8 16c.2-2 .131-5.354 0-6" />
-              <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" />
-              <path d="M8.65 22c.21-.66.45-1.32.57-2" />
-              <path d="M9 6.8a6 6 0 0 1 9 5.2v2" />
-            </svg>
-            <span>Verify with Passkey Instead</span>
-          </button>
           <button type="button" class="btn-text-back" id="login-2fa-back-btn">
-            &larr; Back to password sign-in
+            &larr; Back to sign-in
           </button>
         </form>
       </div>
@@ -1292,7 +1278,7 @@
 
           <!-- Inline Quick-Add Single Variable Bar -->
           <div class="card env-quick-add-card" id="env-quick-add-card">
-            <form id="env-inline-add-form" class="env-quick-add-bar"
+            <form id="env-inline-add-form" class="env-quick-add-bar" autocomplete="off"
               onsubmit="handleInlineQuickAddEnv(event); return false;">
               <div class="env-quick-field env-quick-key">
                 <label class="env-quick-label" for="env-quick-key-input">Key</label>
@@ -1631,7 +1617,7 @@
                 <span id="github-token-status-badge" style="font-size: 11px; flex-shrink: 0;"></span>
               </div>
 
-              <form id="settings-form">
+              <form id="settings-form" autocomplete="off">
                 <div class="settings-card-inset">
                   <div
                     style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -1970,7 +1956,7 @@
           </div>
         </div>
 
-        <form id="website-form" onsubmit="return false;">
+        <form id="website-form" autocomplete="off" onsubmit="return false;">
           <input type="hidden" id="website-form-id">
 
           <!-- Row 1: Name, Port, Branch -->
@@ -2124,7 +2110,7 @@
           creating this service.
         </div>
 
-        <form id="service-form" onsubmit="return false;">
+        <form id="service-form" autocomplete="off" onsubmit="return false;">
           <input type="hidden" id="service-form-id">
           <input type="hidden" id="service-preset-type" value="custom">
 
@@ -2301,14 +2287,14 @@
 
         <!-- Mode 1: Single Variable Form -->
         <div id="env-section-single">
-          <form id="add-env-form" onsubmit="handleSaveEnv(event); return false;">
+          <form id="add-env-form" autocomplete="off" onsubmit="handleSaveEnv(event); return false;">
             <div class="form-group">
               <label class="form-label" for="env-key-input">Variable Key *</label>
-              <input type="text" id="env-key-input" class="form-control" placeholder="API_SECRET">
+              <input type="text" id="env-key-input" class="form-control" placeholder="API_SECRET" autocomplete="off">
             </div>
             <div class="form-group">
               <label class="form-label" for="env-value-input">Value *</label>
-              <textarea id="env-value-input" class="form-control" rows="3" placeholder="your-secret-value"></textarea>
+              <textarea id="env-value-input" class="form-control" rows="3" placeholder="your-secret-value" autocomplete="off"></textarea>
             </div>
             <div class="form-group">
               <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
@@ -2404,17 +2390,17 @@
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
-        <form id="create-user-form">
+        <form id="create-user-form" autocomplete="off">
           <input type="hidden" id="user-edit-id" value="">
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="user-new-username">Username *</label>
-              <input type="text" id="user-new-username" class="form-control" placeholder="e.g. dev_alex" required>
+              <input type="text" id="user-new-username" class="form-control" placeholder="e.g. dev_alex" required autocomplete="off">
             </div>
             <div class="form-group">
               <label class="form-label" for="user-new-password" id="user-password-label">Password (min 6 chars)
                 *</label>
-              <input type="password" id="user-new-password" class="form-control" minlength="6" placeholder="••••••••">
+              <input type="password" id="user-new-password" class="form-control" minlength="6" placeholder="••••••••" autocomplete="new-password">
             </div>
           </div>
 
@@ -2668,7 +2654,7 @@
             </div>
             <div class="form-group" id="pwd-2fa-group" style="display: none;">
               <label class="form-label" for="pwd-2fa-code">6-Digit 2FA Authenticator Code *</label>
-              <input type="text" id="pwd-2fa-code" class="form-control" placeholder="123456"
+              <input type="text" id="pwd-2fa-code" class="form-control" placeholder="123456" autocomplete="off"
                 style="font-family: var(--font-mono); letter-spacing: 0.12em;">
             </div>
             <label
@@ -2703,7 +2689,7 @@
               <div class="form-group">
                 <label class="form-label" for="tfa-setup-password">Confirm Your Current Password to Begin Setup
                   *</label>
-                <input type="password" id="tfa-setup-password" class="form-control" placeholder="Current password">
+                <input type="password" id="tfa-setup-password" class="form-control" placeholder="Current password" autocomplete="current-password">
               </div>
               <button type="button" class="btn btn-primary" style="width: 100%;" id="tfa-start-setup-btn"
                 onclick="start2faSetup()">
@@ -2780,12 +2766,12 @@
             <div class="form-group">
               <label class="form-label" for="tfa-disable-password">Current Password *</label>
               <input type="password" id="tfa-disable-password" class="form-control"
-                placeholder="Enter your current password">
+                placeholder="Enter your current password" autocomplete="current-password">
             </div>
             <div class="form-group">
               <label class="form-label" for="tfa-disable-code">6-Digit Authenticator Code or Recovery Code *</label>
               <input type="text" id="tfa-disable-code" class="form-control" placeholder="123456 or ABCD-1234"
-                style="font-family: var(--font-mono);">
+                autocomplete="off" style="font-family: var(--font-mono);">
             </div>
             <button type="button" class="btn btn-danger" style="width: 100%;" onclick="disable2fa()">
               Disable Two-Factor Authentication
@@ -2828,7 +2814,7 @@
         <div id="release-modal-target-project"
           style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
         </div>
-        <form id="create-release-form" onsubmit="confirmCreateRelease(event)">
+        <form id="create-release-form" autocomplete="off" onsubmit="confirmCreateRelease(event)">
           <div class="form-group" id="release-project-select-group" style="display: none;">
             <label class="form-label" for="release-project-select">Target Website</label>
             <select id="release-project-select" class="form-control"></select>
@@ -2864,27 +2850,27 @@
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
-        <form id="create-database-form" onsubmit="handleCreateDatabaseSubmit(event)">
+        <form id="create-database-form" autocomplete="off" onsubmit="handleCreateDatabaseSubmit(event)">
           <div class="form-group">
             <label class="form-label" for="db-create-name">Display Name</label>
             <input type="text" id="db-create-name" class="form-control" placeholder="e.g. Production PostgreSQL"
-              required>
+              required autocomplete="off">
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
               <label class="form-label" for="db-create-dbname">Database Name</label>
-              <input type="text" id="db-create-dbname" class="form-control" placeholder="e.g. app_production" required>
+              <input type="text" id="db-create-dbname" class="form-control" placeholder="e.g. app_production" required autocomplete="off">
             </div>
             <div class="form-group">
               <label class="form-label" for="db-create-user">Database User</label>
-              <input type="text" id="db-create-user" class="form-control" placeholder="e.g. app_user" required>
+              <input type="text" id="db-create-user" class="form-control" placeholder="e.g. app_user" required autocomplete="off">
             </div>
           </div>
           <div class="form-group">
             <label class="form-label" for="db-create-password">Password</label>
             <div style="display: flex; gap: 8px;">
               <input type="password" id="db-create-password" class="form-control" placeholder="Strong password" required
-                style="font-family: var(--font-mono);">
+                autocomplete="new-password" style="font-family: var(--font-mono);">
               <button type="button" class="btn btn-secondary btn-sm"
                 onclick="togglePasswordVisibility('db-create-password')">Show</button>
               <button type="button" class="btn btn-secondary btn-sm"
@@ -2895,7 +2881,7 @@
             <div class="form-group">
               <label class="form-label" for="db-create-port">TCP Port</label>
               <input type="number" id="db-create-port" class="form-control" value="5432" min="1024" max="65535"
-                required>
+                required autocomplete="off">
             </div>
             <div class="form-group"
               style="display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 8px;">
@@ -2961,10 +2947,16 @@
   <div class="modal-overlay" id="modal-database-details">
     <div class="modal-container" style="max-width: 600px;">
       <div class="modal-header">
-        <h3 class="modal-title" id="db-details-title">PostgreSQL Connection Details</h3>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h3 class="modal-title" id="db-details-title">PostgreSQL Connection Details</h3>
+          <span class="badge badge-neutral" title="Locked after creation">Locked at creation</span>
+        </div>
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
       <div class="modal-body">
+        <div style="margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(7, 11, 20, 0.55); border: 1px solid rgba(238, 241, 247, 0.08); font-size: 12px; color: var(--text-dim);">
+          Credentials, port, and network access are locked once created. Delete and recreate this database to change them.
+        </div>
         <div class="form-group">
           <label class="form-label" for="db-detail-internal-url">Internal Connection URL (For websites on this
             VPS)</label>
@@ -2982,8 +2974,7 @@
               style="font-family: var(--font-mono); font-size: 12px;">
             <button class="btn btn-secondary btn-sm" onclick="copyElementValue('db-detail-external-url')">Copy</button>
           </div>
-          <span class="form-hint">Includes ?sslmode=prefer. Ensure your client IP is allowed in Network Access
-            rules.</span>
+          <span class="form-hint">Includes ?sslmode=prefer. Uses the Network Access policy configured at creation.</span>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;">
           <div class="form-group">
@@ -3030,47 +3021,6 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" data-close-modal>Done</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL: DATABASE NETWORK ACCESS -->
-  <div class="modal-overlay" id="modal-database-access">
-    <div class="modal-container" style="max-width: 480px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Network Access & Allowed IPs</h3>
-        <button class="modal-close" data-close-modal>&times;</button>
-      </div>
-      <div class="modal-body">
-        <form id="database-access-form" onsubmit="handleUpdateDatabaseAccessSubmit(event)">
-          <input type="hidden" id="db-access-id">
-          <div class="form-group">
-            <label class="form-label" for="db-access-domain">Custom Domain / Hostname <span
-                style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
-            <input type="text" id="db-access-domain" class="form-control" placeholder="e.g. postgres.yourdomain.com">
-            <span class="form-hint">Used for external connection URLs and psql commands instead of the VPS IP.</span>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="db-access-mode">Network Access Policy</label>
-            <select id="db-access-mode" class="form-control"
-              onchange="toggleDatabaseAccessIpFields('db-access-mode', 'db-access-allowed-ips-wrap')">
-              <option value="local">Localhost Only (127.0.0.1) — Safest</option>
-              <option value="allowlist">Specific Remote IP Allowlist — Remote VPS / Office IPs</option>
-              <option value="public">Public Access (0.0.0.0) — Open to Internet</option>
-            </select>
-          </div>
-          <div class="form-group" id="db-access-allowed-ips-wrap">
-            <label class="form-label" for="db-access-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
-            <textarea id="db-access-allowed-ips" class="form-control" rows="3"
-              placeholder="e.g. 203.0.113.80, 198.51.100.0/24"
-              style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
-            <span class="form-hint">WebDep will automatically configure firewall (UFW) rules for these IPs.</span>
-          </div>
-          <div class="modal-footer" style="padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border);">
-            <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
-            <button type="submit" class="btn btn-primary">Save & Apply Rules</button>
-          </div>
-        </form>
       </div>
     </div>
   </div>
@@ -3185,7 +3135,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Client Script -->
-  <script type="module" src="/app.js?v=3.15.0"></script>
+  <script type="module" src="/app.js?v=3.17.0"></script>
 </body>
 
 </html>

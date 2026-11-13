@@ -208,10 +208,10 @@ function renderEnvTableFromState() {
               <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleSelectEnvVar(${keyJs}, this.checked)">
             </td>
             <td>
-              <input type="text" id="env-inline-edit-key" class="form-control env-mono-input" value="${escapeHtml(envUiState.editDraft.key)}" placeholder="KEY_NAME" onkeydown="handleInlineEditKeydown(event, ${keyJs})">
+              <input type="text" id="env-inline-edit-key" class="form-control env-mono-input" value="${escapeHtml(envUiState.editDraft.key)}" placeholder="KEY_NAME" autocomplete="off" onkeydown="handleInlineEditKeydown(event, ${keyJs})">
             </td>
             <td>
-              <input type="text" id="env-inline-edit-val" class="form-control env-mono-input" value="${escapeHtml(envUiState.editDraft.value)}" placeholder="Variable value" onkeydown="handleInlineEditKeydown(event, ${keyJs})">
+              <input type="text" id="env-inline-edit-val" class="form-control env-mono-input" value="${escapeHtml(envUiState.editDraft.value)}" placeholder="Variable value" autocomplete="off" onkeydown="handleInlineEditKeydown(event, ${keyJs})">
             </td>
             <td>
               <button type="button" id="env-inline-edit-secret" class="env-visibility-btn ${draftSecret ? 'is-secret' : 'is-public'}" onclick="toggleInlineEditSecret()">
@@ -515,10 +515,10 @@ function renderMultiEditTable() {
   tbody.innerHTML = envUiState.multiRows.map((row, idx) => `
     <tr data-multi-idx="${idx}">
       <td>
-        <input type="text" class="form-control env-mono-input multi-env-key" value="${escapeHtml(row.key)}" placeholder="KEY_NAME">
+        <input type="text" class="form-control env-mono-input multi-env-key" value="${escapeHtml(row.key)}" placeholder="KEY_NAME" autocomplete="off">
       </td>
       <td>
-        <input type="text" class="form-control env-mono-input multi-env-val" value="${escapeHtml(row.value)}" placeholder="Value">
+        <input type="text" class="form-control env-mono-input multi-env-val" value="${escapeHtml(row.value)}" placeholder="Value" autocomplete="off">
       </td>
       <td>
         <button type="button" class="env-visibility-btn ${row.is_secret ? 'is-secret' : 'is-public'}" onclick="toggleMultiEditRowSecret(${idx})">

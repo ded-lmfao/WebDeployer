@@ -353,7 +353,7 @@ function updateWaterDOM(pipeline) {
       const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
       if (sBadge && sBadge.textContent !== 'Stopped' && sBadge.textContent !== 'Idle') {
         sBadge.textContent = 'Stopped';
-        sBadge.className = 'badge badge-neutral';
+        sBadge.className = 'badge badge-danger';
       }
     }
   }

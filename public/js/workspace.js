@@ -224,7 +224,7 @@ function renderDatabaseWorkspaceHeader(banner) {
       badge.className = 'badge badge-danger';
       badge.textContent = 'Error';
     } else {
-      badge.className = 'badge badge-neutral';
+      badge.className = 'badge badge-danger';
       badge.textContent = 'Stopped';
     }
   }
@@ -233,7 +233,7 @@ function renderDatabaseWorkspaceHeader(banner) {
     ? Number((d.containerId || d.container_id).slice(4))
     : null;
   const effectivePid = d.pid || resItem?.pid || pidFromContainer;
-  const diskStr = resItem?.diskFormatted || resItem?.disk_formatted || '';
+  const diskStr = d.diskFormatted || d.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted || '';
   const accessMode = d.accessMode || d.access_mode || 'local';
   const dbName = d.dbName || d.db_name || 'app';
   const dbUser = d.dbUser || d.db_user || 'app_user';
@@ -274,7 +274,7 @@ function renderDatabaseWorkspaceHeader(banner) {
           <span class="ws-meta-item" title="On-Disk Storage">Disk <strong style="color:var(--text-main); font-weight:600;">${diskStr}</strong></span>
         ` : ''}
         <span class="ws-meta-sep">&bull;</span>
-        <span class="ws-meta-item" title="Configure Network Access &amp; Domain" style="font-size:11px; cursor:pointer;" onclick="openDatabaseAccessModal(${d.id})">${accessText}</span>
+        <span class="ws-meta-item" title="Network Access Policy (locked at creation)" style="font-size:11px;">${accessText}</span>
         ${linkedName ? `
           <span class="ws-meta-sep">&bull;</span>
           <span class="ws-meta-item" title="Linked App">Linked <strong style="color:var(--text-main); font-weight:600;">${escapeHtml(linkedName)}</strong></span>
@@ -297,12 +297,12 @@ function renderDatabaseWorkspaceHeader(banner) {
           ${canControl ? `
             <button class="btn ${isRunning ? 'btn-secondary ws-btn-stop' : 'btn-success ws-btn-start'} btn-sm" id="ws-btn-db-toggle-${d.id}" onclick="toggleDatabaseState(${d.id})" ${(isStarting || isStopping) ? 'disabled' : ''}>
               ${isRunning
-                ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="12" height="12"></rect></svg><span>Stop</span>`
-                : isStarting
-                  ? `<span class="btn-spinner"></span><span>Starting</span>`
-                  : isStopping
-                    ? `<span class="btn-spinner"></span><span>Stopping</span>`
-                    : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Start</span>`}
+            ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="12" height="12"></rect></svg><span>Stop</span>`
+            : isStarting
+              ? `<span class="btn-spinner"></span><span>Starting</span>`
+              : isStopping
+                ? `<span class="btn-spinner"></span><span>Stopping</span>`
+                : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Start</span>`}
             </button>
             <button class="btn btn-secondary btn-sm ws-btn-restart" onclick="restartDatabase(${d.id})" title="Restart PostgreSQL cluster" ${(isStarting || isStopping) ? 'disabled' : ''}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
@@ -315,14 +315,10 @@ function renderDatabaseWorkspaceHeader(banner) {
           ${canCreds ? `
             <button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" title="Connection Strings &amp; Credentials">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-              <span>Connection</span>
+              <span>Creds</span>
             </button>
           ` : ''}
           ${canManage ? `
-            <button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" title="Network Access &amp; Domain">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-              <span>Access</span>
-            </button>
             <button class="btn btn-sm ws-btn-delete" onclick="deleteDatabase(${d.id}, '${safeName}')" title="Delete Database">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
@@ -427,12 +423,12 @@ function renderWebsiteWorkspaceHeader() {
       badge.textContent = 'Maintenance';
     } else {
       badge.className = 'badge badge-danger';
-      badge.textContent = 'Offline';
+      badge.textContent = 'Stopped';
     }
   }
 
   const effectivePid = p.app_pid || p.status?.pid || resItem?.pid;
-  const diskStr = resItem?.diskFormatted || resItem?.disk_formatted || '';
+  const diskStr = p.diskFormatted || p.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted || '';
 
   const bannerSig = `${p.id}:${p.name}:${p.slug}:${p.app_status}:${isOnline ? 1 : 0}:${isMaintenance ? 1 : 0}:${effectivePid || ''}:${p.port}:${p.branch}:${p.deployed_sha}:${(p.domains || []).join(',')}:${p.project_kind}:${p.project_type}:${p.access_mode || ''}:${p.repo_url || ''}:${diskStr}`;
   if (state.lastWsBannerSig !== bannerSig) {
@@ -561,19 +557,19 @@ function renderWebsiteWorkspaceHeader() {
           ` : ''}
           ${hasPower('process') ? `
             ${!isOnline
-              ? `<button class="btn btn-success btn-sm ws-btn-start" onclick="startProject(${p.id})">
+            ? `<button class="btn btn-success btn-sm ws-btn-start" onclick="startProject(${p.id})">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                    <span>Start</span>
                  </button>`
-              : ''
-            }
+            : ''
+          }
             ${isOnline || isMaintenance
-              ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
+            ? `<button class="btn btn-secondary btn-sm ws-btn-stop" onclick="stopProject(${p.id})" title="Completely stop process">
                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="12" height="12"></rect></svg>
                    <span>Stop</span>
                  </button>`
-              : ''
-            }
+            : ''
+          }
             <button class="btn btn-secondary btn-sm ws-btn-restart" onclick="restartProject(${p.id})" title="Restart process">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path></svg>
               <span>Restart</span>
