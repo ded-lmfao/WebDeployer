@@ -5,11 +5,21 @@ on:
     branches:
       - main
     tags:
-      - "v*"
+      - "v[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Optional explicit release tag (leave blank to auto-generate)"
+      bump:
+        description: "SemVer increment level"
+        type: choice
+        required: true
+        default: "patch"
+        options:
+          - patch
+          - minor
+          - major
+          - current
+      version:
+        description: "Optional explicit SemVer override (e.g. 2.1.0)"
         required: false
         default: ""
 
@@ -25,44 +35,117 @@ env:
 
 jobs:
   meta_and_test:
-    name: Compute Release Tag & Run Tests
+    name: Compute Version & Run Tests
     runs-on: ubuntu-latest
     outputs:
+      next_ver: ${{ steps.meta.outputs.next_ver }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
+      prev_tag: ${{ steps.meta.outputs.prev_tag }}
+      bump_kind: ${{ steps.meta.outputs.bump_kind }}
+      should_release: ${{ steps.meta.outputs.should_release }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
       commit_msg: ${{ steps.meta.outputs.commit_msg }}
-      pkg_version: ${{ steps.meta.outputs.pkg_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
-      - name: Compute release tag and commit metadata
+      - name: Resolve SemVer release version
         id: meta
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ inputs.tag }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          PKG_VER=$(grep -m1 '^version =' Cargo.toml | sed -E 's/version = "(.*)"/\1/' | tr -d '[:space:]')
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          MSG=$(git log -1 --pretty=%s | tr '\r\n' ' ')
-          CLEAN_INPUT_TAG=$(printf '%s' "${INPUT_TAG}" | tr -d '\r\n[:space:]')
-          if [[ "${EVENT_NAME}" == "workflow_dispatch" && -n "${CLEAN_INPUT_TAG}" ]]; then
-            TAG="${CLEAN_INPUT_TAG}"
-          elif [[ "${REF_TYPE}" == "tag" ]]; then
-            TAG="${REF_NAME}"
+          SUBJECT=$(git log -1 --pretty=%s | tr '\r\n' ' ')
+          FULL_MSG=$(git log -1 --pretty=%B)
+
+          CARGO_VER=$(tr -d '\r' < Cargo.toml | awk '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version[[:space:]]*=/{gsub(/"/,"",$3); print $3; exit}')
+          LATEST_TAG_VER=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n1 || true)
+
+          if [[ -n "$LATEST_TAG_VER" ]]; then
+            BASE_VER=$(printf '%s\n%s\n' "$CARGO_VER" "$LATEST_TAG_VER" | sort -V | tail -n1)
+            PREV_TAG="v${LATEST_TAG_VER}"
           else
-            TS=$(date -u +%Y%m%d%H%M%S)
-            TAG="v${PKG_VER}-${TS}-${SHORT_SHA}"
+            BASE_VER="$CARGO_VER"
+            PREV_TAG=""
           fi
+
+          SHOULD_RELEASE="true"
+          BUMP_KIND="patch"
+          NEXT_VER=""
+
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            CLEAN_TAG="${REF_NAME#v}"
+            if [[ "$CLEAN_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              NEXT_VER="$CLEAN_TAG"
+              RELEASE_TAG="v${CLEAN_TAG}"
+              PREV_TAG=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fxv "$RELEASE_TAG" | sed 's/^v//' | sort -V | awk -v cur="$CLEAN_TAG" '$0 != cur' | tail -n1 | sed 's/^/v/' || true)
+              BUMP_KIND="tag"
+            else
+              NEXT_VER="$CARGO_VER"
+              RELEASE_TAG="$REF_NAME"
+              BUMP_KIND="tag"
+            fi
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            CLEAN_OVR=$(printf '%s' "$INPUT_VERSION" | tr -d '[:space:]')
+            CLEAN_OVR="${CLEAN_OVR#v}"
+            if [[ -n "$CLEAN_OVR" ]]; then
+              if [[ ! "$CLEAN_OVR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Error: invalid SemVer override '$INPUT_VERSION' (expected X.Y.Z)" >&2
+                exit 1
+              fi
+              NEXT_VER="$CLEAN_OVR"
+              BUMP_KIND="manual"
+            else
+              BUMP_KIND="${INPUT_BUMP:-patch}"
+            fi
+          else
+            if printf '%s\n' "$FULL_MSG" | grep -Eiq '(^[[:space:]]*chore\(release\):|\[[[:space:]]*(skip ci|ci skip|skip release|no release)[[:space:]]*\])'; then
+              SHOULD_RELEASE="false"
+              BUMP_KIND="none"
+              NEXT_VER="$BASE_VER"
+            elif printf '%s\n' "$FULL_MSG" | grep -Eiq '(\[[[:space:]]*major[[:space:]]*\]|(^|[[:space:]])(bump|release)[[:space:]]*:[[:space:]]*major\b|^major[[:space:]]*[:-]|^BREAKING CHANGE:)' \
+              || printf '%s\n' "$SUBJECT" | grep -Eq '^[a-zA-Z]+(\([^)]*\))?!:'; then
+              BUMP_KIND="major"
+            elif printf '%s\n' "$FULL_MSG" | grep -Eiq '(\[[[:space:]]*minor[[:space:]]*\]|(^|[[:space:]])(bump|release)[[:space:]]*:[[:space:]]*minor\b|^minor[[:space:]]*[:-])'; then
+              BUMP_KIND="minor"
+            else
+              BUMP_KIND="patch"
+            fi
+          fi
+
+          if [[ -z "$NEXT_VER" ]]; then
+            IFS='.' read -r MAJ MIN PAT <<< "$BASE_VER"
+            case "$BUMP_KIND" in
+              major) NEXT_VER="$((MAJ + 1)).0.0" ;;
+              minor) NEXT_VER="${MAJ}.$((MIN + 1)).0" ;;
+              patch) NEXT_VER="${MAJ}.${MIN}.$((PAT + 1))" ;;
+              current) NEXT_VER="$BASE_VER" ;;
+              *)
+                echo "Error: unsupported bump kind '$BUMP_KIND'" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          RELEASE_TAG="${RELEASE_TAG:-v${NEXT_VER}}"
+          echo "Resolved: next_ver=${NEXT_VER} release_tag=${RELEASE_TAG} prev_tag=${PREV_TAG} bump_kind=${BUMP_KIND} should_release=${SHOULD_RELEASE}"
+
           {
-            echo "release_tag=${TAG}"
+            echo "next_ver=${NEXT_VER}"
+            echo "release_tag=${RELEASE_TAG}"
+            echo "prev_tag=${PREV_TAG}"
+            echo "bump_kind=${BUMP_KIND}"
+            echo "should_release=${SHOULD_RELEASE}"
             echo "short_sha=${SHORT_SHA}"
-            echo "pkg_version=${PKG_VER}"
             echo "commit_msg<<EOF"
-            echo "${MSG}"
+            echo "${SUBJECT}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -88,6 +171,7 @@ jobs:
   build:
     name: Build Static Binary (${{ matrix.asset_arch }})
     needs: meta_and_test
+    if: needs.meta_and_test.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -102,6 +186,26 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Apply target release version to Cargo manifests
+        shell: bash
+        env:
+          NEXT_VER: ${{ needs.meta_and_test.outputs.next_ver }}
+        run: |
+          awk -v v="$NEXT_VER" '
+            { line=$0; cr=(sub(/\r$/, "", line) ? "\r" : "") }
+            line ~ /^\[package\]$/ { p=1; print $0; next }
+            line ~ /^\[/ { p=0 }
+            p && !done && line ~ /^version[[:space:]]*=/ { sub(/"[^"]+"/, "\"" v "\"", line); done=1; print line cr; next }
+            { print $0 }
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+          awk -v v="$NEXT_VER" '
+            { line=$0; cr=(sub(/\r$/, "", line) ? "\r" : "") }
+            line == "[[package]]" { p=1; w=0; print $0; next }
+            p && line == "name = \"webdep\"" { w=1; print $0; next }
+            p && w && !done && line ~ /^version[[:space:]]*=/ { sub(/"[^"]+"/, "\"" v "\"", line); done=1; w=0; p=0; print line cr; next }
+            { print $0 }
+          ' Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
 
       - name: Setup Rust toolchain (${{ matrix.rust_target }})
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -179,12 +283,15 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [meta_and_test, build]
+    if: needs.meta_and_test.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - name: Download build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -196,39 +303,79 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
+          PREV_TAG: ${{ needs.meta_and_test.outputs.prev_tag }}
+          BUMP_KIND: ${{ needs.meta_and_test.outputs.bump_kind }}
           SHORT_SHA: ${{ needs.meta_and_test.outputs.short_sha }}
           COMMIT_MSG: ${{ needs.meta_and_test.outputs.commit_msg }}
+          GH_REPO: ${{ github.repository }}
         run: |
           cd release-artifacts
           sha256sum webdep-linux-*.tar.gz > checksums.txt
           cat checksums.txt
           {
-            echo "Automated WebDep release for commit \`${SHORT_SHA}\`."
+            echo "## WebDep ${RELEASE_TAG}"
             echo ""
-            echo "**Commit:** ${COMMIT_MSG}"
-            echo "**Tag:** \`${RELEASE_TAG}\`"
+            echo "Release \`${RELEASE_TAG}\` (\`${BUMP_KIND}\`) for commit \`${SHORT_SHA}\`."
+            echo ""
+            echo "- **Change:** ${COMMIT_MSG}"
+            if [[ -n "${PREV_TAG}" && "${PREV_TAG}" != "${RELEASE_TAG}" ]]; then
+              echo "- **Compare:** https://github.com/${GH_REPO}/compare/${PREV_TAG}...${RELEASE_TAG}"
+            fi
             echo ""
             echo "### Included Assets"
-            echo "- \`webdep-linux-x86_64.tar.gz\` (Static Linux amd64 binary)"
-            echo "- \`webdep-linux-aarch64.tar.gz\` (Static Linux arm64 binary)"
-            echo "- \`checksums.txt\` (SHA-256 verification checksums)"
+            echo "- \`webdep-linux-x86_64.tar.gz\` — Static Linux \`x86_64\` binary"
+            echo "- \`webdep-linux-aarch64.tar.gz\` — Static Linux \`aarch64\` binary"
+            echo "- \`checksums.txt\` — SHA-256 verification checksums"
           } > ../release_notes.md
 
-      - name: Publish GitHub Release
+      - name: Sync version commit & publish GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          NEXT_VER: ${{ needs.meta_and_test.outputs.next_ver }}
           RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
           TARGET_SHA: ${{ github.sha }}
         run: |
+          TAG_TARGET="${TARGET_SHA}"
+          if [[ "${REF_TYPE}" != "tag" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            awk -v v="$NEXT_VER" '
+              { line=$0; cr=(sub(/\r$/, "", line) ? "\r" : "") }
+              line ~ /^\[package\]$/ { p=1; print $0; next }
+              line ~ /^\[/ { p=0 }
+              p && !done && line ~ /^version[[:space:]]*=/ { sub(/"[^"]+"/, "\"" v "\"", line); done=1; print line cr; next }
+              { print $0 }
+            ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+            awk -v v="$NEXT_VER" '
+              { line=$0; cr=(sub(/\r$/, "", line) ? "\r" : "") }
+              line == "[[package]]" { p=1; w=0; print $0; next }
+              p && line == "name = \"webdep\"" { w=1; print $0; next }
+              p && w && !done && line ~ /^version[[:space:]]*=/ { sub(/"[^"]+"/, "\"" v "\"", line); done=1; w=0; p=0; print line cr; next }
+              { print $0 }
+            ' Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+            if ! git diff --quiet -- Cargo.toml Cargo.lock; then
+              git add Cargo.toml Cargo.lock
+              git commit -m "chore(release): ${RELEASE_TAG} [skip ci]"
+              if git push origin HEAD:main; then
+                TAG_TARGET=$(git rev-parse HEAD)
+              else
+                echo "Note: could not push version commit to main (continuing with release tag on ${TARGET_SHA})."
+                git reset --hard "${TARGET_SHA}"
+              fi
+            fi
+          fi
+
           if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-artifacts/* --clobber --repo "$GH_REPO"
-            gh release edit "$RELEASE_TAG" --notes-file release_notes.md --latest --repo "$GH_REPO"
+            gh release edit "$RELEASE_TAG" --title "${RELEASE_TAG}" --notes-file release_notes.md --latest --repo "$GH_REPO"
           else
             gh release create "$RELEASE_TAG" \
               --repo "$GH_REPO" \
-              --target "${TARGET_SHA}" \
-              --title "WebDep ${RELEASE_TAG}" \
+              --target "${TAG_TARGET}" \
+              --title "${RELEASE_TAG}" \
               --notes-file release_notes.md \
               --latest \
               release-artifacts/*
