@@ -183,6 +183,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
       - name: Download build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -214,14 +217,16 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
           TARGET_SHA: ${{ github.sha }}
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
-            gh release edit "$RELEASE_TAG" --notes-file release_notes.md --latest
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-artifacts/* --clobber --repo "$GH_REPO"
+            gh release edit "$RELEASE_TAG" --notes-file release_notes.md --latest --repo "$GH_REPO"
           else
             gh release create "$RELEASE_TAG" \
+              --repo "$GH_REPO" \
               --target "${TARGET_SHA}" \
               --title "WebDep ${RELEASE_TAG}" \
               --notes-file release_notes.md \
