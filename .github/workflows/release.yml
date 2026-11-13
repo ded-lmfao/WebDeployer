@@ -14,7 +14,7 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -34,19 +34,25 @@ jobs:
       pkg_version: ${{ steps.meta.outputs.pkg_version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Compute release tag and commit metadata
         id: meta
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           PKG_VER=$(grep -m1 '^version =' Cargo.toml | sed -E 's/version = "(.*)"/\1/' | tr -d '[:space:]')
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
           MSG=$(git log -1 --pretty=%s | tr '\r\n' ' ')
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
-            TAG="${{ inputs.tag }}"
-          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAG="${{ github.ref_name }}"
+          CLEAN_INPUT_TAG=$(printf '%s' "${INPUT_TAG}" | tr -d '\r\n[:space:]')
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" && -n "${CLEAN_INPUT_TAG}" ]]; then
+            TAG="${CLEAN_INPUT_TAG}"
+          elif [[ "${REF_TYPE}" == "tag" ]]; then
+            TAG="${REF_NAME}"
           else
             TS=$(date -u +%Y%m%d%H%M%S)
             TAG="v${PKG_VER}-${TS}-${SHORT_SHA}"
@@ -61,13 +67,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Run Rust test suite
-        run: cargo test --no-fail-fast
+        run: cargo test --no-fail-fast --locked
 
       - name: Check frontend JavaScript syntax
         shell: bash
@@ -93,15 +101,16 @@ jobs:
             use_zig: "true"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Rust toolchain (${{ matrix.rust_target }})
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: stable
           targets: ${{ matrix.rust_target }}
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.rust_target }}
 
@@ -111,50 +120,58 @@ jobs:
 
       - name: Setup Zig & cargo-zigbuild (aarch64 static cross-build)
         if: matrix.use_zig == 'true'
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.14.0
 
       - name: Install cargo-zigbuild
         if: matrix.use_zig == 'true'
-        uses: taiki-e/install-action@cargo-zigbuild
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-zigbuild
 
       - name: Build release binary (x86_64-unknown-linux-musl)
         if: matrix.use_zig == 'false'
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
+          RUST_TARGET: ${{ matrix.rust_target }}
           WEBDEP_RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
           WEBDEP_COMMIT_SHA: ${{ needs.meta_and_test.outputs.short_sha }}
           WEBDEP_COMMIT_MSG: ${{ needs.meta_and_test.outputs.commit_msg }}
           WEBDEP_DEFAULT_REPO: ${{ github.repository }}
-        run: cargo build --release --target ${{ matrix.rust_target }}
+        run: cargo build --release --locked --target "${RUST_TARGET}"
 
       - name: Build release binary (aarch64-unknown-linux-musl)
         if: matrix.use_zig == 'true'
         env:
+          RUST_TARGET: ${{ matrix.rust_target }}
           WEBDEP_RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
           WEBDEP_COMMIT_SHA: ${{ needs.meta_and_test.outputs.short_sha }}
           WEBDEP_COMMIT_MSG: ${{ needs.meta_and_test.outputs.commit_msg }}
           WEBDEP_DEFAULT_REPO: ${{ github.repository }}
-        run: cargo zigbuild --release --target ${{ matrix.rust_target }}
+        run: cargo zigbuild --release --locked --target "${RUST_TARGET}"
 
       - name: Package tarball and verify binary
         shell: bash
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          USE_ZIG: ${{ matrix.use_zig }}
         run: |
-          BIN="target/${{ matrix.rust_target }}/release/webdep"
+          BIN="target/${RUST_TARGET}/release/webdep"
           ls -lh "$BIN"
           mkdir -p dist
           cp "$BIN" dist/webdep
           chmod +x dist/webdep
-          if [[ "${{ matrix.use_zig }}" == "false" ]]; then
+          if [[ "${USE_ZIG}" == "false" ]]; then
             dist/webdep --version
           fi
-          ARCHIVE="webdep-${{ matrix.asset_arch }}.tar.gz"
+          ARCHIVE="webdep-${ASSET_ARCH}.tar.gz"
           tar -C dist -czf "dist/${ARCHIVE}" webdep
           rm -f dist/webdep
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist-${{ matrix.asset_arch }}
           path: dist/webdep-${{ matrix.asset_arch }}.tar.gz
@@ -163,9 +180,11 @@ jobs:
     name: Create GitHub Release
     needs: [meta_and_test, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: release-artifacts
           merge-multiple: true
@@ -196,13 +215,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
             gh release edit "$RELEASE_TAG" --notes-file release_notes.md --latest
           else
             gh release create "$RELEASE_TAG" \
-              --target "${{ github.sha }}" \
+              --target "${TARGET_SHA}" \
               --title "WebDep ${RELEASE_TAG}" \
               --notes-file release_notes.md \
               --latest \

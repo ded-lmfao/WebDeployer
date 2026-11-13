@@ -115,13 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     crate::db::prune_old_logs(&conn, 20_000);
                     crate::db::shrink_memory(&conn);
                 }
-                #[cfg(target_os = "linux")]
-                unsafe {
-                    extern "C" {
-                        fn malloc_trim(pad: libc::size_t) -> libc::c_int;
-                    }
-                    malloc_trim(0);
-                }
+                trim_process_heap();
             }
         });
     }
@@ -267,4 +261,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Returns free glibc heap pages back to the OS. Only glibc (`target_env = "gnu"`)
+/// exports `malloc_trim`; musl reclaims freed pages automatically and omits the symbol.
+#[inline]
+pub(crate) fn trim_process_heap() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        extern "C" {
+            fn malloc_trim(pad: libc::size_t) -> libc::c_int;
+        }
+        malloc_trim(0);
+    }
 }

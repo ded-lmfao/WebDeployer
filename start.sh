@@ -60,8 +60,8 @@ install_release_binary() {
     mkdir -p "$tmp_dir" target/release
 
     echo "[*] Downloading latest GitHub Release from ${repo} (${asset})..."
-    if ! curl -fsSL --max-time 180 "https://github.com/${repo}/releases/latest/download/checksums.txt" -o "${tmp_dir}/checksums.txt" \
-       || ! curl -fsSL --max-time 180 "https://github.com/${repo}/releases/latest/download/${asset}" -o "${tmp_dir}/${asset}"; then
+    if ! curl -fsSL --proto '=https' --tlsv1.2 --max-time 180 "https://github.com/${repo}/releases/latest/download/checksums.txt" -o "${tmp_dir}/checksums.txt" \
+       || ! curl -fsSL --proto '=https' --tlsv1.2 --max-time 180 "https://github.com/${repo}/releases/latest/download/${asset}" -o "${tmp_dir}/${asset}"; then
         rm -rf "$tmp_dir"
         return 1
     fi

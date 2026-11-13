@@ -245,13 +245,7 @@ impl Monitor {
                 .await;
 
                 if tick_count % 60 == 0 {
-                    #[cfg(target_os = "linux")]
-                    unsafe {
-                        extern "C" {
-                            fn malloc_trim(pad: libc::size_t) -> libc::c_int;
-                        }
-                        malloc_trim(0);
-                    }
+                    crate::trim_process_heap();
                 }
             }
         });

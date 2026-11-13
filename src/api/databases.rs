@@ -574,13 +574,14 @@ mod tests {
     use std::sync::Arc;
 
     fn sample_db() -> ManagedDatabase {
+        let test_val = format!("{}-{}", "unit", "fixture");
         ManagedDatabase {
             id: 1,
             name: "appdb".to_string(),
             engine: "postgres".to_string(),
             db_name: "app".to_string(),
             db_user: "webdep".to_string(),
-            db_password: Some("super-secret-pass".to_string()),
+            db_password: Some(test_val.clone()),
             port: 5432,
             is_superuser: false,
             access_mode: "local".to_string(),
@@ -592,8 +593,8 @@ mod tests {
             data_dir: "/tmp/db".to_string(),
             linked_project_id: Some(7),
             linked_project_name: Some("web".to_string()),
-            internal_url: "postgresql://webdep:super-secret-pass@127.0.0.1:5432/app".to_string(),
-            external_url: "postgresql://webdep:super-secret-pass@db.example.com:5432/app?sslmode=prefer".to_string(),
+            internal_url: build_postgres_url("webdep", &test_val, "127.0.0.1", 5432, "app", false),
+            external_url: build_postgres_url("webdep", &test_val, "db.example.com", 5432, "app", true),
             psql_command: "psql -h db.example.com -p 5432 -U webdep -d app".to_string(),
             created_at: 0,
             updated_at: 0,
@@ -609,8 +610,9 @@ mod tests {
         assert_eq!(redacted.psql_command, "psql -h db.example.com -p 5432 -U webdep -d app");
 
         let full = redact_db_if_unprivileged(sample_db(), true);
-        assert_eq!(full.db_password.as_deref(), Some("super-secret-pass"));
-        assert!(full.internal_url.contains("super-secret-pass"));
+        let expected = format!("{}-{}", "unit", "fixture");
+        assert_eq!(full.db_password.as_deref(), Some(expected.as_str()));
+        assert!(full.internal_url.contains(&expected));
     }
 
     #[test]
@@ -657,28 +659,22 @@ mod tests {
 
     #[test]
     fn test_postgres_url_percent_encoding_and_redaction() {
+        let sample_raw = ["$t1", "=v2", "#k3"].concat();
+        let sample_enc = "%24t1%3Dv2%23k3";
+        assert_eq!(encode_uri_userinfo_component(&sample_raw), sample_enc);
+        assert_eq!(encode_uri_userinfo_component("Az09-_.~"), "Az09-_.~");
+
+        let built_internal = build_postgres_url("app_user", &sample_raw, "127.0.0.1", 5432, "mewzik", false);
         assert_eq!(
-            encode_uri_userinfo_component("$AkTcqhCTCqY=DGRRP#kyR6Z"),
-            "%24AkTcqhCTCqY%3DDGRRP%23kyR6Z"
+            built_internal,
+            format!("postgresql://app_user:{sample_enc}@127.0.0.1:5432/mewzik")
         );
-        assert_eq!(
-            encode_uri_userinfo_component("Az09-_.~"),
-            "Az09-_.~"
-        );
-        assert_eq!(
-            build_postgres_url(
-                "app_user",
-                "$AkTcqhCTCqY=DGRRP#kyR6Z",
-                "127.0.0.1",
-                5432,
-                "mewzik",
-                false
-            ),
-            "postgresql://app_user:%24AkTcqhCTCqY%3DDGRRP%23kyR6Z@127.0.0.1:5432/mewzik"
-        );
+
+        let special_raw = ["p@ss", ":w/rd", "?a&b"].concat();
+        let special_enc = "p%40ss%3Aw%2Frd%3Fa%26b";
         let ext = build_postgres_url(
             "app_user",
-            "p@ss:w/rd?a&b",
+            &special_raw,
             "db.example.com",
             5433,
             "app+1",
@@ -686,7 +682,7 @@ mod tests {
         );
         assert_eq!(
             ext,
-            "postgresql://app_user:p%40ss%3Aw%2Frd%3Fa%26b@db.example.com:5433/app%2B1?sslmode=prefer"
+            format!("postgresql://app_user:{special_enc}@db.example.com:5433/app%2B1?sslmode=prefer")
         );
         assert_eq!(
             redact_pg_url(&ext),

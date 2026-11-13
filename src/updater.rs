@@ -854,7 +854,7 @@ impl Updater {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&staged_new, std::fs::Permissions::from_mode(0o755));
+            let _ = std::fs::set_permissions(&staged_new, std::fs::Permissions::from_mode(0o700));
         }
 
         // Smoke-check executable runs cleanly before touching live binary
