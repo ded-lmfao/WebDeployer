@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
 Write-Host "===================================================" -ForegroundColor Cyan
-Write-Host "     WebDep - Multi-Website Hosting Platform" -ForegroundColor Cyan
+Write-Host "     WebDep - VPS Manager & Hosting Platform" -ForegroundColor Cyan
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -25,7 +25,6 @@ if (-not $needsBuild -and (Test-Path $binaryPath)) {
 if ($needsBuild) {
     Write-Host "[*] Compiling optimized release binary..." -ForegroundColor Yellow
     Stop-Process -Name "webdep*" -Force -ErrorAction SilentlyContinue
-    Stop-Process -Name "nexus-deploy*" -Force -ErrorAction SilentlyContinue
     if (Test-Path $binaryPath) {
         $oldPath = "$binaryPath.old.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
         Move-Item $binaryPath $oldPath -Force -ErrorAction SilentlyContinue
@@ -36,14 +35,12 @@ if ($needsBuild) {
         Write-Host "[!] Build failed. Please verify Rust installation." -ForegroundColor Red
         Exit 1
     }
-    Copy-Item $binaryPath (Join-Path $PSScriptRoot "target\release\nexus-deploy.exe") -Force -ErrorAction SilentlyContinue
 }
 
 $port = if ($env:PORT) { $env:PORT } else { "4600" }
 $url = "http://127.0.0.1:$port"
 
 Stop-Process -Name "webdep*" -Force -ErrorAction SilentlyContinue
-Stop-Process -Name "nexus-deploy*" -Force -ErrorAction SilentlyContinue
 Get-NetTCPConnection -LocalPort 4600 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
 Write-Host "[*] Starting WebDep server on $url" -ForegroundColor Green

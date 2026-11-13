@@ -1,5 +1,5 @@
 {
-  "name": "nexus-deploy",
+  "name": "webdep",
   "version": "2.0.0",
   "description": "Self-hosted deployment platform: GitHub sync, release directories, health-checked deploys, automatic rollback.",
   "type": "module",

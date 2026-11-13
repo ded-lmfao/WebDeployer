@@ -50,17 +50,15 @@
 }
 
 .login-card-header .brand-icon {
-  width: 40px;
-  height: 40px;
-  font-size: 14px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-md);
-  background: var(--text-main);
-  color: var(--text-inverse);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 600;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .login-card-header-text h2 {
