@@ -28,6 +28,7 @@ const _netState = {
   samples: [],
   perfToServerOffset: 0,
   hasOffset: false,
+  playheadTs: null,
   displayMaxRate: 1024,
   hoverRatio: null,
   rafId: null,
@@ -276,6 +277,229 @@ function ensureOnlineChartDom() {
   return chartEl;
 }
 
+function syncPerfOffset(netState, samples, blend = 0.05) {
+  if (!Array.isArray(samples) || samples.length === 0) return;
+  const newestTs = samples[samples.length - 1].ts;
+  const impliedOffset = newestTs - performance.now();
+  if (!netState.hasOffset) {
+    netState.perfToServerOffset = impliedOffset;
+    netState.hasOffset = true;
+  } else {
+    netState.perfToServerOffset += (impliedOffset - netState.perfToServerOffset) * blend;
+  }
+}
+
+function renderSmoothNetFrame(cfg, netState, nowPerf) {
+  const dt = netState.lastDrawPerf > 0
+    ? Math.min(0.08, Math.max(0.004, (nowPerf - netState.lastDrawPerf) / 1000))
+    : 0.016;
+  netState.lastDrawPerf = nowPerf;
+
+  const { svgW, svgH, topPad, yZeroIn, yZeroOut, windowMs, lagMs, ids } = cfg;
+  const samples = netState.samples;
+  const inAreaEl = document.getElementById(ids.inArea);
+  const outAreaEl = document.getElementById(ids.outArea);
+  const inGlowEl = document.getElementById(ids.inGlow);
+  const outGlowEl = document.getElementById(ids.outGlow);
+  const inLineEl = document.getElementById(ids.inLine);
+  const outLineEl = document.getElementById(ids.outLine);
+  const inDotEl = document.getElementById(ids.inDot);
+  const outDotEl = document.getElementById(ids.outDot);
+  const crossEl = document.getElementById(ids.crosshair);
+  const peakEl = document.getElementById(ids.peak);
+  if (!inLineEl || !outLineEl || !inAreaEl || !outAreaEl) return false;
+
+  if (samples.length < 2) {
+    const flatInLine = `M0.00,${yZeroIn.toFixed(2)} L${svgW}.00,${yZeroIn.toFixed(2)}`;
+    const flatOutLine = `M0.00,${yZeroOut.toFixed(2)} L${svgW}.00,${yZeroOut.toFixed(2)}`;
+    const flatInArea = `M0.00,${yZeroIn.toFixed(2)} L${svgW}.00,${yZeroIn.toFixed(2)} Z`;
+    const flatOutArea = `M0.00,${yZeroOut.toFixed(2)} L${svgW}.00,${yZeroOut.toFixed(2)} Z`;
+    inLineEl.setAttribute('d', flatInLine);
+    outLineEl.setAttribute('d', flatOutLine);
+    if (inGlowEl) inGlowEl.setAttribute('d', flatInLine);
+    if (outGlowEl) outGlowEl.setAttribute('d', flatOutLine);
+    inAreaEl.setAttribute('d', flatInArea);
+    outAreaEl.setAttribute('d', flatOutArea);
+    if (inDotEl) {
+      inDotEl.style.opacity = '1';
+      inDotEl.style.left = '100%';
+      inDotEl.style.top = `${(yZeroIn / svgH) * 100}%`;
+    }
+    if (outDotEl) {
+      outDotEl.style.opacity = '1';
+      outDotEl.style.left = '100%';
+      outDotEl.style.top = `${(yZeroOut / svgH) * 100}%`;
+    }
+    if (peakEl) {
+      peakEl.textContent = samples.length === 1
+        ? (cfg.singleSamplePeakText || 'Sampling...')
+        : 'Starting...';
+    }
+    return true;
+  }
+
+  const firstTs = samples[0].ts;
+  const lastTs = samples[samples.length - 1].ts;
+  const estServerNow = netState.hasOffset
+    ? Math.min(lastTs + lagMs + 900, nowPerf + netState.perfToServerOffset)
+    : lastTs;
+  const spanMs = Math.max(0, lastTs - firstTs);
+  const effectiveLag = Math.min(lagMs, spanMs * 0.5);
+  const targetViewEnd = Math.max(firstTs + 50, Math.min(lastTs, estServerNow - effectiveLag));
+
+  // Monotonic non-backwards playhead prevents HTTP round-trip jitter from jerking the waveform
+  if (!Number.isFinite(netState.playheadTs) || netState.playheadTs < firstTs || netState.playheadTs > lastTs) {
+    netState.playheadTs = targetViewEnd;
+  } else {
+    const nominal = netState.playheadTs + dt * 1000;
+    const corrected = nominal + (targetViewEnd - nominal) * Math.min(0.18, dt * 2.5);
+    netState.playheadTs = Math.min(lastTs, Math.max(netState.playheadTs, corrected));
+  }
+  const viewEnd = netState.playheadTs;
+  const viewStart = viewEnd - windowMs;
+
+  // Include at most 1 look-behind / look-ahead bracket beyond the margin so clipped tangents stay smooth
+  const visible = samples.filter((s) => s.ts >= viewStart - 3000 && s.ts <= viewEnd + 3000);
+  const inWindow = visible.filter((s) => s.ts >= viewStart && s.ts <= viewEnd);
+  const peakBasis = inWindow.length ? inWindow : visible;
+
+  let rawPeak = cfg.minRawPeak ?? 512;
+  for (let i = 0; i < peakBasis.length; i++) {
+    const s = peakBasis[i];
+    if (s.inboundBps > rawPeak) rawPeak = s.inboundBps;
+    if (s.outboundBps > rawPeak) rawPeak = s.outboundBps;
+  }
+  const targetPeak = Math.max(1024, rawPeak * 1.15);
+  const scaleAlpha = 1 - Math.exp(-dt * 3.5);
+  netState.displayMaxRate += (targetPeak - netState.displayMaxRate) * scaleAlpha;
+  const maxRate = Math.max(1024, netState.displayMaxRate);
+
+  const inUsableH = yZeroIn - topPad;
+  const outUsableH = yZeroOut - topPad;
+  const ptsIn = [];
+  const ptsOut = [];
+  for (let i = 0; i < visible.length; i++) {
+    const s = visible[i];
+    const x = ((s.ts - viewStart) / windowMs) * svgW;
+    const yIn = yZeroIn - Math.min(1, s.inboundBps / maxRate) * inUsableH;
+    const yOut = yZeroOut - Math.min(1, s.outboundBps / maxRate) * outUsableH;
+    ptsIn.push({ x, y: yIn });
+    ptsOut.push({ x, y: yOut });
+  }
+
+  if (ptsIn.length === 0) {
+    const latest = samples[samples.length - 1];
+    const yInLast = yZeroIn - Math.min(1, (latest?.inboundBps || 0) / maxRate) * inUsableH;
+    const yOutLast = yZeroOut - Math.min(1, (latest?.outboundBps || 0) / maxRate) * outUsableH;
+    ptsIn.push({ x: 0, y: yZeroIn }, { x: svgW, y: yInLast });
+    ptsOut.push({ x: 0, y: yZeroOut }, { x: svgW, y: yOutLast });
+  } else {
+    const firstX = ptsIn[0].x;
+    if (firstX > 0.5) {
+      if (firstX > 6) {
+        ptsIn.unshift({ x: firstX - 3, y: yZeroIn });
+        ptsOut.unshift({ x: firstX - 3, y: yZeroOut });
+      }
+      ptsIn.unshift({ x: 0, y: yZeroIn });
+      ptsOut.unshift({ x: 0, y: yZeroOut });
+    }
+    const lastIn = ptsIn[ptsIn.length - 1];
+    const lastOut = ptsOut[ptsOut.length - 1];
+    if (lastIn.x < svgW - 0.5) {
+      ptsIn.push({ x: svgW, y: lastIn.y });
+      ptsOut.push({ x: svgW, y: lastOut.y });
+    }
+  }
+
+  const mIn = computeMonotoneTangents(ptsIn);
+  const mOut = computeMonotoneTangents(ptsOut);
+  const pathsIn = buildCubicPaths(ptsIn, mIn, yZeroIn);
+  const pathsOut = buildCubicPaths(ptsOut, mOut, yZeroOut);
+
+  inAreaEl.setAttribute('d', pathsIn.area);
+  outAreaEl.setAttribute('d', pathsOut.area);
+  inLineEl.setAttribute('d', pathsIn.line);
+  outLineEl.setAttribute('d', pathsOut.line);
+  if (inGlowEl) inGlowEl.setAttribute('d', pathsIn.line);
+  if (outGlowEl) outGlowEl.setAttribute('d', pathsOut.line);
+
+  const rightX = Math.max(0, Math.min(svgW, ptsIn[ptsIn.length - 1].x));
+  const dotYIn = evalMonotoneYAtX(ptsIn, mIn, rightX);
+  const dotYOut = evalMonotoneYAtX(ptsOut, mOut, rightX);
+
+  if (inDotEl) {
+    inDotEl.style.opacity = '1';
+    inDotEl.style.left = `${(rightX / svgW) * 100}%`;
+    inDotEl.style.top = `${(dotYIn / svgH) * 100}%`;
+  }
+  if (outDotEl) {
+    outDotEl.style.opacity = '1';
+    outDotEl.style.left = `${(rightX / svgW) * 100}%`;
+    outDotEl.style.top = `${(dotYOut / svgH) * 100}%`;
+  }
+
+  if (netState.hoverRatio !== null) {
+    const hoverTs = viewStart + netState.hoverRatio * windowMs;
+    let nearest = null;
+    let bestDiff = Infinity;
+    for (let i = 0; i < visible.length; i++) {
+      const diff = Math.abs(visible[i].ts - hoverTs);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        nearest = visible[i];
+      }
+    }
+    if (nearest && crossEl) {
+      const hx = ((nearest.ts - viewStart) / windowMs) * svgW;
+      if (hx >= 0 && hx <= svgW) {
+        crossEl.style.display = 'block';
+        crossEl.style.left = `${(hx / svgW) * 100}%`;
+      } else {
+        crossEl.style.display = 'none';
+      }
+      if (peakEl) {
+        peakEl.textContent = `In ${formatRate(nearest.inboundBps)} • Out ${formatRate(nearest.outboundBps)}`;
+      }
+      setText(ids.inVal, formatRate(nearest.inboundBps));
+      setText(ids.outVal, formatRate(nearest.outboundBps));
+    }
+  } else {
+    if (crossEl) crossEl.style.display = 'none';
+    const latest = samples[samples.length - 1];
+    setText(ids.inVal, formatRate(latest.inboundBps));
+    setText(ids.outVal, formatRate(latest.outboundBps));
+    if (peakEl) peakEl.textContent = `Peak ${formatRate(rawPeak)}`;
+  }
+
+  return true;
+}
+
+const APP_NET_CHART_CFG = {
+  svgW: SVG_W,
+  svgH: SVG_H,
+  topPad: TOP_PAD,
+  yZeroIn: Y_ZERO_IN,
+  yZeroOut: Y_ZERO_OUT,
+  windowMs: WINDOW_MS,
+  lagMs: LAG_MS,
+  minRawPeak: 512,
+  singleSamplePeakText: 'Sampling...',
+  ids: {
+    inArea: 'net-in-area',
+    outArea: 'net-out-area',
+    inGlow: 'net-in-glow',
+    outGlow: 'net-out-glow',
+    inLine: 'net-in-line',
+    outLine: 'net-out-line',
+    inDot: 'net-in-dot',
+    outDot: 'net-out-dot',
+    crosshair: 'net-crosshair',
+    peak: 'net-peak-label',
+    inVal: 'usage-net-in-val',
+    outVal: 'usage-net-out-val',
+  },
+};
+
 function drawNetFrame(nowPerf) {
   _netState.rafId = null;
 
@@ -287,173 +511,9 @@ function drawNetFrame(nowPerf) {
   const chartEl = ensureOnlineChartDom();
   if (!chartEl) return;
 
-  const dt = _netState.lastDrawPerf > 0 ? Math.min(0.08, (nowPerf - _netState.lastDrawPerf) / 1000) : 0.016;
-  _netState.lastDrawPerf = nowPerf;
-
-  const samples = _netState.samples;
-  const inAreaEl = document.getElementById('net-in-area');
-  const outAreaEl = document.getElementById('net-out-area');
-  const inGlowEl = document.getElementById('net-in-glow');
-  const outGlowEl = document.getElementById('net-out-glow');
-  const inLineEl = document.getElementById('net-in-line');
-  const outLineEl = document.getElementById('net-out-line');
-  const inDotEl = document.getElementById('net-in-dot');
-  const outDotEl = document.getElementById('net-out-dot');
-  const crossEl = document.getElementById('net-crosshair');
-  const peakEl = document.getElementById('net-peak-label');
-  if (!inLineEl || !outLineEl || !inAreaEl || !outAreaEl) return;
-
-  if (samples.length < 2) {
-    const flatInLine = `M0.00,${Y_ZERO_IN} L${SVG_W}.00,${Y_ZERO_IN}`;
-    const flatOutLine = `M0.00,${Y_ZERO_OUT} L${SVG_W}.00,${Y_ZERO_OUT}`;
-    const flatInArea = `M0.00,${Y_ZERO_IN} L${SVG_W}.00,${Y_ZERO_IN} Z`;
-    const flatOutArea = `M0.00,${Y_ZERO_OUT} L${SVG_W}.00,${Y_ZERO_OUT} Z`;
-    inLineEl.setAttribute('d', flatInLine);
-    outLineEl.setAttribute('d', flatOutLine);
-    if (inGlowEl) inGlowEl.setAttribute('d', flatInLine);
-    if (outGlowEl) outGlowEl.setAttribute('d', flatOutLine);
-    inAreaEl.setAttribute('d', flatInArea);
-    outAreaEl.setAttribute('d', flatOutArea);
-    if (inDotEl) {
-      inDotEl.style.opacity = '1';
-      inDotEl.style.left = '100%';
-      inDotEl.style.top = `${(Y_ZERO_IN / SVG_H) * 100}%`;
-    }
-    if (outDotEl) {
-      outDotEl.style.opacity = '1';
-      outDotEl.style.left = '100%';
-      outDotEl.style.top = `${(Y_ZERO_OUT / SVG_H) * 100}%`;
-    }
-    if (peakEl) peakEl.textContent = samples.length === 1 ? 'Sampling...' : 'Starting...';
+  if (renderSmoothNetFrame(APP_NET_CHART_CFG, _netState, nowPerf)) {
     _netState.rafId = requestAnimationFrame(drawNetFrame);
-    return;
   }
-
-  const firstTs = samples[0].ts;
-  const lastTs = samples[samples.length - 1].ts;
-  const estServerNow = _netState.hasOffset
-    ? Math.min(lastTs + LAG_MS + 900, nowPerf + _netState.perfToServerOffset)
-    : lastTs;
-  const spanMs = Math.max(0, lastTs - firstTs);
-  const effectiveLag = Math.min(LAG_MS, spanMs * 0.5);
-  const viewEnd = Math.max(firstTs + 50, Math.min(lastTs, estServerNow - effectiveLag));
-  const viewStart = viewEnd - WINDOW_MS;
-
-  // Keep a small look-behind/look-ahead margin so clipped off-screen tangents remain smooth.
-  const visible = samples.filter((s) => s.ts >= viewStart - 3000 && s.ts <= viewEnd + 3000);
-  const inWindow = visible.filter((s) => s.ts >= viewStart && s.ts <= viewEnd);
-  const peakBasis = inWindow.length ? inWindow : visible;
-
-  let rawPeak = 512;
-  for (let i = 0; i < peakBasis.length; i++) {
-    const s = peakBasis[i];
-    if (s.inboundBps > rawPeak) rawPeak = s.inboundBps;
-    if (s.outboundBps > rawPeak) rawPeak = s.outboundBps;
-  }
-  const targetPeak = Math.max(1024, rawPeak * 1.15);
-  const scaleAlpha = 1 - Math.exp(-dt * 4.5);
-  _netState.displayMaxRate += (targetPeak - _netState.displayMaxRate) * scaleAlpha;
-  const maxRate = Math.max(1024, _netState.displayMaxRate);
-
-  const inUsableH = Y_ZERO_IN - TOP_PAD;
-  const outUsableH = Y_ZERO_OUT - TOP_PAD;
-  const ptsIn = [];
-  const ptsOut = [];
-  for (let i = 0; i < visible.length; i++) {
-    const s = visible[i];
-    const x = ((s.ts - viewStart) / WINDOW_MS) * SVG_W;
-    const yIn = Y_ZERO_IN - Math.min(1, s.inboundBps / maxRate) * inUsableH;
-    const yOut = Y_ZERO_OUT - Math.min(1, s.outboundBps / maxRate) * outUsableH;
-    ptsIn.push({ x, y: yIn });
-    ptsOut.push({ x, y: yOut });
-  }
-
-  if (ptsIn.length === 0) {
-    const latest = samples[samples.length - 1];
-    const yInLast = Y_ZERO_IN - Math.min(1, (latest?.inboundBps || 0) / maxRate) * inUsableH;
-    const yOutLast = Y_ZERO_OUT - Math.min(1, (latest?.outboundBps || 0) / maxRate) * outUsableH;
-    ptsIn.push({ x: 0, y: Y_ZERO_IN }, { x: SVG_W, y: yInLast });
-    ptsOut.push({ x: 0, y: Y_ZERO_OUT }, { x: SVG_W, y: yOutLast });
-  } else {
-    // Anchor both edges so zero/active lines remain visible continuously across the full width.
-    const firstX = ptsIn[0].x;
-    if (firstX > 0.5) {
-      if (firstX > 6) {
-        ptsIn.unshift({ x: firstX - 3, y: Y_ZERO_IN });
-        ptsOut.unshift({ x: firstX - 3, y: Y_ZERO_OUT });
-      }
-      ptsIn.unshift({ x: 0, y: Y_ZERO_IN });
-      ptsOut.unshift({ x: 0, y: Y_ZERO_OUT });
-    }
-    const lastIn = ptsIn[ptsIn.length - 1];
-    const lastOut = ptsOut[ptsOut.length - 1];
-    if (lastIn.x < SVG_W - 0.5) {
-      ptsIn.push({ x: SVG_W, y: lastIn.y });
-      ptsOut.push({ x: SVG_W, y: lastOut.y });
-    }
-  }
-
-  const mIn = computeMonotoneTangents(ptsIn);
-  const mOut = computeMonotoneTangents(ptsOut);
-  const pathsIn = buildCubicPaths(ptsIn, mIn, Y_ZERO_IN);
-  const pathsOut = buildCubicPaths(ptsOut, mOut, Y_ZERO_OUT);
-
-  inAreaEl.setAttribute('d', pathsIn.area);
-  outAreaEl.setAttribute('d', pathsOut.area);
-  inLineEl.setAttribute('d', pathsIn.line);
-  outLineEl.setAttribute('d', pathsOut.line);
-  if (inGlowEl) inGlowEl.setAttribute('d', pathsIn.line);
-  if (outGlowEl) outGlowEl.setAttribute('d', pathsOut.line);
-
-  const rightX = Math.max(0, Math.min(SVG_W, ptsIn[ptsIn.length - 1].x));
-  const dotYIn = evalMonotoneYAtX(ptsIn, mIn, rightX);
-  const dotYOut = evalMonotoneYAtX(ptsOut, mOut, rightX);
-
-  if (inDotEl) {
-    inDotEl.style.opacity = '1';
-    inDotEl.style.left = `${(rightX / SVG_W) * 100}%`;
-    inDotEl.style.top = `${(dotYIn / SVG_H) * 100}%`;
-  }
-  if (outDotEl) {
-    outDotEl.style.opacity = '1';
-    outDotEl.style.left = `${(rightX / SVG_W) * 100}%`;
-    outDotEl.style.top = `${(dotYOut / SVG_H) * 100}%`;
-  }
-
-  if (_netState.hoverRatio !== null) {
-    const hoverTs = viewStart + _netState.hoverRatio * WINDOW_MS;
-    let nearest = null;
-    let bestDiff = Infinity;
-    for (let i = 0; i < visible.length; i++) {
-      const diff = Math.abs(visible[i].ts - hoverTs);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        nearest = visible[i];
-      }
-    }
-    if (nearest && crossEl) {
-      const hx = ((nearest.ts - viewStart) / WINDOW_MS) * SVG_W;
-      if (hx >= 0 && hx <= SVG_W) {
-        crossEl.style.display = 'block';
-        crossEl.style.left = `${(hx / SVG_W) * 100}%`;
-      } else {
-        crossEl.style.display = 'none';
-      }
-      if (peakEl) {
-        peakEl.textContent = `In ${formatRate(nearest.inboundBps)} • Out ${formatRate(nearest.outboundBps)}`;
-      }
-      setText('usage-net-in-val', formatRate(nearest.inboundBps));
-      setText('usage-net-out-val', formatRate(nearest.outboundBps));
-    }
-  } else {
-    if (crossEl) crossEl.style.display = 'none';
-    const latest = samples[samples.length - 1];
-    setText('usage-net-in-val', formatRate(latest.inboundBps));
-    setText('usage-net-out-val', formatRate(latest.outboundBps));
-    if (peakEl) peakEl.textContent = `Peak ${formatRate(rawPeak)}`;
-  }
-
-  _netState.rafId = requestAnimationFrame(drawNetFrame);
 }
 
 function startNetChartRaf() {
@@ -555,18 +615,7 @@ function applyUsagePayload(entity, data) {
   }
 
   _netState.samples = samples;
-  if (samples.length > 0) {
-    const newestTs = samples[samples.length - 1].ts;
-    const nowPerf = performance.now();
-    const impliedOffset = newestTs - nowPerf;
-    if (!_netState.hasOffset) {
-      _netState.perfToServerOffset = impliedOffset;
-      _netState.hasOffset = true;
-    } else {
-      // Gently track server clock drift without introducing HTTP latency jitter.
-      _netState.perfToServerOffset += (impliedOffset - _netState.perfToServerOffset) * 0.08;
-    }
-  }
+  syncPerfOffset(_netState, samples, 0.05);
 
   setText('usage-net-iface', portOnly);
   setText('usage-net-totals', `↓ ${formatBytesShort(rxTot)}  ↑ ${formatBytesShort(txTot)}`);
@@ -629,6 +678,7 @@ function resetAppUsageCards(projectId = null, entityKey = null) {
   _netState.running = false;
   _netState.samples = [];
   _netState.hasOffset = false;
+  _netState.playheadTs = null;
   _netState.displayMaxRate = 1024;
   _netState.hoverRatio = null;
   _netState.domMode = null;
@@ -684,4 +734,4 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-export { loadAppUsageCards, resetAppUsageCards };
+export { loadAppUsageCards, resetAppUsageCards, formatBytesShort, formatRate, setText, computeMonotoneTangents, buildCubicPaths, evalMonotoneYAtX, syncPerfOffset, renderSmoothNetFrame };

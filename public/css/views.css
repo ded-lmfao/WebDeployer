@@ -377,6 +377,8 @@
 }
 
 .overview-stats-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: stretch;
   margin-top: 4px;
   margin-bottom: 16px;
   gap: 12px;
@@ -384,6 +386,37 @@
 
 .overview-stats-grid .stat-card {
   padding: 12px 14px;
+}
+
+.overview-stats-grid .stat-card-network {
+  grid-column: span 2;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.overview-net-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.overview-net-chart {
+  height: 48px;
+  margin-bottom: 0;
+}
+
+.overview-net-footer {
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.overview-net-footer #overview-net-iface {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .overview-stats-grid .stat-value {

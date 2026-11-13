@@ -248,6 +248,7 @@ function getCacheTtlMs(path) {
   if (path.startsWith('/api/auth/')) return 0; // Always verify live authentication state with server
   if (path.startsWith('/api/logs') || path.includes('/files/content') || /\/api\/databases\/\d+\/logs/.test(path)) return 0; // Live logs / raw file contents
   if (path.startsWith('/api/databases')) return 3500; // Live database status
+  if (path.startsWith('/api/overview/network')) return 0; // Live 1s global VPS network telemetry
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 3000;
   if (path.startsWith('/api/deployments')) return 0; // Live deployment status and pipeline stage
   if (path.includes('/usage')) return 0; // Live CPU, RAM, disk, and network chart telemetry

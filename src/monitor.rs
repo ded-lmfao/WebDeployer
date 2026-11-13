@@ -188,6 +188,11 @@ impl Monitor {
         }
     }
 
+    /// Mark the monitor as actively observed by a client so the 1s sampler stays awake.
+    pub fn touch_activity(&self) {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+    }
+
     /// Returns true once `Monitor` has observed at least one PID in `pids` across >= 2 process
     /// refresh cycles, ensuring `sysinfo` CPU percentages have a valid differential baseline
     /// matching the Overview view.
@@ -224,6 +229,7 @@ impl Monitor {
                 let refresh_disks = tick_count % 32 == 0;
                 let _ = tokio::task::spawn_blocking(move || {
                     if is_active {
+                        crate::monitor::record_network_sample();
                         crate::monitor_net::sample_active_projects();
                     }
                     if should_refresh_host {
@@ -458,7 +464,7 @@ impl Monitor {
     }
 }
 
-const NET_HISTORY_LIMIT: usize = 30;
+const NET_HISTORY_LIMIT: usize = 60;
 
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -496,18 +502,46 @@ fn is_loopback_iface(name: &str) -> bool {
         || lower.contains("loopback")
 }
 
-fn aggregate_network_stats(networks: &sysinfo::Networks) -> (u64, u64, u64, u64, usize) {
-    let mut non_lo_rx_delta = 0u64;
-    let mut non_lo_tx_delta = 0u64;
-    let mut non_lo_rx_total = 0u64;
-    let mut non_lo_tx_total = 0u64;
-    let mut non_lo_count = 0usize;
+fn is_virtual_bridge_iface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "docker0"
+        || lower.starts_with("docker")
+        || lower.starts_with("veth")
+        || lower.starts_with("br-")
+        || lower.starts_with("virbr")
+        || lower.starts_with("cni")
+        || lower.starts_with("flannel")
+        || lower.starts_with("cali")
+        || lower.contains("vethernet")
+}
 
-    let mut all_rx_delta = 0u64;
-    let mut all_tx_delta = 0u64;
-    let mut all_rx_total = 0u64;
-    let mut all_tx_total = 0u64;
-    let mut all_count = 0usize;
+#[derive(Default)]
+struct NetBucket {
+    rx_delta: u64,
+    tx_delta: u64,
+    rx_total: u64,
+    tx_total: u64,
+    count: usize,
+}
+
+impl NetBucket {
+    fn add(&mut self, rx_d: u64, tx_d: u64, rx_t: u64, tx_t: u64) {
+        self.rx_delta = self.rx_delta.saturating_add(rx_d);
+        self.tx_delta = self.tx_delta.saturating_add(tx_d);
+        self.rx_total = self.rx_total.saturating_add(rx_t);
+        self.tx_total = self.tx_total.saturating_add(tx_t);
+        self.count += 1;
+    }
+
+    fn into_tuple(self) -> (u64, u64, u64, u64, usize) {
+        (self.rx_delta, self.tx_delta, self.rx_total, self.tx_total, self.count)
+    }
+}
+
+fn aggregate_network_stats(networks: &sysinfo::Networks) -> (u64, u64, u64, u64, usize) {
+    let mut phys = NetBucket::default();
+    let mut non_lo = NetBucket::default();
+    let mut all = NetBucket::default();
 
     for (name, data) in networks.iter() {
         let rx_d = data.received();
@@ -515,31 +549,21 @@ fn aggregate_network_stats(networks: &sysinfo::Networks) -> (u64, u64, u64, u64,
         let rx_t = data.total_received();
         let tx_t = data.total_transmitted();
 
-        all_rx_delta = all_rx_delta.saturating_add(rx_d);
-        all_tx_delta = all_tx_delta.saturating_add(tx_d);
-        all_rx_total = all_rx_total.saturating_add(rx_t);
-        all_tx_total = all_tx_total.saturating_add(tx_t);
-        all_count += 1;
-
+        all.add(rx_d, tx_d, rx_t, tx_t);
         if !is_loopback_iface(name) {
-            non_lo_rx_delta = non_lo_rx_delta.saturating_add(rx_d);
-            non_lo_tx_delta = non_lo_tx_delta.saturating_add(tx_d);
-            non_lo_rx_total = non_lo_rx_total.saturating_add(rx_t);
-            non_lo_tx_total = non_lo_tx_total.saturating_add(tx_t);
-            non_lo_count += 1;
+            non_lo.add(rx_d, tx_d, rx_t, tx_t);
+            if !is_virtual_bridge_iface(name) {
+                phys.add(rx_d, tx_d, rx_t, tx_t);
+            }
         }
     }
 
-    if non_lo_count > 0 {
-        (
-            non_lo_rx_delta,
-            non_lo_tx_delta,
-            non_lo_rx_total,
-            non_lo_tx_total,
-            non_lo_count,
-        )
+    if phys.count > 0 {
+        phys.into_tuple()
+    } else if non_lo.count > 0 {
+        non_lo.into_tuple()
     } else {
-        (all_rx_delta, all_tx_delta, all_rx_total, all_tx_total, all_count)
+        all.into_tuple()
     }
 }
 
@@ -637,10 +661,22 @@ mod network_tests {
         assert!(!is_loopback_iface("eth0"));
         assert!(!is_loopback_iface("Wi-Fi"));
         assert!(!is_loopback_iface("enp3s0"));
+        assert!(is_virtual_bridge_iface("docker0"));
+        assert!(is_virtual_bridge_iface("veth8a91f2"));
+        assert!(is_virtual_bridge_iface("br-0a1b2c"));
+        assert!(!is_virtual_bridge_iface("eth0"));
+        assert!(!is_virtual_bridge_iface("enp3s0"));
 
         let metrics = get_network_metrics();
         assert!(!metrics.history.is_empty());
         assert!(metrics.history.len() <= NET_HISTORY_LIMIT);
+        let serialized = serde_json::to_value(&metrics).expect("serialize NetworkMetrics");
+        assert!(serialized.get("inboundBps").is_some());
+        assert!(serialized.get("outboundBps").is_some());
+        assert!(serialized.get("totalRxBytes").is_some());
+        assert!(serialized.get("totalTxBytes").is_some());
+        assert!(serialized.get("interfaceCount").is_some());
+        assert!(serialized.get("history").is_some());
     }
 
     #[test]

@@ -1,7 +1,8 @@
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
-    response::Response,
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
 };
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +113,7 @@ pub(crate) struct OverviewResponse {
     pub summary: ResourceSummary,
     pub recent: Vec<crate::deployer::Deployment>,
     pub monitor: crate::monitor::SystemMetrics,
+    pub network: crate::monitor::NetworkMetrics,
 }
 
 pub(crate) fn format_resource_bytes(bytes: u64) -> String {
@@ -164,6 +166,7 @@ pub(crate) async fn overview_handler(
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     let user = current_user(&state, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    state.monitor.touch_activity();
     let cache_key = format!("overview:u{}", user.id);
 
     if let Some(res) = check_api_cache(&state.cache, &cache_key) {
@@ -501,9 +504,24 @@ pub(crate) async fn overview_handler(
         summary,
         recent,
         monitor,
+        network: crate::monitor::get_network_metrics(),
     };
 
     cached_json_response(&state.cache, cache_key, &payload, std::time::Duration::from_secs(2))
+}
+
+pub(crate) async fn overview_network_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let _user = current_user(&state, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    state.monitor.touch_activity();
+    let mut res = Json(crate::monitor::get_network_metrics()).into_response();
+    res.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+    );
+    Ok(res)
 }
 
 pub(crate) async fn monitor_handler(

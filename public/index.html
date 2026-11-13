@@ -375,19 +375,28 @@
         <section id="view-overview" class="view-section active">
           <!-- Compact Quick Stats Strip -->
           <div class="stats-grid overview-stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">Websites</div>
-              <div class="stat-value" id="stat-total-projects">0</div>
-              <div class="stat-meta"><span id="stat-online-count"
-                  style="color: var(--success); font-weight: 600;">0</span> online &bull; <span
-                  id="stat-offline-count">0</span> stopped</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Backend Services</div>
-              <div class="stat-value" id="stat-total-services">0</div>
-              <div class="stat-meta"><span id="stat-services-online"
-                  style="color: var(--success); font-weight: 600;">0</span> running &bull; <span
-                  id="stat-services-offline">0</span> stopped</div>
+            <div class="stat-card stat-card-network" id="overview-card-network">
+              <div class="overview-net-head">
+                <div class="stat-label" style="justify-content: flex-start; gap: 6px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  Global Network
+                </div>
+                <div class="app-net-legend">
+                  <span class="app-net-pill net-in" title="Whole VPS inbound throughput">
+                    <span class="app-net-dot"></span>In <strong id="overview-net-in-val">0 B/s</strong>
+                  </span>
+                  <span class="app-net-pill net-out" title="Whole VPS outbound throughput">
+                    <span class="app-net-dot"></span>Out <strong id="overview-net-out-val">0 B/s</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="app-usage-net-chart overview-net-chart" id="overview-net-chart"></div>
+              <div class="stat-meta overview-net-footer">
+                <span id="overview-net-iface">Whole VPS &bull; -- NICs</span>
+                <span id="overview-net-totals" class="app-net-totals">&#8595; 0 B &nbsp;&#8593; 0 B</span>
+              </div>
             </div>
             <div class="stat-card">
               <div class="stat-label">CPU</div>
@@ -408,6 +417,9 @@
             <div class="stat-card">
               <div class="stat-label">Disk Free</div>
               <div class="stat-value" id="stat-disk-free">-- GB</div>
+              <div class="progress-bar">
+                <div class="progress-fill green" id="stat-disk-bar" style="width: 0%;"></div>
+              </div>
               <div class="stat-meta" id="stat-disk-meta">-- total</div>
             </div>
           </div>

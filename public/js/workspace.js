@@ -714,6 +714,9 @@ function renderCurrentView() {
     state.logEventSource.close();
     state.logEventSource = null;
   }
+  if (state.currentView !== 'overview' && typeof window.stopOverviewNetPoller === 'function') {
+    window.stopOverviewNetPoller();
+  }
 
   // Close mobile sidebar if open
   document.querySelector('.sidebar')?.classList.remove('mobile-open');

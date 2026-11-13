@@ -8,6 +8,273 @@ import { state, PAGE_SIZE, paginateAndRender, setHtmlIfChanged, escapeHtml, form
 import { api, toast } from './api.js';
 import { loadDatabases } from './databases.js';
 import { renderPipelineStages, waterPipelines } from './deployments.js';
+import {
+  formatBytesShort,
+  formatRate,
+  setText,
+  syncPerfOffset,
+  renderSmoothNetFrame,
+} from './app_usage.js';
+
+const OV_NET_WINDOW_MS = 45000;
+const OV_NET_LAG_MS = 1250;
+const OV_NET_SVG_W = 420;
+const OV_NET_SVG_H = 56;
+const OV_NET_TOP = 7;
+const OV_NET_BOTTOM = 50;
+const OV_NET_Y_ZERO_IN = 48.2;
+const OV_NET_Y_ZERO_OUT = OV_NET_BOTTOM;
+const OV_NET_POLL_MS = 1000;
+
+const _ovNetState = {
+  samples: [],
+  perfToServerOffset: 0,
+  hasOffset: false,
+  playheadTs: null,
+  displayMaxRate: 1024,
+  hoverRatio: null,
+  rafId: null,
+  pollTimer: null,
+  pollInFlight: false,
+  lastFetchAt: 0,
+  lastDrawPerf: 0,
+  lastLiveServerTs: 0,
+  hasDrawnInitial: false,
+};
+
+const OV_NET_CHART_CFG = {
+  svgW: OV_NET_SVG_W,
+  svgH: OV_NET_SVG_H,
+  topPad: OV_NET_TOP,
+  yZeroIn: OV_NET_Y_ZERO_IN,
+  yZeroOut: OV_NET_Y_ZERO_OUT,
+  windowMs: OV_NET_WINDOW_MS,
+  lagMs: OV_NET_LAG_MS,
+  minRawPeak: 0,
+  singleSamplePeakText: 'Peak 0 B/s',
+  ids: {
+    inArea: 'ov-net-in-area',
+    outArea: 'ov-net-out-area',
+    inGlow: 'ov-net-in-glow',
+    outGlow: 'ov-net-out-glow',
+    inLine: 'ov-net-in-line',
+    outLine: 'ov-net-out-line',
+    inDot: 'ov-net-in-dot',
+    outDot: 'ov-net-out-dot',
+    crosshair: 'ov-net-crosshair',
+    peak: 'ov-net-peak-label',
+    inVal: 'overview-net-in-val',
+    outVal: 'overview-net-out-val',
+  },
+};
+
+function stopOverviewNetRaf() {
+  if (_ovNetState.rafId !== null && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(_ovNetState.rafId);
+  }
+  _ovNetState.rafId = null;
+  _ovNetState.lastDrawPerf = 0;
+}
+
+function stopOverviewNetPoller() {
+  if (_ovNetState.pollTimer !== null) {
+    clearInterval(_ovNetState.pollTimer);
+    _ovNetState.pollTimer = null;
+  }
+  stopOverviewNetRaf();
+}
+
+function ensureOverviewNetDom() {
+  const chartEl = document.getElementById('overview-net-chart');
+  if (!chartEl) return null;
+  if (chartEl.querySelector('#ov-net-in-line')) return chartEl;
+
+  chartEl.innerHTML = `
+    <svg class="app-net-svg" viewBox="0 0 ${OV_NET_SVG_W} ${OV_NET_SVG_H}" preserveAspectRatio="none" aria-label="Whole VPS global inbound and outbound network traffic">
+      <defs>
+        <clipPath id="overview-net-clip">
+          <rect x="0" y="0" width="${OV_NET_SVG_W}" height="${OV_NET_SVG_H}"></rect>
+        </clipPath>
+        <linearGradient id="overviewNetGradIn" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#34d399" stop-opacity="0.32"/>
+          <stop offset="100%" stop-color="#34d399" stop-opacity="0.01"/>
+        </linearGradient>
+        <linearGradient id="overviewNetGradOut" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.28"/>
+          <stop offset="100%" stop-color="#60a5fa" stop-opacity="0.01"/>
+        </linearGradient>
+      </defs>
+      <line x1="0" y1="18" x2="${OV_NET_SVG_W}" y2="18" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="34" x2="${OV_NET_SVG_W}" y2="34" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="${OV_NET_BOTTOM}" x2="${OV_NET_SVG_W}" y2="${OV_NET_BOTTOM}" stroke="rgba(255,255,255,0.08)"/>
+      <g clip-path="url(#overview-net-clip)">
+        <path id="ov-net-in-area" d="" fill="url(#overviewNetGradIn)"/>
+        <path id="ov-net-out-area" d="" fill="url(#overviewNetGradOut)"/>
+        <path id="ov-net-in-glow" d="" fill="none" stroke="rgba(52, 211, 153, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-out-glow" d="" fill="none" stroke="rgba(96, 165, 250, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+    </svg>
+    <div id="ov-net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
+    <div id="ov-net-out-dot" class="app-net-live-marker net-out" style="opacity:0;"></div>
+    <div id="ov-net-crosshair" class="app-net-crosshair" style="display:none;"></div>
+    <span id="ov-net-peak-label" class="app-net-scale-chip">Peak 0 B/s</span>`;
+
+  chartEl.onmousemove = (ev) => {
+    const rect = chartEl.getBoundingClientRect();
+    if (!rect.width) return;
+    _ovNetState.hoverRatio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+  };
+  chartEl.onmouseleave = () => {
+    _ovNetState.hoverRatio = null;
+    const cross = document.getElementById('ov-net-crosshair');
+    if (cross) cross.style.display = 'none';
+  };
+
+  return chartEl;
+}
+
+function drawOverviewNetFrame(nowPerf = 0) {
+  _ovNetState.rafId = null;
+
+  if (state.currentView !== 'overview' || (typeof document !== 'undefined' && document.hidden)) {
+    _ovNetState.lastDrawPerf = 0;
+    return;
+  }
+
+  const chartEl = ensureOverviewNetDom();
+  if (!chartEl) return;
+
+  if (renderSmoothNetFrame(OV_NET_CHART_CFG, _ovNetState, nowPerf)) {
+    _ovNetState.hasDrawnInitial = true;
+    startOverviewNetRaf();
+  }
+}
+
+function startOverviewNetRaf() {
+  if (_ovNetState.rafId !== null || state.currentView !== 'overview') return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  if (typeof requestAnimationFrame !== 'function') return;
+  _ovNetState.rafId = requestAnimationFrame(drawOverviewNetFrame);
+}
+
+function updateOverviewNetwork(net, opts = {}) {
+  if (!net || typeof net !== 'object') return;
+  const rawHistory = Array.isArray(net.history) ? net.history : [];
+  const normalized = rawHistory
+    .filter((pt) => pt && typeof pt.ts === 'number')
+    .map((pt) => ({
+      ts: pt.ts,
+      inboundBps: Math.max(0, Number(pt.inboundBps ?? pt.inbound_bps) || 0),
+      outboundBps: Math.max(0, Number(pt.outboundBps ?? pt.outbound_bps) || 0),
+    }))
+    .sort((a, b) => a.ts - b.ts);
+
+  const inBps = Math.max(0, Number(net.inboundBps ?? net.inbound_bps) || 0);
+  const outBps = Math.max(0, Number(net.outboundBps ?? net.outbound_bps) || 0);
+  if (normalized.length === 0) {
+    normalized.push({ ts: Date.now(), inboundBps: inBps, outboundBps: outBps });
+  }
+
+  const latestServerTs = normalized[normalized.length - 1].ts;
+  // Never let a 2s/3s-cached /api/overview snapshot overwrite or regress live 1s telemetry
+  const staleSnapshot = Boolean(opts.fromSnapshot)
+    && _ovNetState.lastLiveServerTs > 0
+    && latestServerTs <= _ovNetState.lastLiveServerTs;
+
+  if (!staleSnapshot) {
+    if (!opts.fromSnapshot) {
+      _ovNetState.lastLiveServerTs = Math.max(_ovNetState.lastLiveServerTs, latestServerTs);
+    }
+
+    const cutoff = latestServerTs - (OV_NET_WINDOW_MS + 12000);
+    const merged = new Map();
+    for (const s of _ovNetState.samples) {
+      if (s.ts >= cutoff) merged.set(s.ts, s);
+    }
+    for (const s of normalized) {
+      if (s.ts >= cutoff) merged.set(s.ts, s);
+    }
+    _ovNetState.samples = Array.from(merged.values()).sort((a, b) => a.ts - b.ts);
+    syncPerfOffset(_ovNetState, _ovNetState.samples, 0.05);
+
+    if (_ovNetState.hoverRatio === null) {
+      setText('overview-net-in-val', formatRate(inBps));
+      setText('overview-net-out-val', formatRate(outBps));
+    }
+
+    const ifaces = Number(net.interfaceCount ?? net.interface_count ?? 0);
+    setText(
+      'overview-net-iface',
+      ifaces > 0 ? `Whole VPS • ${ifaces} NIC${ifaces === 1 ? '' : 's'}` : 'Whole VPS NIC'
+    );
+
+    const rxTotal = Number(net.totalRxBytes ?? net.total_rx_bytes ?? 0);
+    const txTotal = Number(net.totalTxBytes ?? net.total_tx_bytes ?? 0);
+    setText('overview-net-totals', `↓ ${formatBytesShort(rxTotal)}  ↑ ${formatBytesShort(txTotal)}`);
+  }
+
+  ensureOverviewNetDom();
+  if (!_ovNetState.hasDrawnInitial) {
+    drawOverviewNetFrame(typeof performance !== 'undefined' ? performance.now() : 0);
+  } else {
+    startOverviewNetRaf();
+  }
+}
+
+async function fetchOverviewNetwork() {
+  if (_ovNetState.pollInFlight || state.currentView !== 'overview') return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  _ovNetState.pollInFlight = true;
+  _ovNetState.lastFetchAt = Date.now();
+  try {
+    const net = await api('/api/overview/network', { noCache: true });
+    if (net && typeof net === 'object') {
+      updateOverviewNetwork(net, { fromSnapshot: false });
+    }
+  } catch {
+    // Keep last rendered global VPS network graph silently on transient network glitches
+  } finally {
+    _ovNetState.pollInFlight = false;
+  }
+}
+
+function ensureOverviewNetPoller() {
+  if (state.currentView !== 'overview') {
+    stopOverviewNetPoller();
+    return;
+  }
+  startOverviewNetRaf();
+  if (_ovNetState.lastLiveServerTs === 0 && !_ovNetState.pollInFlight) {
+    void fetchOverviewNetwork();
+  }
+  if (_ovNetState.pollTimer !== null) return;
+  _ovNetState.pollTimer = setInterval(() => {
+    if (state.currentView !== 'overview') {
+      stopOverviewNetPoller();
+      return;
+    }
+    if (typeof document !== 'undefined' && document.hidden) {
+      stopOverviewNetRaf();
+      return;
+    }
+    startOverviewNetRaf();
+    if (Date.now() - _ovNetState.lastFetchAt >= OV_NET_POLL_MS - 120) {
+      void fetchOverviewNetwork();
+    }
+  }, OV_NET_POLL_MS);
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopOverviewNetRaf();
+    } else if (state.currentView === 'overview') {
+      startOverviewNetRaf();
+    }
+  });
+}
 
 function getWorkloadIconInfo(r) {
   if (r.kind === 'database') {
@@ -268,12 +535,10 @@ async function loadOverview() {
       }
     }
 
-    // Server Stats
+    // Server Stats & Sidebar Counts
     const m = data.monitor || {};
     const ovWeb = (data.projects || []).filter((x) => x.project.project_kind !== 'service');
     const ovSvc = (data.projects || []).filter((x) => x.project.project_kind === 'service');
-    document.getElementById('stat-total-projects').textContent = ovWeb.length;
-    document.getElementById('stat-total-services').textContent = ovSvc.length;
 
     // Keep navigation sidebar counts updated immediately without extra network calls
     const badgeWebEl = document.getElementById('badge-projects-count');
@@ -287,17 +552,10 @@ async function loadOverview() {
       badgeDbEl.textContent = Math.max(dbCountFromResources, dbCountFromState);
     }
 
-    const svcOnline = ovSvc.filter((x) => x.app?.running).length;
-    document.getElementById('stat-services-online').textContent = svcOnline;
-    document.getElementById('stat-services-offline').textContent = ovSvc.length - svcOnline;
-    
-    let online = 0;
-    let offline = 0;
-    ovWeb.forEach((item) => {
-      if (item.app?.running) online++; else offline++;
-    });
-    document.getElementById('stat-online-count').textContent = online;
-    document.getElementById('stat-offline-count').textContent = offline;
+    if (data.network) {
+      updateOverviewNetwork(data.network, { fromSnapshot: true });
+    }
+    ensureOverviewNetPoller();
 
     const cpuPct = m.cpu?.pct || 0;
     const cpuCores = m.cpu?.cores || 1;
@@ -323,10 +581,16 @@ async function loadOverview() {
     if (memMeta) memMeta.textContent = `${usedMb} MB / ${totalMb} MB`;
 
     if (m.disk) {
+      const diskPct = Math.min(100, Math.max(0, Number(m.disk.pct) || 0));
       const freeGb = (m.disk.free / 1073741824).toFixed(1);
       const totalGb = (m.disk.total / 1073741824).toFixed(1);
-      document.getElementById('stat-disk-free').textContent = `${freeGb} GB`;
-      document.getElementById('stat-disk-meta').textContent = `${totalGb} GB total (${m.disk.pct}% used)`;
+      setText('stat-disk-free', `${freeGb} GB`);
+      const diskBar = document.getElementById('stat-disk-bar');
+      if (diskBar) {
+        diskBar.style.width = `${diskPct}%`;
+        diskBar.className = `progress-fill ${diskPct > 85 ? 'rose' : diskPct > 70 ? 'amber' : 'green'}`;
+      }
+      setText('stat-disk-meta', `${totalGb} GB total (${diskPct}% used)`);
     }
 
     // Active resource summary bar
@@ -392,9 +656,12 @@ async function loadOverview() {
 window.loadOverview = loadOverview;
 window.renderResourceBreakdown = renderResourceBreakdown;
 window.filterResourceBreakdown = filterResourceBreakdown;
+window.stopOverviewNetPoller = stopOverviewNetPoller;
 
 export {
   loadOverview,
   renderResourceBreakdown,
   filterResourceBreakdown,
+  updateOverviewNetwork,
+  stopOverviewNetPoller,
 };
