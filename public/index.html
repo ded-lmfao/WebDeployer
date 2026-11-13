@@ -18,6 +18,7 @@
     }
   </style>
   <link rel="stylesheet" href="/style.css?v=3.13.15">
+  <link rel="stylesheet" href="/style.css?v=3.14.2">
 </head>
 
 <body>
@@ -309,6 +310,7 @@
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
               </svg>
               <span id="ws-tab-deployments-label">Deployments</span>
+              <span id="ws-tab-deployments-label">Overview</span>
             </button>
             <button class="ws-tab-item" data-ws-tab="github" onclick="switchWebsiteTab('github')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -430,7 +432,8 @@
 
           <!-- Live Resource Consumption & Telemetry Breakdown -->
           <div class="card resource-breakdown-card">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div class="card-header"
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span class="card-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
                   <span class="status-dot online"></span>
@@ -440,10 +443,14 @@
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <div class="filter-pills" id="resource-filter-pills">
-                  <button class="pill active" data-res-filter="all" onclick="filterResourceBreakdown('all')">All Workloads</button>
-                  <button class="pill" data-res-filter="website" onclick="filterResourceBreakdown('website')">Websites</button>
-                  <button class="pill" data-res-filter="service" onclick="filterResourceBreakdown('service')">Services</button>
-                  <button class="pill" data-res-filter="database" onclick="filterResourceBreakdown('database')">Databases</button>
+                  <button class="pill active" data-res-filter="all" onclick="filterResourceBreakdown('all')">All
+                    Workloads</button>
+                  <button class="pill" data-res-filter="website"
+                    onclick="filterResourceBreakdown('website')">Websites</button>
+                  <button class="pill" data-res-filter="service"
+                    onclick="filterResourceBreakdown('service')">Services</button>
+                  <button class="pill" data-res-filter="database"
+                    onclick="filterResourceBreakdown('database')">Databases</button>
                   <button class="pill" data-res-filter="panel" onclick="filterResourceBreakdown('panel')">Panel</button>
                 </div>
               </div>
@@ -457,7 +464,8 @@
               </div>
               <div class="res-summary-item">
                 <span class="res-summary-label">Managed Workloads</span>
-                <span class="res-summary-val" id="res-workloads-usage" style="color: var(--accent-light);">-- MB &bull; 0% CPU</span>
+                <span class="res-summary-val" id="res-workloads-usage" style="color: var(--accent-light);">-- MB &bull;
+                  0% CPU</span>
               </div>
               <div class="res-summary-item">
                 <span class="res-summary-label">System / OS Overhead</span>
@@ -537,13 +545,15 @@
             </div>
             <div class="view-actions">
               <div class="filter-pills" id="services-status-filters">
-                <button class="pill active" data-filter="all">All (<span id="services-filter-count-all">0</span>)</button>
-                <button class="pill" data-filter="running">Running (<span id="services-filter-count-running">0</span>)</button>
-                <button class="pill" data-filter="stopped">Stopped (<span id="services-filter-count-stopped">0</span>)</button>
+                <button class="pill active" data-filter="all">All (<span
+                    id="services-filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span
+                    id="services-filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span
+                    id="services-filter-count-stopped">0</span>)</button>
               </div>
               <input type="text" id="services-search-input" class="form-control"
-                placeholder="Search backend services..." style="width: 220px;"
-                aria-label="Search backend services">
+                placeholder="Search backend services..." style="width: 220px;" aria-label="Search backend services">
               <button class="btn btn-primary" id="add-service-header-btn" onclick="openAddServiceModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -564,17 +574,20 @@
           <div class="view-header">
             <div class="view-title-group">
               <h1>Managed Databases</h1>
-              <p>Deploy isolated PostgreSQL instances, manage remote IP allowlists, and inject credentials into hosted websites</p>
+              <p>Deploy isolated PostgreSQL instances, manage remote IP allowlists, and inject credentials into hosted
+                websites</p>
             </div>
             <div class="view-actions">
               <div class="filter-pills" id="databases-status-filters">
-                <button class="pill active" data-filter="all">All (<span id="databases-filter-count-all">0</span>)</button>
-                <button class="pill" data-filter="running">Running (<span id="databases-filter-count-running">0</span>)</button>
-                <button class="pill" data-filter="stopped">Stopped (<span id="databases-filter-count-stopped">0</span>)</button>
+                <button class="pill active" data-filter="all">All (<span
+                    id="databases-filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span
+                    id="databases-filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span
+                    id="databases-filter-count-stopped">0</span>)</button>
               </div>
-              <input type="text" id="databases-search-input" class="form-control"
-                placeholder="Search databases..." style="width: 220px;"
-                aria-label="Search databases">
+              <input type="text" id="databases-search-input" class="form-control" placeholder="Search databases..."
+                style="width: 220px;" aria-label="Search databases">
               <button class="btn btn-primary" id="add-database-header-btn" onclick="openCreateDatabaseModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -641,11 +654,112 @@
         </section>
 
         <!-- ==================== 4. DEPLOYMENTS VIEW ==================== -->
+        <!-- ==================== 4. APP OVERVIEW VIEW ==================== -->
         <section id="view-deployments" class="view-section">
           <div class="view-header">
             <div class="view-title-group">
               <h1 id="deployments-view-title">Deployments Pipeline</h1>
               <p id="deployments-view-desc">Automated zero-downtime deployment pipelines and operation history</p>
+              <h1 id="deployments-view-title">Overview</h1>
+              <p id="deployments-view-desc">Live resource usage, pipeline status, and last 5 deployment records</p>
+            </div>
+          </div>
+
+          <!-- 4 App Resource Usage Cards (CPU, RAM, Network Line Graph, Disk) -->
+          <div class="app-usage-grid" id="app-usage-cards-grid">
+            <!-- CPU Card -->
+            <div class="card app-usage-card" id="usage-card-cpu">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                    <rect x="9" y="9" width="6" height="6"></rect>
+                    <line x1="9" y1="1" x2="9" y2="4"></line>
+                    <line x1="15" y1="1" x2="15" y2="4"></line>
+                    <line x1="9" y1="20" x2="9" y2="23"></line>
+                    <line x1="15" y1="20" x2="15" y2="23"></line>
+                    <line x1="20" y1="9" x2="23" y2="9"></line>
+                    <line x1="20" y1="14" x2="23" y2="14"></line>
+                    <line x1="1" y1="9" x2="4" y2="9"></line>
+                    <line x1="1" y1="14" x2="4" y2="14"></line>
+                  </svg>
+                  CPU Usage
+                </span>
+                <span class="badge badge-neutral" id="usage-cpu-badge">Idle</span>
+              </div>
+              <div class="app-usage-value" id="usage-cpu-val">0.0%</div>
+              <div class="app-usage-meter">
+                <div class="app-usage-meter-fill" id="usage-cpu-bar" style="width: 0%;"></div>
+              </div>
+              <div class="app-usage-sub" id="usage-cpu-sub">Checking process metrics...</div>
+            </div>
+
+            <!-- RAM Card -->
+            <div class="card app-usage-card" id="usage-card-ram">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 19v-8a6 6 0 0 1 12 0v8"></path>
+                    <rect x="2" y="11" width="20" height="8" rx="2"></rect>
+                    <line x1="6" y1="19" x2="6" y2="22"></line>
+                    <line x1="10" y1="19" x2="10" y2="22"></line>
+                    <line x1="14" y1="19" x2="14" y2="22"></line>
+                    <line x1="18" y1="19" x2="18" y2="22"></line>
+                  </svg>
+                  RAM Usage
+                </span>
+                <span class="badge badge-neutral" id="usage-ram-badge">0%</span>
+              </div>
+              <div class="app-usage-value" id="usage-ram-val">0 B</div>
+              <div class="app-usage-meter">
+                <div class="app-usage-meter-fill" id="usage-ram-bar" style="width: 0%;"></div>
+              </div>
+              <div class="app-usage-sub" id="usage-ram-sub">Resident process memory</div>
+            </div>
+
+            <!-- Network Card (Inbound / Outbound Line Graph) -->
+            <div class="card app-usage-card app-usage-card-network" id="usage-card-network">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  Network
+                </span>
+                <div class="app-net-legend">
+                  <span class="app-net-pill net-in" title="Inbound throughput">
+                    <span class="app-net-dot"></span>In <strong id="usage-net-in-val">0 B/s</strong>
+                  </span>
+                  <span class="app-net-pill net-out" title="Outbound throughput">
+                    <span class="app-net-dot"></span>Out <strong id="usage-net-out-val">0 B/s</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="app-usage-net-chart" id="usage-net-chart"></div>
+              <div class="app-usage-sub app-net-footer">
+                <span id="usage-net-iface">Host NIC</span>
+                <span id="usage-net-totals" class="app-net-totals">↓ 0 B  ↑ 0 B</span>
+              </div>
+            </div>
+
+            <!-- Disk Card -->
+            <div class="card app-usage-card" id="usage-card-disk">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                  </svg>
+                  Disk Usage
+                </span>
+                <span class="badge badge-neutral" id="usage-disk-badge">0%</span>
+              </div>
+              <div class="app-usage-value" id="usage-disk-val">0 B</div>
+              <div class="app-usage-meter">
+                <div class="app-usage-meter-fill" id="usage-disk-bar" style="width: 0%;"></div>
+              </div>
+              <div class="app-usage-sub" id="usage-disk-sub">App workspace &amp; releases</div>
             </div>
           </div>
 
@@ -663,12 +777,21 @@
           </div>
 
           <!-- Deployments History Table -->
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Deployment Records</span>
+          <div class="card deployments-records-card">
+            <div class="card-header deployments-records-header">
+              <div class="deployments-records-title-group">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span class="card-title">Deployment Records</span>
+              </div>
+              <div class="deployments-records-meta">
+                <span class="badge badge-neutral deployments-retention-badge" id="deployments-count-badge">0 / 5 kept</span>
+              </div>
             </div>
-            <div class="card-body" style="padding: 0;">
-              <div class="table-responsive">
+            <div class="card-body deployments-records-body">
+              <div class="table-responsive deployments-table-wrap">
                 <table class="table tbl-deployments">
                   <thead>
                     <tr>
@@ -683,7 +806,7 @@
                   </thead>
                   <tbody id="deployments-table-body">
                     <tr>
-                      <td colspan="7" style="text-align: center; padding: 24px;">Loading deployments...</td>
+                      <td colspan="7" style="text-align: center; padding: 28px; color: var(--text-dim);">Loading deployments...</td>
                     </tr>
                   </tbody>
                 </table>
@@ -867,25 +990,33 @@
           <div class="view-header" style="margin-bottom: 16px;">
             <div class="view-title-group">
               <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(59, 130, 246, 0.12); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 18px;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                <div
+                  style="width: 36px; height: 36px; border-radius: 8px; background: rgba(59, 130, 246, 0.12); color: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
                 </div>
                 <div>
-                  <h1 style="font-size: 20px; font-weight: 700; margin: 0;" id="files-view-title">Files &amp; Storage</h1>
-                  <p style="font-size: 12.5px; color: var(--text-muted); margin: 2px 0 0 0;">Inspect, edit, upload, and manage application binaries, configurations, and assets in real time.</p>
+                  <h1 style="font-size: 20px; font-weight: 700; margin: 0;" id="files-view-title">Files &amp; Storage
+                  </h1>
+                  <p style="font-size: 12.5px; color: var(--text-muted); margin: 2px 0 0 0;">Inspect, edit, upload, and
+                    manage application binaries, configurations, and assets in real time.</p>
                 </div>
               </div>
             </div>
-            <div class="view-actions" id="files-header-actions" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <div class="view-actions" id="files-header-actions"
+              style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
               <input type="file" id="service-file-upload-input" multiple style="display: none;"
                 onchange="handleFilesUpload(event)" aria-label="Upload files to service directory">
-              <input type="file" id="service-folder-upload-input" webkitdirectory directory multiple style="display: none;"
-                onchange="handleFilesUpload(event)" aria-label="Upload directory to service directory">
+              <input type="file" id="service-folder-upload-input" webkitdirectory directory multiple
+                style="display: none;" onchange="handleFilesUpload(event)"
+                aria-label="Upload directory to service directory">
 
               <button class="btn btn-primary btn-sm files-write-only"
                 onclick="document.getElementById('service-file-upload-input').click()"
                 title="Upload files (.jar, .py, configs, assets) directly into this directory">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"
+                  style="margin-right: 4px; vertical-align: -2px;">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="17 8 12 3 7 8"></polyline>
                   <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -896,7 +1027,8 @@
               <button class="btn btn-secondary btn-sm files-write-only"
                 onclick="document.getElementById('service-folder-upload-input').click()"
                 title="Upload an entire directory folder">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"
+                  style="margin-right: 4px; vertical-align: -2px;">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                   <line x1="12" y1="11" x2="12" y2="17"></line>
                   <line x1="9" y1="14" x2="15" y2="14"></line>
@@ -904,8 +1036,10 @@
                 Upload Folder
               </button>
 
-              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFile()" title="Create a new blank file in this folder">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
+              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFile()"
+                title="Create a new blank file in this folder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"
+                  style="margin-right: 4px; vertical-align: -2px;">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                   <polyline points="14 2 14 8 20 8"></polyline>
                   <line x1="12" y1="18" x2="12" y2="12"></line>
@@ -914,16 +1048,20 @@
                 + New File
               </button>
 
-              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFolder()" title="Create a new subfolder">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 4px; vertical-align: -2px;">
+              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFolder()"
+                title="Create a new subfolder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"
+                  style="margin-right: 4px; vertical-align: -2px;">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                   <line x1="12" y1="11" x2="12" y2="17"></line>
                 </svg>
                 + New Folder
               </button>
 
-              <button class="btn btn-secondary btn-sm" id="files-refresh-btn" onclick="loadFilesView()" title="Refresh file directory">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -2px;">
+              <button class="btn btn-secondary btn-sm" id="files-refresh-btn" onclick="loadFilesView()"
+                title="Refresh file directory">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"
+                  style="vertical-align: -2px;">
                   <polyline points="23 4 23 10 17 10"></polyline>
                   <polyline points="1 20 1 14 7 14"></polyline>
                   <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -933,42 +1071,62 @@
           </div>
 
           <!-- Main Unified File Explorer & In-Browser IDE Surface (1 Box, Dual Mode) -->
-          <div class="card file-explorer-card" id="file-explorer-dropzone" style="padding: 0; overflow: hidden; position: relative;">
+          <div class="card file-explorer-card" id="file-explorer-dropzone"
+            style="padding: 0; overflow: hidden; position: relative;">
             <!-- Drop overlay when dragging files from desktop -->
             <div id="file-drop-overlay" class="file-drop-overlay" style="display: none;">
               <div class="file-drop-overlay-box">
-                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)" stroke-width="1.8">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)"
+                  stroke-width="1.8">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="17 8 12 3 7 8"></polyline>
                   <line x1="12" y1="3" x2="12" y2="15"></line>
                 </svg>
-                <div style="font-size: 15px; font-weight: 600; margin-top: 10px; color: var(--text-main);">Drop files to upload</div>
-                <div style="font-size: 12px; color: var(--text-muted); margin-top: 3px;" id="file-drop-path-label">Uploading to current folder</div>
+                <div style="font-size: 15px; font-weight: 600; margin-top: 10px; color: var(--text-main);">Drop files to
+                  upload</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 3px;" id="file-drop-path-label">
+                  Uploading to current folder</div>
               </div>
             </div>
 
             <!-- View 1: File Browser & Directory Table -->
             <div id="files-browser-view">
               <!-- Breadcrumb Navigation & Filter Toolbar -->
-              <div class="file-explorer-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;">
+              <div class="file-explorer-bar"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-                  <button class="btn btn-secondary btn-sm" id="files-up-btn" onclick="filesGoUp()" title="Go to parent directory" style="display: none; padding: 4px 8px;">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                  <button class="btn btn-secondary btn-sm" id="files-up-btn" onclick="filesGoUp()"
+                    title="Go to parent directory" style="display: none; padding: 4px 8px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="2.5">
+                      <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
                     <span style="font-size: 11.5px; margin-left: 2px;">Up</span>
                   </button>
                   <div id="files-breadcrumb" class="file-breadcrumb-trail"></div>
-                  <button class="file-copy-path-btn" onclick="filesCopyCurrentPath()" title="Copy current folder path to clipboard">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <button class="file-copy-path-btn" onclick="filesCopyCurrentPath()"
+                    title="Copy current folder path to clipboard">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
                   </button>
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 10px;">
                   <div class="file-search-input-wrap">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="file-search-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                    <input type="text" id="files-filter-input" placeholder="Filter files..." aria-label="Filter files" class="file-filter-input" oninput="filesFilterList(this.value)">
-                    <button type="button" id="files-filter-clear" class="file-filter-clear" onclick="filesClearFilter()" style="display: none;">&times;</button>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                      class="file-search-icon">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="files-filter-input" placeholder="Filter files..." aria-label="Filter files"
+                      class="file-filter-input" oninput="filesFilterList(this.value)">
+                    <button type="button" id="files-filter-clear" class="file-filter-clear" onclick="filesClearFilter()"
+                      style="display: none;">&times;</button>
                   </div>
-                  <span id="files-count-badge" class="badge badge-neutral" style="font-size: 11px; font-family: var(--font-mono); font-weight: 500;">
+                  <span id="files-count-badge" class="badge badge-neutral"
+                    style="font-size: 11px; font-family: var(--font-mono); font-weight: 500;">
                     0 items
                   </span>
                 </div>
@@ -978,7 +1136,8 @@
               <div id="files-table-container" class="file-table-container" style="overflow-x: auto;">
                 <table class="file-table" style="width: 100%; border-collapse: collapse; text-align: left;">
                   <thead>
-                    <tr style="border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.015);">
+                    <tr
+                      style="border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.015);">
                       <th style="padding: 10px 16px; font-weight: 600; width: 46%;">Name</th>
                       <th style="padding: 10px 14px; font-weight: 600; width: 14%;">Size</th>
                       <th style="padding: 10px 14px; font-weight: 600; width: 22%;">Modified</th>
@@ -996,32 +1155,58 @@
             </div>
 
             <!-- View 2: Professional In-Browser IDE Code / Config Editor (Unified in Same Box) -->
-            <div class="file-editor-card" id="files-editor-card" style="display: none; padding: 0; overflow: hidden; border: none; border-radius: 0; background: #0b0f19;">
-              <div class="file-editor-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; flex-wrap: wrap; gap: 8px;">
+            <div class="file-editor-card" id="files-editor-card"
+              style="display: none; padding: 0; overflow: hidden; border: none; border-radius: 0; background: #0b0f19;">
+              <div class="file-editor-header"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; flex-wrap: wrap; gap: 8px;">
                 <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-                  <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()" title="Back to files list" style="padding: 4px 10px; display: inline-flex; align-items: center; gap: 5px; font-weight: 500;">
-                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                  <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()" title="Back to files list"
+                    style="padding: 4px 10px; display: inline-flex; align-items: center; gap: 5px; font-weight: 500;">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="19" y1="12" x2="5" y2="12"></line>
+                      <polyline points="12 19 5 12 12 5"></polyline>
+                    </svg>
                     <span>Back</span>
                   </button>
                   <div class="file-editor-tab-pill">
                     <span id="files-editor-icon" style="display: inline-flex; align-items: center;"></span>
-                    <span id="files-editor-name" style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;"></span>
-                    <span id="files-editor-dirty-badge" class="file-editor-dirty-indicator" style="display: none;" title="Unsaved changes"></span>
+                    <span id="files-editor-name"
+                      style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;"></span>
+                    <span id="files-editor-dirty-badge" class="file-editor-dirty-indicator" style="display: none;"
+                      title="Unsaved changes"></span>
                   </div>
-                  <span id="files-editor-meta" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
+                  <span id="files-editor-meta"
+                    style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
                   <span class="file-editor-kbd hide-mobile" title="Press Ctrl+S to save">Ctrl+S</span>
-                  <button class="btn btn-secondary btn-sm" id="files-download-current-btn" onclick="filesDownloadCurrent()" title="Download file to computer">
-                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                  <button class="btn btn-secondary btn-sm" id="files-download-current-btn"
+                    onclick="filesDownloadCurrent()" title="Download file to computer">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" x2="12" y1="15" y2="3" />
+                    </svg>
                     <span>Download</span>
                   </button>
-                  <button class="btn btn-secondary btn-sm hide-mobile" id="files-fullscreen-btn" onclick="filesToggleFullscreen()" title="Toggle full-height workspace">
-                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                  <button class="btn btn-secondary btn-sm hide-mobile" id="files-fullscreen-btn"
+                    onclick="filesToggleFullscreen()" title="Toggle full-height workspace">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M15 3h6v6" />
+                      <path d="M10 14 21 3" />
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    </svg>
                     <span>Fullscreen</span>
                   </button>
-                  <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent(true)" title="Save changes and return to files (Ctrl+S)">
-                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent(true)"
+                    title="Save changes and return to files (Ctrl+S)">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
                     <span>Save</span>
                   </button>
                 </div>
@@ -1031,8 +1216,10 @@
               <div class="file-editor-body" id="files-editor-body">
                 <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
                 <div class="file-editor-stage" id="files-editor-stage">
-                  <pre id="files-editor-pre" class="file-editor-pre" aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
-                  <textarea id="files-editor" class="file-editor-textarea" aria-label="File content editor" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+                  <pre id="files-editor-pre" class="file-editor-pre"
+                    aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
+                  <textarea id="files-editor" class="file-editor-textarea" aria-label="File content editor"
+                    spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
                 </div>
               </div>
 
@@ -1058,7 +1245,8 @@
             <div class="view-title-group">
               <h1>Environment Variables &amp; Secrets</h1>
               <p>Add, edit a single variable inline, edit multiple variables at once, or manage as a raw
-                <code>.env</code> file. Encrypted with AES-256-GCM.</p>
+                <code>.env</code> file. Encrypted with AES-256-GCM.
+              </p>
             </div>
             <div class="view-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
               <input type="file" id="env-file-upload-input" accept=".env,text/plain" style="display: none;"
@@ -1356,10 +1544,12 @@
           <div class="settings-cards-grid">
             <!-- 1. Account Security Card -->
             <div class="project-card settings-card" id="settings-security-card">
-              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
                   <div class="project-card-icon" style="color: #38bdf8;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
                       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                     </svg>
                   </div>
@@ -1367,12 +1557,14 @@
                     <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
                       <span>Account Security</span>
                     </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
                       Passkeys &bull; TOTP 2FA &bull; Sessions
                     </div>
                   </div>
                 </div>
-                <span class="badge badge-neutral" id="settings-2fa-status-badge" style="flex-shrink: 0;">Checking...</span>
+                <span class="badge badge-neutral" id="settings-2fa-status-badge"
+                  style="flex-shrink: 0;">Checking...</span>
               </div>
 
               <div class="settings-sec-summary-row">
@@ -1397,7 +1589,8 @@
               <div class="project-card-actions" style="justify-content: flex-start;">
                 <button type="button" class="btn btn-primary btn-sm" id="settings-open-passkeys-btn"
                   onclick="openSecurityModal('passkeys')">Passkeys</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openSecurityModal('password')">Password</button>
+                <button type="button" class="btn btn-secondary btn-sm"
+                  onclick="openSecurityModal('password')">Password</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="settings-open-2fa-btn"
                   onclick="openSecurityModal('2fa')">2FA</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="revokeOtherSessions()">Revoke</button>
@@ -1406,18 +1599,21 @@
 
             <!-- 2. GitHub Tokens & Deploy Defaults Card -->
             <div class="project-card settings-card" id="settings-global-config-card">
-              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
                   <div class="project-card-icon" style="color: var(--text-main);">
                     <svg viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                      <path
+                        d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
                     </svg>
                   </div>
                   <div style="min-width: 0;">
                     <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
                       <span>GitHub &amp; Deploy</span>
                     </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
                       Tokens &bull; Thresholds
                     </div>
                   </div>
@@ -1427,9 +1623,13 @@
 
               <form id="settings-form">
                 <div class="settings-card-inset">
-                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
-                    <span class="form-label" style="margin: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim);">Access Tokens</span>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()" style="padding: 2px 8px; font-size: 11px;">+ Add</button>
+                  <div
+                    style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span class="form-label"
+                      style="margin: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim);">Access
+                      Tokens</span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()"
+                      style="padding: 2px 8px; font-size: 11px;">+ Add</button>
                   </div>
                   <div id="github-tokens-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
                 </div>
@@ -1444,7 +1644,8 @@
                       </div>
                       <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="setting-default-retention">Keep Releases</label>
-                        <input type="number" id="setting-default-retention" class="form-control" required min="2" max="50">
+                        <input type="number" id="setting-default-retention" class="form-control" required min="2"
+                          max="50">
                       </div>
                       <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="setting-step-timeout">Step Timeout (s)</label>
@@ -1459,7 +1660,8 @@
                 </details>
 
                 <div class="project-card-actions" style="justify-content: space-between;">
-                  <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">SQLite Persisted</span>
+                  <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">SQLite
+                    Persisted</span>
                   <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
                 </div>
               </form>
@@ -1467,10 +1669,12 @@
 
             <!-- 3. Platform Version & 1-Click Self-Update Card -->
             <div class="project-card settings-card" id="settings-update-card">
-              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
                   <div class="project-card-icon" style="color: var(--accent-light);">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
                       <polyline points="23 4 23 10 17 10"></polyline>
                       <polyline points="1 20 1 14 7 14"></polyline>
                       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -1480,24 +1684,31 @@
                     <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
                       <span>Platform Update</span>
                     </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
-                      origin/<span id="platform-remote-branch">main</span> &bull; <code id="platform-remote-hash" style="color: var(--text-muted); font-size: 11px;">...</code>
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      origin/<span id="platform-remote-branch">main</span> &bull; <code id="platform-remote-hash"
+                        style="color: var(--text-muted); font-size: 11px;">...</code>
                     </div>
                   </div>
                 </div>
-                <span class="badge" id="platform-version-badge" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-light); font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;">Checking...</span>
+                <span class="badge" id="platform-version-badge"
+                  style="background: rgba(99, 102, 241, 0.15); color: var(--accent-light); font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;">Checking...</span>
               </div>
 
               <div class="settings-card-inset">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                  <div style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-family: var(--font-mono);">
-                    <span style="font-weight: 600; color: var(--text-main);">Instance: <span id="platform-branch-name">main</span></span>
+                  <div
+                    style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-family: var(--font-mono);">
+                    <span style="font-weight: 600; color: var(--text-main);">Instance: <span
+                        id="platform-branch-name">main</span></span>
                     <span style="color: var(--text-dim);">&bull;</span>
                     <code id="platform-commit-hash" style="color: var(--accent-light); font-size: 12px;">...</code>
                   </div>
-                  <div style="font-size: 11.5px; font-weight: 600; flex-shrink: 0;" id="platform-remote-status-text">Checking...</div>
+                  <div style="font-size: 11.5px; font-weight: 600; flex-shrink: 0;" id="platform-remote-status-text">
+                    Checking...</div>
                 </div>
-                <div id="platform-commit-msg" style="font-size: 11px; color: var(--text-dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <div id="platform-commit-msg"
+                  style="font-size: 11px; color: var(--text-dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   Fetching commit details...
                 </div>
               </div>
@@ -1507,18 +1718,22 @@
                   placeholder="owner/repo or https://github.com/owner/repo.git"
                   style="flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11.5px;"
                   aria-label="Platform update repository">
-                <button type="button" class="btn btn-secondary btn-sm" id="save-platform-repo-btn" onclick="savePlatformUpdateRepo()" style="flex-shrink: 0;">
+                <button type="button" class="btn btn-secondary btn-sm" id="save-platform-repo-btn"
+                  onclick="savePlatformUpdateRepo()" style="flex-shrink: 0;">
                   Save Repo
                 </button>
               </div>
 
               <div class="project-card-actions" style="justify-content: space-between;">
-                <span class="badge badge-neutral" style="font-size: 10px;" title="Preserves data/ and .env">&#10003; Safe (data/ &amp; .env)</span>
+                <span class="badge badge-neutral" style="font-size: 10px;" title="Preserves data/ and .env">&#10003;
+                  Safe (data/ &amp; .env)</span>
                 <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
-                  <button type="button" class="btn btn-secondary btn-sm" id="check-platform-update-btn" onclick="checkPlatformUpdates(true)">
+                  <button type="button" class="btn btn-secondary btn-sm" id="check-platform-update-btn"
+                    onclick="checkPlatformUpdates(true)">
                     Check
                   </button>
-                  <button type="button" class="btn btn-primary btn-sm" id="trigger-platform-update-btn" onclick="startPlatformUpdate()">
+                  <button type="button" class="btn btn-primary btn-sm" id="trigger-platform-update-btn"
+                    onclick="startPlatformUpdate()">
                     Update
                   </button>
                 </div>
@@ -1527,10 +1742,12 @@
 
             <!-- 4. Server Controls Card -->
             <div class="project-card settings-card" id="settings-panel-card">
-              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
                   <div class="project-card-icon" style="color: #10b981;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
                       <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
                       <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
                       <line x1="6" y1="6" x2="6.01" y2="6"></line>
@@ -1541,7 +1758,8 @@
                     <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
                       <span>Server Controls</span>
                     </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
                       Daemon &bull; Cache Engine
                     </div>
                   </div>
@@ -1549,13 +1767,16 @@
                 <span class="badge badge-success" style="flex-shrink: 0;">ONLINE</span>
               </div>
 
-              <div class="settings-card-inset" style="font-size: 11.5px; color: var(--text-dim); font-family: var(--font-mono); line-height: 1.5;">
+              <div class="settings-card-inset"
+                style="font-size: 11.5px; color: var(--text-dim); font-family: var(--font-mono); line-height: 1.5;">
                 Safely restart the WebDep panel daemon with zero workload downtime or flush server response caches.
               </div>
 
               <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
-                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Zero-Downtime Restart</span>
-                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Telemetry Cache</span>
+                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Zero-Downtime
+                  Restart</span>
+                <span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">Telemetry
+                  Cache</span>
               </div>
 
               <div class="project-card-actions" style="justify-content: flex-start;">
@@ -1566,10 +1787,12 @@
 
             <!-- 5. User Permissions Card (Full Width Table Card) -->
             <div class="project-card settings-card settings-card-wide" id="settings-users-card">
-              <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
                   <div class="project-card-icon" style="color: #a855f7;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
                       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
                       <circle cx="9" cy="7" r="4"></circle>
                       <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
@@ -1579,9 +1802,11 @@
                   <div style="min-width: 0;">
                     <div class="project-info-title" style="font-size: 15px; font-weight: 600;">
                       <span>User Permissions</span>
-                      <span class="badge badge-info" id="settings-users-count-badge" style="font-size: 10px;">RBAC</span>
+                      <span class="badge badge-info" id="settings-users-count-badge"
+                        style="font-size: 10px;">RBAC</span>
                     </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
                       Access &amp; Powers &bull; 2FA &bull; Scope
                     </div>
                   </div>
@@ -1589,7 +1814,8 @@
                 <button class="btn btn-primary btn-sm" id="create-user-modal-btn">+ Add User</button>
               </div>
 
-              <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-alt);">
+              <div class="table-responsive"
+                style="border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-alt);">
                 <table class="table tbl-users">
                   <thead>
                     <tr>
@@ -1771,12 +1997,14 @@
             style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <label class="form-label" for="website-repo">GitHub Repository URL <span style="color:var(--text-dim); font-weight:400;">(or blank for manual)</span></label>
+                <label class="form-label" for="website-repo">GitHub Repository URL <span
+                    style="color:var(--text-dim); font-weight:400;">(or blank for manual)</span></label>
                 <a href="javascript:void(0)" id="browse-github-repos-btn"
                   style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse
                   Repos &nearr;</a>
               </div>
-              <input type="text" id="website-repo" class="form-control" placeholder="https://github.com/owner/repo.git (optional)">
+              <input type="text" id="website-repo" class="form-control"
+                placeholder="https://github.com/owner/repo.git (optional)">
               <select id="github-repos-select" class="form-control"
                 style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
             </div>
@@ -1807,19 +2035,24 @@
           <!-- Row 4: Network Access Policy (Firewall & Direct Access) -->
           <div class="form-group" style="margin-bottom: 12px;">
             <label class="form-label" for="website-access-mode">Network Access Policy</label>
-            <select id="website-access-mode" class="form-control" onchange="toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap')">
+            <select id="website-access-mode" class="form-control"
+              onchange="toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap')">
               <option value="local">Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
               <option value="allowlist">Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
               <option value="public">Public Access — Open port to external internet with auto firewall rules</option>
             </select>
             <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
-              If a custom domain is configured, HTTPS traffic is reverse-proxied through Caddy automatically. Direct TCP port exposure is governed by this policy.
+              If a custom domain is configured, HTTPS traffic is reverse-proxied through Caddy automatically. Direct TCP
+              port exposure is governed by this policy.
             </div>
           </div>
           <div class="form-group" id="website-allowed-ips-wrap" style="display: none; margin-bottom: 12px;">
             <label class="form-label" for="website-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
-            <textarea id="website-allowed-ips" class="form-control" rows="2" placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)" style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
-            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port from these remote IPs.</span>
+            <textarea id="website-allowed-ips" class="form-control" rows="2"
+              placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)"
+              style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port
+              from these remote IPs.</span>
           </div>
 
           <!-- Hidden defaults: auto-deploy disabled by default, slug and deploy dir auto-derived -->
@@ -1847,7 +2080,8 @@
       <div class="modal-header">
         <div>
           <h3 class="modal-title" id="modal-service-title">Add Backend Service</h3>
-          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">24/7 background daemon with automatic process supervision and environment secrets</div>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">24/7 background daemon with automatic
+            process supervision and environment secrets</div>
         </div>
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
@@ -1869,10 +2103,14 @@
         <div style="margin-bottom: 14px;">
           <span class="form-label" style="display: block; margin-bottom: 6px;">Deployment Source</span>
           <div style="display: flex; gap: 8px;">
-            <button type="button" class="btn btn-secondary btn-sm active" id="service-source-mode-manual" onclick="setServiceSourceMode('manual')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
+            <button type="button" class="btn btn-secondary btn-sm active" id="service-source-mode-manual"
+              onclick="setServiceSourceMode('manual')"
+              style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
               Manual File Upload (No Git)
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" id="service-source-mode-git" onclick="setServiceSourceMode('git')" style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
+            <button type="button" class="btn btn-secondary btn-sm" id="service-source-mode-git"
+              onclick="setServiceSourceMode('git')"
+              style="flex: 1; padding: 7px 10px; font-size: 12px; justify-content: center;">
               GitHub Repository
             </button>
           </div>
@@ -1880,8 +2118,11 @@
         </div>
 
         <!-- Informative note for manual file upload -->
-        <div id="service-manual-info-box" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; line-height: 1.45; color: var(--text-dim);">
-          <strong style="color: var(--text-main);">Manual File Upload Mode:</strong> No Git repository required. Upload your application files, jar files, or scripts directly in the built-in <strong>Files</strong> tab after creating this service.
+        <div id="service-manual-info-box"
+          style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; line-height: 1.45; color: var(--text-dim);">
+          <strong style="color: var(--text-main);">Manual File Upload Mode:</strong> No Git repository required. Upload
+          your application files, jar files, or scripts directly in the built-in <strong>Files</strong> tab after
+          creating this service.
         </div>
 
         <form id="service-form" onsubmit="return false;">
@@ -1889,7 +2130,8 @@
           <input type="hidden" id="service-preset-type" value="custom">
 
           <!-- Row 1: Name & Branch -->
-          <div id="service-name-branch-row" class="modal-grid-2" style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div id="service-name-branch-row" class="modal-grid-2"
+            style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="service-name">Service Name *</label>
               <input type="text" id="service-name" class="form-control" placeholder="e.g. My Backend Service" required>
@@ -1905,33 +2147,42 @@
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <label class="form-label" for="service-repo">GitHub Repository URL</label>
               <a href="javascript:void(0)" id="service-browse-github-repos-btn"
-                style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse Repos &nearr;</a>
+                style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse
+                Repos &nearr;</a>
             </div>
-            <input type="text" id="service-repo" class="form-control" placeholder="https://github.com/owner/repository.git">
+            <input type="text" id="service-repo" class="form-control"
+              placeholder="https://github.com/owner/repository.git">
             <select id="service-github-repos-select" class="form-control"
               style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
           </div>
 
           <!-- Row 3: Install & Start Commands -->
-          <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; margin-bottom: 12px;">
+          <div class="modal-grid-2"
+            style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
-              <label class="form-label" for="service-install-cmd">Install Command <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
-              <input type="text" id="service-install-cmd" class="form-control" placeholder="e.g. npm ci or pip install -r requirements.txt">
+              <label class="form-label" for="service-install-cmd">Install Command <span
+                  style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="text" id="service-install-cmd" class="form-control"
+                placeholder="e.g. npm ci or pip install -r requirements.txt">
             </div>
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="service-start-cmd">Start Command *</label>
-              <input type="text" id="service-start-cmd" class="form-control" placeholder="e.g. java -jar Lavalink.jar or node index.js" required>
+              <input type="text" id="service-start-cmd" class="form-control"
+                placeholder="e.g. java -jar Lavalink.jar or node index.js" required>
             </div>
           </div>
 
           <!-- Row 4: Listening Port & Custom Domain -->
-          <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-bottom: 12px;">
+          <div class="modal-grid-2"
+            style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-bottom: 12px;">
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label" for="service-port">Assigned Port *</label>
-              <input type="number" id="service-port" class="form-control" placeholder="e.g. 1112 or 8000" min="1" max="65535" required>
+              <input type="number" id="service-port" class="form-control" placeholder="e.g. 1112 or 8000" min="1"
+                max="65535" required>
             </div>
             <div class="form-group" style="margin-bottom: 0;">
-              <label class="form-label" for="service-domain">Custom Domain <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <label class="form-label" for="service-domain">Custom Domain <span
+                  style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
               <input type="text" id="service-domain" class="form-control" placeholder="e.g. service.yourdomain.com">
             </div>
           </div>
@@ -1939,19 +2190,24 @@
           <!-- Row 6: Network Access Policy (Firewall & Direct Access) -->
           <div class="form-group" style="margin-bottom: 12px;">
             <label class="form-label" for="service-access-mode">Network Access Policy</label>
-            <select id="service-access-mode" class="form-control" onchange="toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap')">
+            <select id="service-access-mode" class="form-control"
+              onchange="toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap')">
               <option value="local">Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
               <option value="allowlist">Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
               <option value="public">Public Access — Open port to external internet with auto firewall rules</option>
             </select>
             <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
-              If a custom domain is configured, HTTPS &amp; WebSocket traffic is reverse-proxied through Caddy automatically. Direct TCP port exposure is governed by this policy.
+              If a custom domain is configured, HTTPS &amp; WebSocket traffic is reverse-proxied through Caddy
+              automatically. Direct TCP port exposure is governed by this policy.
             </div>
           </div>
           <div class="form-group" id="service-allowed-ips-wrap" style="display: none; margin-bottom: 12px;">
             <label class="form-label" for="service-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
-            <textarea id="service-allowed-ips" class="form-control" rows="2" placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)" style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
-            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port from these remote IPs.</span>
+            <textarea id="service-allowed-ips" class="form-control" rows="2"
+              placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)"
+              style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port
+              from these remote IPs.</span>
           </div>
 
           <input type="hidden" id="service-slug">
@@ -2163,17 +2419,25 @@
           </div>
 
           <div class="form-group">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
               <span class="form-label" style="margin-bottom: 0;">Granular Powers (Permissions)</span>
               <div style="display: flex; gap: 6px;">
-                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('all')">Select All</button>
-                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('defaults')">Defaults</button>
-                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('readonly')">Read-Only</button>
-                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('none')">Clear</button>
+                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('all')">Select
+                  All</button>
+                <button type="button" class="btn btn-secondary btn-xs"
+                  onclick="setUserPowerPreset('defaults')">Defaults</button>
+                <button type="button" class="btn btn-secondary btn-xs"
+                  onclick="setUserPowerPreset('readonly')">Read-Only</button>
+                <button type="button" class="btn btn-secondary btn-xs"
+                  onclick="setUserPowerPreset('none')">Clear</button>
               </div>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim);">Workloads &amp; Deploy</div>
+            <div
+              style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+              <div
+                style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim);">
+                Workloads &amp; Deploy</div>
               <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
                   <input type="checkbox" class="user-power-check" value="deploy" checked>
@@ -2201,7 +2465,9 @@
                 </label>
               </div>
 
-              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px;">Storage, Env &amp; Databases</div>
+              <div
+                style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px;">
+                Storage, Env &amp; Databases</div>
               <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
                   <input type="checkbox" class="user-power-check" value="files" checked>
@@ -2225,7 +2491,9 @@
                 </label>
               </div>
 
-              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px;">Observability &amp; Platform</div>
+              <div
+                style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px;">
+                Observability &amp; Platform</div>
               <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
                   <input type="checkbox" class="user-power-check" value="logs" checked>
@@ -2639,9 +2907,11 @@
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label" for="db-create-domain">Custom Domain / Hostname <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+            <label class="form-label" for="db-create-domain">Custom Domain / Hostname <span
+                style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
             <input type="text" id="db-create-domain" class="form-control" placeholder="e.g. postgres.yourdomain.com">
-            <span class="form-hint">If set, external connection URLs and psql commands will use this hostname instead of the VPS IP address.</span>
+            <span class="form-hint">If set, external connection URLs and psql commands will use this hostname instead of
+              the VPS IP address.</span>
           </div>
           <div class="form-group">
             <label class="form-label" for="db-create-access-mode">Network Access Policy</label>
@@ -2662,15 +2932,19 @@
           </div>
 
           <!-- Real-time database provisioning progress track -->
-          <div id="db-create-progress-container" style="display: none; margin-top: 14px; padding: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: var(--radius-md);">
+          <div id="db-create-progress-container"
+            style="display: none; margin-top: 14px; padding: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: var(--radius-md);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <span style="font-size: 13px; font-weight: 600;" id="db-create-progress-title">Provisioning PostgreSQL Instance...</span>
+              <span style="font-size: 13px; font-weight: 600;" id="db-create-progress-title">Provisioning PostgreSQL
+                Instance...</span>
               <span class="badge badge-warning" id="db-create-progress-step">Stage 1/5</span>
             </div>
             <div class="progress-bar" style="height: 6px;">
-              <div class="progress-fill green" id="db-create-progress-bar" style="width: 20%; transition: width 0.35s ease;"></div>
+              <div class="progress-fill green" id="db-create-progress-bar"
+                style="width: 20%; transition: width 0.35s ease;"></div>
             </div>
-            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px; font-family: var(--font-mono);" id="db-create-progress-detail">
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px; font-family: var(--font-mono);"
+              id="db-create-progress-detail">
               Allocating dedicated TCP port and preparing filesystem sandbox...
             </div>
           </div>
@@ -2693,7 +2967,8 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" for="db-detail-internal-url">Internal Connection URL (For websites on this VPS)</label>
+          <label class="form-label" for="db-detail-internal-url">Internal Connection URL (For websites on this
+            VPS)</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="db-detail-internal-url" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12px;">
@@ -2701,7 +2976,8 @@
           </div>
         </div>
         <div class="form-group" id="db-detail-external-url-wrap">
-          <label class="form-label" for="db-detail-external-url">External Connection URL (For remote VPS or external clients)</label>
+          <label class="form-label" for="db-detail-external-url">External Connection URL (For remote VPS or external
+            clients)</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="db-detail-external-url" class="form-control" readonly
               style="font-family: var(--font-mono); font-size: 12px;">
@@ -2770,7 +3046,8 @@
         <form id="database-access-form" onsubmit="handleUpdateDatabaseAccessSubmit(event)">
           <input type="hidden" id="db-access-id">
           <div class="form-group">
-            <label class="form-label" for="db-access-domain">Custom Domain / Hostname <span style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+            <label class="form-label" for="db-access-domain">Custom Domain / Hostname <span
+                style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
             <input type="text" id="db-access-domain" class="form-control" placeholder="e.g. postgres.yourdomain.com">
             <span class="form-hint">Used for external connection URLs and psql commands instead of the VPS IP.</span>
           </div>
@@ -2808,16 +3085,20 @@
           <span class="badge badge-neutral" id="db-logs-badge">LOGS</span>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <button type="button" class="btn btn-secondary btn-sm" id="db-logs-refresh-btn" onclick="refreshCurrentDatabaseLogs()">Refresh</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="db-logs-refresh-btn"
+            onclick="refreshCurrentDatabaseLogs()">Refresh</button>
           <button type="button" class="modal-close" data-close-modal>&times;</button>
         </div>
       </div>
       <div class="modal-body" style="padding: 12px 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);" id="db-logs-path">postgresql.log</span>
-          <button type="button" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 2px 8px;" onclick="copyDatabaseLogs()">Copy Full Log</button>
+          <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);"
+            id="db-logs-path">postgresql.log</span>
+          <button type="button" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 2px 8px;"
+            onclick="copyDatabaseLogs()">Copy Full Log</button>
         </div>
-        <pre id="db-logs-content" style="background: var(--bg-alt); color: var(--text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); max-height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+        <pre id="db-logs-content"
+          style="background: var(--bg-alt); color: var(--text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); max-height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
       </div>
       <div class="modal-footer" style="padding: 10px 16px;">
         <button type="button" class="btn btn-primary btn-sm" data-close-modal>Close</button>
@@ -2863,26 +3144,36 @@
         <!-- Progress Bar & Status -->
         <div style="margin-bottom: 12px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <span id="update-step-text" style="font-weight: 600; font-size: 13px; color: var(--text-main);">Updating WebDep...</span>
+            <span id="update-step-text" style="font-weight: 600; font-size: 13px; color: var(--text-main);">Updating
+              WebDep...</span>
             <span id="update-pct-text" style="font-weight: 600; font-size: 12px; color: var(--accent-light);">0%</span>
           </div>
-          <div class="progress" style="height: 6px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden;">
-            <div id="update-progress-bar" class="progress-bar" style="width: 0%; transition: width 0.3s ease; background: var(--accent-primary);"></div>
+          <div class="progress"
+            style="height: 6px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden;">
+            <div id="update-progress-bar" class="progress-bar"
+              style="width: 0%; transition: width 0.3s ease; background: var(--accent-primary);"></div>
           </div>
         </div>
 
-        <div id="update-status-banner" style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
-          <div class="spinner-sm" id="update-active-spinner" style="border: 2px solid rgba(255,255,255,0.15); border-top-color: var(--accent-light); width: 12px; height: 12px; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-          <span id="update-banner-msg">Fetching latest commit &amp; compiling... Panel will restart automatically.</span>
+        <div id="update-status-banner"
+          style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          <div class="spinner-sm" id="update-active-spinner"
+            style="border: 2px solid rgba(255,255,255,0.15); border-top-color: var(--accent-light); width: 12px; height: 12px; border-radius: 50%; animation: spin 0.8s linear infinite;">
+          </div>
+          <span id="update-banner-msg">Fetching latest commit &amp; compiling... Panel will restart
+            automatically.</span>
         </div>
 
         <!-- Live Build & Git Console Logs -->
         <div class="form-group" style="margin-bottom: 0;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <span class="form-label" style="margin: 0; font-size: 11.5px; color: var(--text-dim);">Build Output</span>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="copyUpdateLogs()" style="padding: 1px 6px; font-size: 10.5px;">Copy</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyUpdateLogs()"
+              style="padding: 1px 6px; font-size: 10.5px;">Copy</button>
           </div>
-          <div id="update-console-logs" style="height: 180px; overflow-y: auto; background: #0c0e14; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: #cbd5e1; white-space: pre-wrap; word-break: break-all;">Waiting for update to start...</div>
+          <div id="update-console-logs"
+            style="height: 180px; overflow-y: auto; background: #0c0e14; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: #cbd5e1; white-space: pre-wrap; word-break: break-all;">
+            Waiting for update to start...</div>
         </div>
       </div>
       <div class="modal-footer" style="padding: 10px 18px; justify-content: flex-end;" id="update-modal-footer">
@@ -2896,6 +3187,7 @@
 
   <!-- Client Script -->
   <script type="module" src="/app.js?v=3.13.15"></script>
+  <script type="module" src="/app.js?v=3.14.2"></script></script>
 </body>
 
 </html>

@@ -11,6 +11,7 @@ mod deployer;
 mod git;
 mod logs;
 mod monitor;
+mod monitor_net;
 mod projects;
 mod runtime;
 mod static_assets;
@@ -174,6 +175,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         });
     }
+
+    // Enforce max-5 deployment retention cleanup across existing projects at startup.
+    crate::deployer::retention::prune_all_projects(&db, crate::deployer::MAX_DEPLOYMENT_RECORDS);
 
     let state = AppState {
         db,

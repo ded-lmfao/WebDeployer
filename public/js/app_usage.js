@@ -1,0 +1,617 @@
+/**
+ * WebDep App Resource Usage Cards
+ * Renders live per-app CPU, RAM, Network (60fps smooth monotone spline), and Disk metrics.
+ */
+
+import { state, getSelectedProject } from './state.js';
+import { api } from './api.js';
+
+const SVG_W = 320;
+const SVG_H = 84;
+const TOP_PAD = 10;
+const BOTTOM_PAD = 6;
+const PLOT_BOTTOM = SVG_H - BOTTOM_PAD;
+const WINDOW_MS = 45000;
+const LAG_MS = 1250;
+const POLL_INTERVAL_MS = 1000;
+
+const _netState = {
+  projectId: null,
+  running: false,
+  port: null,
+  interfaceCount: 0,
+  totalRxBytes: 0,
+  totalTxBytes: 0,
+  samples: [],
+  perfToServerOffset: 0,
+  hasOffset: false,
+  displayMaxRate: 1024,
+  hoverRatio: null,
+  rafId: null,
+  pollTimer: null,
+  fetchInFlight: false,
+  lastFetchAt: 0,
+  lastDrawPerf: 0,
+  domMode: null, // 'online' | 'offline' | 'warming'
+};
+
+function formatBytesShort(bytes) {
+  const b = Math.max(0, Number(bytes) || 0);
+  if (b < 1024) return `${Math.round(b)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let idx = -1;
+  let val = b;
+  while (val >= 1024 && idx < units.length - 1) {
+    val /= 1024;
+    idx++;
+  }
+  return `${val >= 100 ? val.toFixed(0) : val.toFixed(1)} ${units[idx]}`;
+}
+
+function formatRate(bps) {
+  return `${formatBytesShort(bps)}/s`;
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== text) {
+    el.textContent = text;
+  }
+}
+
+function setMeterWidth(id, pct) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+  const widthStr = `${clamped.toFixed(1)}%`;
+  if (el.style.width !== widthStr) {
+    el.style.width = widthStr;
+  }
+}
+
+/**
+ * Compute Fritsch-Carlson monotone cubic tangents so smoothed lines never overshoot
+ * plotted bounds or oscillate on step changes.
+ */
+function computeMonotoneTangents(pts) {
+  const n = pts.length;
+  const m = new Array(n).fill(0);
+  if (n < 2) return m;
+
+  const d = new Array(n - 1);
+  const dx = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = Math.max(pts[i + 1].x - pts[i].x, 1e-4);
+    d[i] = (pts[i + 1].y - pts[i].y) / dx[i];
+  }
+
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (d[i - 1] === 0 || d[i] === 0 || Math.sign(d[i - 1]) !== Math.sign(d[i])) {
+      m[i] = 0;
+    } else {
+      const w1 = 2 * dx[i] + dx[i - 1];
+      const w2 = dx[i] + 2 * dx[i - 1];
+      m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+    }
+  }
+
+  for (let i = 0; i < n - 1; i++) {
+    if (Math.abs(d[i]) < 1e-9) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const alpha = m[i] / d[i];
+    const beta = m[i + 1] / d[i];
+    const h = Math.hypot(alpha, beta);
+    if (h > 3) {
+      const scale = 3 / h;
+      m[i] = scale * alpha * d[i];
+      m[i + 1] = scale * beta * d[i];
+    }
+  }
+  return m;
+}
+
+function buildCubicPaths(pts, m) {
+  const n = pts.length;
+  if (n === 0) return { line: '', area: '' };
+  if (n === 1) {
+    const p = pts[0];
+    return {
+      line: `M${p.x.toFixed(2)},${p.y.toFixed(2)}`,
+      area: `M${p.x.toFixed(2)},${PLOT_BOTTOM} L${p.x.toFixed(2)},${p.y.toFixed(2)} L${p.x.toFixed(2)},${PLOT_BOTTOM} Z`,
+    };
+  }
+
+  let line = `M${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const step = (pts[i + 1].x - pts[i].x) / 3;
+    const c1x = pts[i].x + step;
+    const c1y = Math.max(TOP_PAD, Math.min(PLOT_BOTTOM, pts[i].y + m[i] * step));
+    const c2x = pts[i + 1].x - step;
+    const c2y = Math.max(TOP_PAD, Math.min(PLOT_BOTTOM, pts[i + 1].y - m[i + 1] * step));
+    line += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${pts[i + 1].x.toFixed(2)},${pts[i + 1].y.toFixed(2)}`;
+  }
+
+  const last = pts[n - 1];
+  const first = pts[0];
+  const area = `${line} L${last.x.toFixed(2)},${PLOT_BOTTOM} L${first.x.toFixed(2)},${PLOT_BOTTOM} Z`;
+  return { line, area };
+}
+
+function evalMonotoneYAtX(pts, m, xTarget) {
+  const n = pts.length;
+  if (n === 0) return PLOT_BOTTOM;
+  if (n === 1 || xTarget <= pts[0].x) return pts[0].y;
+  if (xTarget >= pts[n - 1].x) return pts[n - 1].y;
+
+  let lo = 0;
+  for (let i = 0; i < n - 1; i++) {
+    if (xTarget >= pts[i].x && xTarget <= pts[i + 1].x) {
+      lo = i;
+      break;
+    }
+  }
+  const h = Math.max(pts[lo + 1].x - pts[lo].x, 1e-4);
+  const t = Math.max(0, Math.min(1, (xTarget - pts[lo].x) / h));
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1;
+  const h10 = t3 - 2 * t2 + t;
+  const h01 = -2 * t3 + 3 * t2;
+  const h11 = t3 - t2;
+  const y =
+    h00 * pts[lo].y +
+    h10 * h * m[lo] +
+    h01 * pts[lo + 1].y +
+    h11 * h * m[lo + 1];
+  return Math.max(TOP_PAD, Math.min(PLOT_BOTTOM, y));
+}
+
+function stopNetChartRaf() {
+  if (_netState.rafId !== null) {
+    cancelAnimationFrame(_netState.rafId);
+    _netState.rafId = null;
+  }
+  _netState.lastDrawPerf = 0;
+}
+
+function stopAppUsagePoller() {
+  if (_netState.pollTimer !== null) {
+    clearInterval(_netState.pollTimer);
+    _netState.pollTimer = null;
+  }
+}
+
+function setOfflinePills(isOffline) {
+  const card = document.getElementById('usage-card-network');
+  if (!card) return;
+  card.querySelectorAll('.app-net-pill').forEach((pill) => {
+    pill.classList.toggle('is-offline', isOffline);
+  });
+}
+
+function renderOfflineNetChart() {
+  stopNetChartRaf();
+  const chartEl = document.getElementById('usage-net-chart');
+  if (!chartEl) return;
+
+  setOfflinePills(true);
+  chartEl.classList.add('is-offline');
+
+  if (_netState.domMode !== 'offline') {
+    _netState.domMode = 'offline';
+    chartEl.innerHTML = `
+      <div class="app-net-offline-state">
+        <span class="app-net-offline-pill">
+          <span class="app-net-offline-dot"></span>
+          Service Offline
+        </span>
+        <span class="app-net-offline-hint">Start app to track live traffic</span>
+      </div>`;
+  }
+}
+
+function ensureOnlineChartDom() {
+  const chartEl = document.getElementById('usage-net-chart');
+  if (!chartEl) return null;
+
+  setOfflinePills(false);
+  chartEl.classList.remove('is-offline');
+
+  if (_netState.domMode === 'online' && chartEl.querySelector('#net-in-line')) {
+    return chartEl;
+  }
+
+  _netState.domMode = 'online';
+  chartEl.innerHTML = `
+    <svg class="app-net-svg" viewBox="0 0 ${SVG_W} ${SVG_H}" preserveAspectRatio="none" aria-label="Inbound and outbound network traffic">
+      <defs>
+        <clipPath id="app-net-clip">
+          <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}"></rect>
+        </clipPath>
+        <linearGradient id="netGradIn" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#34d399" stop-opacity="0.34"/>
+          <stop offset="100%" stop-color="#34d399" stop-opacity="0.01"/>
+        </linearGradient>
+        <linearGradient id="netGradOut" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.30"/>
+          <stop offset="100%" stop-color="#60a5fa" stop-opacity="0.01"/>
+        </linearGradient>
+        <filter id="netGlow" x="-15%" y="-15%" width="130%" height="130%">
+          <feGaussianBlur stdDeviation="1.4" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <line x1="0" y1="22" x2="${SVG_W}" y2="22" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="48" x2="${SVG_W}" y2="48" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="${PLOT_BOTTOM}" x2="${SVG_W}" y2="${PLOT_BOTTOM}" stroke="rgba(255,255,255,0.08)"/>
+      <g clip-path="url(#app-net-clip)">
+        <path id="net-in-area" d="" fill="url(#netGradIn)"/>
+        <path id="net-out-area" d="" fill="url(#netGradOut)"/>
+        <path id="net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
+        <path id="net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
+      </g>
+    </svg>
+    <div id="net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
+    <div id="net-out-dot" class="app-net-live-marker net-out" style="opacity:0;"></div>
+    <div id="net-crosshair" class="app-net-crosshair" style="display:none;"></div>
+    <span id="net-peak-label" class="app-net-scale-chip">Peak 0 B/s</span>`;
+
+  chartEl.onmousemove = (ev) => {
+    const rect = chartEl.getBoundingClientRect();
+    if (!rect.width) return;
+    _netState.hoverRatio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+  };
+  chartEl.onmouseleave = () => {
+    _netState.hoverRatio = null;
+    const cross = document.getElementById('net-crosshair');
+    if (cross) cross.style.display = 'none';
+  };
+
+  return chartEl;
+}
+
+function drawNetFrame(nowPerf) {
+  _netState.rafId = null;
+
+  if (!_netState.running || state.currentView !== 'deployments' || document.hidden) {
+    _netState.lastDrawPerf = 0;
+    return;
+  }
+
+  const chartEl = ensureOnlineChartDom();
+  if (!chartEl) return;
+
+  const dt = _netState.lastDrawPerf > 0 ? Math.min(0.08, (nowPerf - _netState.lastDrawPerf) / 1000) : 0.016;
+  _netState.lastDrawPerf = nowPerf;
+
+  const samples = _netState.samples;
+  const inAreaEl = document.getElementById('net-in-area');
+  const outAreaEl = document.getElementById('net-out-area');
+  const inLineEl = document.getElementById('net-in-line');
+  const outLineEl = document.getElementById('net-out-line');
+  const inDotEl = document.getElementById('net-in-dot');
+  const outDotEl = document.getElementById('net-out-dot');
+  const crossEl = document.getElementById('net-crosshair');
+  const peakEl = document.getElementById('net-peak-label');
+  if (!inLineEl || !outLineEl || !inAreaEl || !outAreaEl) return;
+
+  if (samples.length < 2) {
+    const flatLine = `M0,${PLOT_BOTTOM} L${SVG_W},${PLOT_BOTTOM}`;
+    const flatArea = `M0,${PLOT_BOTTOM} L${SVG_W},${PLOT_BOTTOM} Z`;
+    inLineEl.setAttribute('d', flatLine);
+    outLineEl.setAttribute('d', flatLine);
+    inAreaEl.setAttribute('d', flatArea);
+    outAreaEl.setAttribute('d', flatArea);
+    if (inDotEl) inDotEl.style.opacity = '0';
+    if (outDotEl) outDotEl.style.opacity = '0';
+    if (peakEl) peakEl.textContent = samples.length === 1 ? 'Sampling...' : 'Starting...';
+    _netState.rafId = requestAnimationFrame(drawNetFrame);
+    return;
+  }
+
+  const firstTs = samples[0].ts;
+  const lastTs = samples[samples.length - 1].ts;
+  const estServerNow = _netState.hasOffset
+    ? Math.min(lastTs + LAG_MS + 900, nowPerf + _netState.perfToServerOffset)
+    : lastTs;
+  const spanMs = Math.max(0, lastTs - firstTs);
+  const effectiveLag = Math.min(LAG_MS, spanMs * 0.5);
+  const viewEnd = Math.max(firstTs + 50, Math.min(lastTs, estServerNow - effectiveLag));
+  const viewStart = viewEnd - WINDOW_MS;
+
+  // Keep a small look-behind/look-ahead margin so clipped off-screen tangents remain smooth.
+  const visible = samples.filter((s) => s.ts >= viewStart - 3000 && s.ts <= viewEnd + 3000);
+  const inWindow = visible.filter((s) => s.ts >= viewStart && s.ts <= viewEnd);
+  const peakBasis = inWindow.length ? inWindow : visible;
+
+  let rawPeak = 512;
+  for (let i = 0; i < peakBasis.length; i++) {
+    const s = peakBasis[i];
+    if (s.inboundBps > rawPeak) rawPeak = s.inboundBps;
+    if (s.outboundBps > rawPeak) rawPeak = s.outboundBps;
+  }
+  const targetPeak = Math.max(1024, rawPeak * 1.15);
+  const scaleAlpha = 1 - Math.exp(-dt * 4.5);
+  _netState.displayMaxRate += (targetPeak - _netState.displayMaxRate) * scaleAlpha;
+  const maxRate = Math.max(1024, _netState.displayMaxRate);
+
+  const usableH = PLOT_BOTTOM - TOP_PAD;
+  const ptsIn = [];
+  const ptsOut = [];
+  for (let i = 0; i < visible.length; i++) {
+    const s = visible[i];
+    const x = ((s.ts - viewStart) / WINDOW_MS) * SVG_W;
+    const yIn = PLOT_BOTTOM - Math.min(1, s.inboundBps / maxRate) * usableH;
+    const yOut = PLOT_BOTTOM - Math.min(1, s.outboundBps / maxRate) * usableH;
+    ptsIn.push({ x, y: yIn });
+    ptsOut.push({ x, y: yOut });
+  }
+
+  const mIn = computeMonotoneTangents(ptsIn);
+  const mOut = computeMonotoneTangents(ptsOut);
+  const pathsIn = buildCubicPaths(ptsIn, mIn);
+  const pathsOut = buildCubicPaths(ptsOut, mOut);
+
+  inAreaEl.setAttribute('d', pathsIn.area);
+  outAreaEl.setAttribute('d', pathsOut.area);
+  inLineEl.setAttribute('d', pathsIn.line);
+  outLineEl.setAttribute('d', pathsOut.line);
+
+  const rightX = Math.max(0, Math.min(SVG_W, ptsIn[ptsIn.length - 1].x));
+  const dotYIn = evalMonotoneYAtX(ptsIn, mIn, rightX);
+  const dotYOut = evalMonotoneYAtX(ptsOut, mOut, rightX);
+
+  if (inDotEl) {
+    inDotEl.style.opacity = '1';
+    inDotEl.style.left = `${(rightX / SVG_W) * 100}%`;
+    inDotEl.style.top = `${(dotYIn / SVG_H) * 100}%`;
+  }
+  if (outDotEl) {
+    outDotEl.style.opacity = '1';
+    outDotEl.style.left = `${(rightX / SVG_W) * 100}%`;
+    outDotEl.style.top = `${(dotYOut / SVG_H) * 100}%`;
+  }
+
+  if (_netState.hoverRatio !== null) {
+    const hoverTs = viewStart + _netState.hoverRatio * WINDOW_MS;
+    let nearest = null;
+    let bestDiff = Infinity;
+    for (let i = 0; i < visible.length; i++) {
+      const diff = Math.abs(visible[i].ts - hoverTs);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        nearest = visible[i];
+      }
+    }
+    if (nearest && crossEl) {
+      const hx = ((nearest.ts - viewStart) / WINDOW_MS) * SVG_W;
+      if (hx >= 0 && hx <= SVG_W) {
+        crossEl.style.display = 'block';
+        crossEl.style.left = `${(hx / SVG_W) * 100}%`;
+      } else {
+        crossEl.style.display = 'none';
+      }
+      if (peakEl) {
+        peakEl.textContent = `In ${formatRate(nearest.inboundBps)} • Out ${formatRate(nearest.outboundBps)}`;
+      }
+      setText('usage-net-in-val', formatRate(nearest.inboundBps));
+      setText('usage-net-out-val', formatRate(nearest.outboundBps));
+    }
+  } else {
+    if (crossEl) crossEl.style.display = 'none';
+    const latest = samples[samples.length - 1];
+    setText('usage-net-in-val', formatRate(latest.inboundBps));
+    setText('usage-net-out-val', formatRate(latest.outboundBps));
+    if (peakEl) peakEl.textContent = `Peak ${formatRate(rawPeak)}`;
+  }
+
+  _netState.rafId = requestAnimationFrame(drawNetFrame);
+}
+
+function startNetChartRaf() {
+  if (_netState.rafId === null && _netState.running && state.currentView === 'deployments' && !document.hidden) {
+    _netState.rafId = requestAnimationFrame(drawNetFrame);
+  }
+}
+
+function applyUsagePayload(p, data) {
+  if (!data || _netState.projectId !== p.id) return;
+
+  const running = !!data.running;
+  const cpuPct = Number(data.cpu?.percent || 0);
+  const cpuCores = Number(data.cpu?.hostCores || 1);
+  const activePids = Number(data.cpu?.activePids || 0);
+
+  setText('usage-cpu-val', `${cpuPct.toFixed(1)}%`);
+  setMeterWidth('usage-cpu-bar', Math.min(100, cpuPct));
+  const cpuBadge = document.getElementById('usage-cpu-badge');
+  if (cpuBadge) {
+    cpuBadge.className = running ? 'badge badge-success' : 'badge badge-neutral';
+    cpuBadge.textContent = running ? `${activePids} PID${activePids === 1 ? '' : 's'}` : 'STOPPED';
+  }
+  setText(
+    'usage-cpu-sub',
+    running
+      ? `Active process tree • ${cpuCores} host cores`
+      : `Idle • ${cpuCores} host cores`
+  );
+
+  const ramBytes = Number(data.ram?.bytes || 0);
+  const ramPct = Number(data.ram?.percentOfHost || 0);
+  const hostRam = data.ram?.hostTotalFormatted || '0 B';
+  setText('usage-ram-val', running ? (data.ram?.formatted || formatBytesShort(ramBytes)) : '0 B');
+  setMeterWidth('usage-ram-bar', running ? ramPct : 0);
+  setText('usage-ram-badge', `${(running ? ramPct : 0).toFixed(1)}%`);
+  setText(
+    'usage-ram-sub',
+    running
+      ? `Working set • ${hostRam} VPS RAM`
+      : `Idle • ${hostRam} VPS RAM`
+  );
+
+  const diskPct = Number(data.disk?.percentOfVps || 0);
+  const vpsFree = data.disk?.vpsFreeFormatted || '0 B';
+  setText('usage-disk-val', data.disk?.formatted || formatBytesShort(data.disk?.bytes || 0));
+  setMeterWidth('usage-disk-bar', diskPct);
+  setText('usage-disk-badge', `${diskPct.toFixed(1)}%`);
+  setText('usage-disk-sub', `App & releases • ${vpsFree} free`);
+
+  const net = data.network || {};
+  const portLabel = data.port ? `• :${data.port}` : '';
+  const rxTot = Number(net.totalRxBytes || 0);
+  const txTot = Number(net.totalTxBytes || 0);
+  const conns = Number(net.interfaceCount || 0);
+  const samples = Array.isArray(net.history) ? net.history : [];
+
+  _netState.running = running;
+  _netState.port = data.port || null;
+  _netState.interfaceCount = conns;
+  _netState.totalRxBytes = rxTot;
+  _netState.totalTxBytes = txTot;
+
+  if (!running) {
+    _netState.samples = [];
+    _netState.hasOffset = false;
+    _netState.displayMaxRate = 1024;
+    setText('usage-net-in-val', '0 B/s');
+    setText('usage-net-out-val', '0 B/s');
+    setText('usage-net-iface', ['Offline', portLabel].filter(Boolean).join(' '));
+    setText('usage-net-totals', '↓ 0 B  ↑ 0 B');
+    renderOfflineNetChart();
+    return;
+  }
+
+  _netState.samples = samples;
+  if (samples.length > 0) {
+    const newestTs = samples[samples.length - 1].ts;
+    const nowPerf = performance.now();
+    const impliedOffset = newestTs - nowPerf;
+    if (!_netState.hasOffset) {
+      _netState.perfToServerOffset = impliedOffset;
+      _netState.hasOffset = true;
+    } else {
+      // Gently track server clock drift without introducing HTTP latency jitter.
+      _netState.perfToServerOffset += (impliedOffset - _netState.perfToServerOffset) * 0.08;
+    }
+  }
+
+  const connLabel = conns > 0 ? `• ${conns} conn${conns === 1 ? '' : 's'}` : '';
+  setText('usage-net-iface', ['App Traffic', connLabel, portLabel].filter(Boolean).join(' '));
+  setText('usage-net-totals', `↓ ${formatBytesShort(rxTot)}  ↑ ${formatBytesShort(txTot)}`);
+
+  if (_netState.hoverRatio === null) {
+    setText('usage-net-in-val', formatRate(net.inboundBps || 0));
+    setText('usage-net-out-val', formatRate(net.outboundBps || 0));
+  }
+
+  ensureOnlineChartDom();
+  startNetChartRaf();
+}
+
+async function fetchProjectUsage(project) {
+  if (!project || _netState.fetchInFlight) return;
+  _netState.fetchInFlight = true;
+  _netState.lastFetchAt = Date.now();
+  try {
+    const data = await api('GET', `/api/projects/${project.id}/usage`);
+    if (getSelectedProject()?.id === project.id) {
+      applyUsagePayload(project, data);
+    }
+  } catch {
+    // Keep existing frame cleanly when transient poll fails
+  } finally {
+    _netState.fetchInFlight = false;
+  }
+}
+
+function ensureAppUsagePoller() {
+  if (_netState.pollTimer !== null) return;
+  _netState.pollTimer = setInterval(() => {
+    if (state.currentView !== 'deployments' || document.hidden) {
+      stopNetChartRaf();
+      return;
+    }
+    const p = getSelectedProject();
+    if (!p) {
+      resetAppUsageCards();
+      return;
+    }
+    if (_netState.running) {
+      startNetChartRaf();
+    }
+    if (Date.now() - _netState.lastFetchAt >= POLL_INTERVAL_MS - 120) {
+      void fetchProjectUsage(p);
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+function resetAppUsageCards(projectId = null) {
+  stopNetChartRaf();
+  stopAppUsagePoller();
+  _netState.projectId = projectId;
+  _netState.running = false;
+  _netState.samples = [];
+  _netState.hasOffset = false;
+  _netState.displayMaxRate = 1024;
+  _netState.hoverRatio = null;
+  _netState.domMode = null;
+
+  setText('usage-cpu-val', '0.0%');
+  setMeterWidth('usage-cpu-bar', 0);
+  setText('usage-ram-val', '0 B');
+  setMeterWidth('usage-ram-bar', 0);
+  setText('usage-ram-badge', '0%');
+  setText('usage-disk-val', '0 B');
+  setMeterWidth('usage-disk-bar', 0);
+  setText('usage-disk-badge', '0%');
+  setText('usage-net-in-val', '0 B/s');
+  setText('usage-net-out-val', '0 B/s');
+  setText('usage-net-iface', 'App Network');
+  setText('usage-net-totals', '↓ 0 B  ↑ 0 B');
+
+  const chartEl = document.getElementById('usage-net-chart');
+  if (chartEl) {
+    chartEl.classList.remove('is-offline');
+    chartEl.innerHTML = '';
+  }
+  setOfflinePills(false);
+}
+
+async function loadAppUsageCards(project) {
+  if (!project) {
+    resetAppUsageCards();
+    return;
+  }
+
+  const switchedProject = _netState.projectId !== project.id;
+  if (switchedProject) {
+    resetAppUsageCards(project.id);
+  }
+
+  ensureAppUsagePoller();
+
+  // Avoid colliding with the 1s sampler when the 4.5s overview poll fires immediately after a 1s tick.
+  if (!switchedProject && Date.now() - _netState.lastFetchAt < 650) {
+    return;
+  }
+
+  await fetchProjectUsage(project);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopNetChartRaf();
+  } else if (_netState.running && state.currentView === 'deployments') {
+    startNetChartRaf();
+  }
+});
+
+export { loadAppUsageCards, resetAppUsageCards };

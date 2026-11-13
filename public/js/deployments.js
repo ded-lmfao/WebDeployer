@@ -28,6 +28,7 @@ export * from './releases.js';
 export * from './env_vars.js';
 
 import { waterPipelines, renderPipelineStages, resetWaterPipeline } from './pipeline_engine.js';
+import { loadAppUsageCards } from './app_usage.js';
 
 // ============================================================================
 // View 3: GitHub View
@@ -163,20 +164,23 @@ let deploymentPollTimer = null;
 
 async function loadDeploymentsView() {
   const p = getSelectedProject();
-  const query = p ? `?project=${p.id}&limit=200` : '?limit=200';
+  const query = p ? `?project=${p.id}&limit=5` : '?limit=50';
   const tbody = document.getElementById('deployments-table-body');
 
   const isService = p && p.project_kind === 'service';
   const depTitle = document.getElementById('deployments-view-title');
   const depDesc = document.getElementById('deployments-view-desc');
   if (depTitle) {
-    depTitle.textContent = isService ? 'Service Lifecycle & Pipeline' : 'Deployments Pipeline';
+    depTitle.textContent = 'Overview';
   }
   if (depDesc) {
     depDesc.textContent = isService
-      ? 'Automated service daemon lifecycle, health verification, and deployment history'
-      : 'Automated zero-downtime deployment pipelines and operation history';
+      ?'Live resource usage, service lifecycle pipeline, and last 5 deployment records'
+      : 'Live resource usage, deployment pipeline, and last 5 deployment records';
   }
+
+  // Load 4 app usage cards (CPU, RAM, Network Inbound/Outbound graph, Disk) concurrently
+  void loadAppUsageCards(p);
 
   try {
     const deployments = await api(`/api/deployments${query}`, { noCache: true });
@@ -258,11 +262,32 @@ async function loadDeploymentsView() {
       }
     }
 
+    const countBadge = document.getElementById('deployments-count-badge');
+    if (countBadge) {
+      countBadge.textContent = `${deployments.length} / 5 kept`;
+    }
+
     if (!deployments.length) {
-      const emptyMsg = isService
-        ? 'No deployment records yet. Service is supervised and managed via daemon lifecycle.'
-        : 'No deployments found.';
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 24px;">${emptyMsg}</td></tr>`;
+      const emptyDesc = isService
+        ? 'Service is supervised and managed via daemon lifecycle. New builds or rollbacks will appear here.'
+        : 'No deployments triggered yet. Deploy from GitHub or click Deploy to record build history.';
+      tbody.innerHTML = `
+        <tr class="deployments-empty-row">
+          <td colspan="7">
+            <div class="deployments-empty-state">
+              <div class="deployments-empty-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                  <path d="M2 17l10 5 10-5"></path>
+                  <path d="M2 12l10 5 10-5"></path>
+                </svg>
+              </div>
+              <div class="deployments-empty-title">No deployment records yet</div>
+              <div class="deployments-empty-desc">${emptyDesc}</div>
+            </div>
+          </td>
+        </tr>
+      `;
       const bar = document.getElementById('deployments-pagination');
       if (bar) bar.innerHTML = '';
       return;

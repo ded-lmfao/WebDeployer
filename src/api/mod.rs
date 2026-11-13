@@ -116,6 +116,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/webhooks/github/:slug", post(github_webhook_handler))
         // Overview, Telemetry & Cache Layer
         .route("/api/overview", get(overview_handler))
+        .route("/api/projects/:id/usage", get(project_usage_handler))
         .route("/api/monitor", get(monitor_handler))
         .route("/api/audit", get(audit_handler))
         .route("/api/cache/stats", get(cache_stats_handler))

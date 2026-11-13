@@ -1,5 +1,8 @@
 pub mod builder;
+pub mod retention;
 pub mod worker;
+
+pub use retention::MAX_DEPLOYMENT_RECORDS;
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -275,6 +278,10 @@ impl Deployer {
             dep_id
         };
 
+        // Keep at most the latest 5 deployment records per project and reclaim old storage
+        // immediately as the new deployment starts.
+        retention::prune_project_deployments(&self.db, p.id, retention::MAX_DEPLOYMENT_RECORDS);
+
         if let Ok(mut active) = self.active_projects.lock() {
             active.insert(p.id, id);
         }
@@ -366,7 +373,8 @@ impl Deployer {
                     active_map.remove(&pid);
                 }
             }
-            self.cache.invalidate_project(pid);
+            retention::prune_project_deployments(&self.db, pid, retention::MAX_DEPLOYMENT_RECORDS);
+        self.cache.invalidate_project(pid);
         } else {
             self.cache.invalidate_all();
         }

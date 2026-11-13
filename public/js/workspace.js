@@ -88,7 +88,7 @@ function updateBreadcrumbs() {
   const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
   const p = getSelectedProject();
   const tabLabels = {
-    deployments: 'Deployments',
+    deployments: 'Overview',
     github: 'GitHub & Commits',
     logs: 'Live Logs',
     env: 'Environment (.env)',
@@ -358,7 +358,7 @@ function renderWebsiteWorkspaceHeader() {
 
   const depTabLabel = document.getElementById('ws-tab-deployments-label');
   if (depTabLabel) {
-    depTabLabel.textContent = isService ? 'Pipeline' : 'Deployments';
+    depTabLabel.textContent = 'Overview';
   }
 
   const tabsBar = document.getElementById('ws-tabs-bar');

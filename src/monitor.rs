@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::{
     CpuRefreshKind, Disks, MemoryRefreshKind, ProcessRefreshKind, RefreshKind, System,
@@ -178,27 +178,33 @@ impl Monitor {
         let mon = self.clone();
         tokio::spawn(async move {
             let mut tick_count: u64 = 0;
-            let mut interval = tokio::time::interval(Duration::from_secs(4));
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 interval.tick().await;
                 tick_count = tick_count.wrapping_add(1);
 
-                // Demand-driven telemetry: only scan OS process table when a dashboard client was active in the last 18s
+                // Demand-driven telemetry: sample active project network every 1s and host stats every 4s
                 let idle_ms = epoch_ms().saturating_sub(mon.last_queried_ms.load(Ordering::Relaxed));
                 let is_active = idle_ms < 18_000;
 
-                if !is_active && tick_count % 15 != 0 {
+                if !is_active && tick_count % 60 != 0 {
                     continue;
                 }
 
                 let m = mon.clone();
-                let refresh_disks = tick_count % 8 == 0;
+                let should_refresh_host = tick_count % 4 == 0 || !is_active;
+                let refresh_disks = tick_count % 32 == 0;
                 let _ = tokio::task::spawn_blocking(move || {
-                    m.refresh_now(is_active, refresh_disks);
+                    if is_active {
+                        crate::monitor_net::sample_active_projects();
+                    }
+                    if should_refresh_host {
+                        m.refresh_now(is_active, refresh_disks);
+                    }
                 })
                 .await;
 
-                if tick_count % 15 == 0 {
+                if tick_count % 60 == 0 {
                     #[cfg(target_os = "linux")]
                     unsafe {
                         extern "C" {
@@ -296,6 +302,15 @@ impl Monitor {
 static DISK_USAGE_CACHE: RwLock<Option<HashMap<std::path::PathBuf, (u64, std::time::Instant)>>> =
     RwLock::new(None);
 
+/// Invalidate any cached disk footprint entries covering `path` or its children.
+pub fn invalidate_path_disk_cache(path: &std::path::Path) {
+    if let Ok(mut guard) = DISK_USAGE_CACHE.write() {
+        if let Some(map) = guard.as_mut() {
+            map.retain(|k, _| !k.starts_with(path) && !path.starts_with(k));
+        }
+    }
+}
+
 /// Returns on-disk storage size in bytes for a directory or file.
 /// Traverses filesystem safely without following symlinks to prevent loops.
 /// Employs a non-blocking in-memory cache (120s TTL) with background refresh so HTTP threads never stall on I/O.
@@ -361,3 +376,238 @@ fn compute_disk_size(path: &std::path::Path) -> u64 {
     total
 }
 
+
+impl Monitor {
+    /// Aggregate unique process-tree CPU (%) and RSS memory (bytes) across all `seed_pids`
+    /// without double-counting shared descendants. Also returns unique alive PID count.
+    pub fn get_combined_tree_metrics(&self, seed_pids: &[u32]) -> (f32, u64, usize) {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+        if seed_pids.is_empty() {
+            return (0.0, 0, 0);
+        }
+        let sys = self.sys.lock().unwrap();
+        let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (pid, p) in sys.processes() {
+            if let Some(parent) = p.parent() {
+                children_map
+                    .entry(parent.as_u32())
+                    .or_default()
+                    .push(pid.as_u32());
+            }
+        }
+
+        let mut visited: HashSet<u32> = HashSet::new();
+        let mut queue: VecDeque<u32> = VecDeque::new();
+        for &root in seed_pids {
+            if root > 0 && visited.insert(root) {
+                queue.push_back(root);
+            }
+        }
+
+        let mut total_cpu = 0.0f32;
+        let mut total_mem = 0u64;
+        let mut alive_count = 0usize;
+        while let Some(curr) = queue.pop_front() {
+            let pid_obj = sysinfo::Pid::from_u32(curr);
+            if let Some(proc_info) = sys.process(pid_obj) {
+                total_cpu += proc_info.cpu_usage();
+                total_mem = total_mem.saturating_add(proc_info.memory());
+                alive_count += 1;
+            }
+            if let Some(kids) = children_map.get(&curr) {
+                for &k in kids {
+                    if visited.insert(k) {
+                        queue.push_back(k);
+                    }
+                }
+            }
+        }
+        (total_cpu, total_mem, alive_count)
+    }
+}
+
+const NET_HISTORY_LIMIT: usize = 30;
+
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSample {
+    pub ts: i64,
+    pub inbound_bps: u64,
+    pub outbound_bps: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkMetrics {
+    pub inbound_bps: u64,
+    pub outbound_bps: u64,
+    pub total_rx_bytes: u64,
+    pub total_tx_bytes: u64,
+    pub interface_count: usize,
+    pub history: Vec<NetworkSample>,
+}
+
+struct NetworkTracker {
+    networks: sysinfo::Networks,
+    last_tick: std::time::Instant,
+    total_rx_bytes: u64,
+    total_tx_bytes: u64,
+    interface_count: usize,
+    history: VecDeque<NetworkSample>,
+}
+
+static NETWORK_TRACKER: OnceLock<Mutex<NetworkTracker>> = OnceLock::new();
+
+fn is_loopback_iface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "lo" || lower.starts_with("lo") && lower[2..].chars().all(|c| c.is_ascii_digit())
+        || lower.contains("loopback")
+}
+
+fn aggregate_network_stats(networks: &sysinfo::Networks) -> (u64, u64, u64, u64, usize) {
+    let mut non_lo_rx_delta = 0u64;
+    let mut non_lo_tx_delta = 0u64;
+    let mut non_lo_rx_total = 0u64;
+    let mut non_lo_tx_total = 0u64;
+    let mut non_lo_count = 0usize;
+
+    let mut all_rx_delta = 0u64;
+    let mut all_tx_delta = 0u64;
+    let mut all_rx_total = 0u64;
+    let mut all_tx_total = 0u64;
+    let mut all_count = 0usize;
+
+    for (name, data) in networks.iter() {
+        let rx_d = data.received();
+        let tx_d = data.transmitted();
+        let rx_t = data.total_received();
+        let tx_t = data.total_transmitted();
+
+        all_rx_delta = all_rx_delta.saturating_add(rx_d);
+        all_tx_delta = all_tx_delta.saturating_add(tx_d);
+        all_rx_total = all_rx_total.saturating_add(rx_t);
+        all_tx_total = all_tx_total.saturating_add(tx_t);
+        all_count += 1;
+
+        if !is_loopback_iface(name) {
+            non_lo_rx_delta = non_lo_rx_delta.saturating_add(rx_d);
+            non_lo_tx_delta = non_lo_tx_delta.saturating_add(tx_d);
+            non_lo_rx_total = non_lo_rx_total.saturating_add(rx_t);
+            non_lo_tx_total = non_lo_tx_total.saturating_add(tx_t);
+            non_lo_count += 1;
+        }
+    }
+
+    if non_lo_count > 0 {
+        (
+            non_lo_rx_delta,
+            non_lo_tx_delta,
+            non_lo_rx_total,
+            non_lo_tx_total,
+            non_lo_count,
+        )
+    } else {
+        (all_rx_delta, all_tx_delta, all_rx_total, all_tx_total, all_count)
+    }
+}
+
+fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn get_tracker() -> &'static Mutex<NetworkTracker> {
+    NETWORK_TRACKER.get_or_init(|| {
+        let networks = sysinfo::Networks::new_with_refreshed_list();
+        let (_, _, rx_total, tx_total, iface_count) = aggregate_network_stats(&networks);
+        let mut history = VecDeque::with_capacity(NET_HISTORY_LIMIT);
+        history.push_back(NetworkSample {
+            ts: now_unix_ms(),
+            inbound_bps: 0,
+            outbound_bps: 0,
+        });
+        Mutex::new(NetworkTracker {
+            networks,
+            last_tick: std::time::Instant::now(),
+            total_rx_bytes: rx_total,
+            total_tx_bytes: tx_total,
+            interface_count: iface_count,
+            history,
+        })
+    })
+}
+
+fn sample_tracker(tracker: &mut NetworkTracker) {
+    let elapsed = tracker.last_tick.elapsed();
+    if elapsed < Duration::from_millis(200) {
+        return;
+    }
+
+    tracker.networks.refresh();
+    let dt = elapsed.as_secs_f64().max(0.2);
+    let (rx_d, tx_d, rx_total, tx_total, iface_count) = aggregate_network_stats(&tracker.networks);
+
+    let inbound_bps = ((rx_d as f64) / dt).round() as u64;
+    let outbound_bps = ((tx_d as f64) / dt).round() as u64;
+
+    tracker.last_tick = std::time::Instant::now();
+    tracker.total_rx_bytes = rx_total;
+    tracker.total_tx_bytes = tx_total;
+    tracker.interface_count = iface_count;
+
+    if tracker.history.len() >= NET_HISTORY_LIMIT {
+        tracker.history.pop_front();
+    }
+    tracker.history.push_back(NetworkSample {
+        ts: now_unix_ms(),
+        inbound_bps,
+        outbound_bps,
+    });
+}
+
+/// Record a fresh network interface I/O sample into the rolling telemetry ring buffer.
+pub fn record_network_sample() {
+    if let Ok(mut guard) = get_tracker().lock() {
+        sample_tracker(&mut guard);
+    }
+}
+
+/// Return current host network inbound/outbound rates plus up to `NET_HISTORY_LIMIT` rolling samples.
+pub fn get_network_metrics() -> NetworkMetrics {
+    let Ok(mut guard) = get_tracker().lock() else {
+        return NetworkMetrics::default();
+    };
+    if guard.last_tick.elapsed() >= Duration::from_secs(2) {
+        sample_tracker(&mut guard);
+    }
+    let latest = guard.history.back().cloned().unwrap_or_default();
+    NetworkMetrics {
+        inbound_bps: latest.inbound_bps,
+        outbound_bps: latest.outbound_bps,
+        total_rx_bytes: guard.total_rx_bytes,
+        total_tx_bytes: guard.total_tx_bytes,
+        interface_count: guard.interface_count,
+        history: guard.history.iter().cloned().collect(),
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+
+    #[test]
+    fn test_loopback_detection_and_metrics_shape() {
+        assert!(is_loopback_iface("lo"));
+        assert!(is_loopback_iface("lo0"));
+        assert!(is_loopback_iface("Loopback Pseudo-Interface 1"));
+        assert!(!is_loopback_iface("eth0"));
+        assert!(!is_loopback_iface("Wi-Fi"));
+        assert!(!is_loopback_iface("enp3s0"));
+
+        let metrics = get_network_metrics();
+        assert!(!metrics.history.is_empty());
+        assert!(metrics.history.len() <= NET_HISTORY_LIMIT);
+    }
+}

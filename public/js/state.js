@@ -233,6 +233,7 @@ function getCacheTtlMs(path) {
   if (path.startsWith('/api/databases')) return 3500; // Live database status
   if (path.startsWith('/api/overview') || path.startsWith('/api/monitor')) return 3000;
   if (path.startsWith('/api/deployments')) return 0; // Live deployment status and pipeline stage
+  if (path.includes('/usage')) return 0; // Live CPU, RAM, disk, and network chart telemetry
   if (path.startsWith('/api/audit')) return 8000;
   if (path.includes('/commits')) return 45000;
   if (path.includes('/releases') || path.includes('/backups') || path.includes('/env')) return 20000;

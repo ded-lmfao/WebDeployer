@@ -8,9 +8,11 @@ use sha2::{Digest, Sha256};
 
 use super::common::*;
 
+pub mod app_usage;
 pub mod overview;
 pub mod settings;
 
+pub(crate) use app_usage::*;
 pub use overview::*;
 pub(crate) use settings::*;
 
