@@ -109,7 +109,7 @@ export function getFileMeta(entry) {
     isBinary,
     iconColor: isDir ? 'var(--text-main)' : 'var(--text-muted)',
     boxColor: (isDir || DEVICONS[iconName]) ? 'var(--text-main)' : 'var(--text-muted)',
-    iconBg: isDir ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.05)',
+    iconBg: isDir ? 'rgba(238, 241, 247, 0.08)' : 'rgba(238, 241, 247, 0.05)',
     iconSvg: icon(iconName, { size: 17 }),
   });
 

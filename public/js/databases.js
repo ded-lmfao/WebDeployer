@@ -248,8 +248,6 @@ export function renderDatabasesList() {
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
           <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">Port ${d.port || 5432}</span>
           <span class="badge ${accessBadgeCls}" style="font-size: 10px; padding: 2px 8px;">${icon(accessIconName, { size: 10 })} ${accessLabel}</span>
-          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">DB: ${escapeHtml(dbName)}</span>
-          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">User: ${escapeHtml(dbUser)}</span>
           ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
           ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
         </div>

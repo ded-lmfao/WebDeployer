@@ -100,20 +100,20 @@ function ensureOverviewNetDom() {
           <stop offset="100%" stop-color="#4cc38a" stop-opacity="0.01"/>
         </linearGradient>
         <linearGradient id="overviewNetGradOut" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.26"/>
-          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.01"/>
+          <stop offset="0%" stop-color="#4f8ef7" stop-opacity="0.26"/>
+          <stop offset="100%" stop-color="#4f8ef7" stop-opacity="0.01"/>
         </linearGradient>
       </defs>
-      <line x1="0" y1="18" x2="${OV_NET_SVG_W}" y2="18" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
-      <line x1="0" y1="34" x2="${OV_NET_SVG_W}" y2="34" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
-      <line x1="0" y1="${OV_NET_BOTTOM}" x2="${OV_NET_SVG_W}" y2="${OV_NET_BOTTOM}" stroke="rgba(255,255,255,0.08)"/>
+      <line x1="0" y1="18" x2="${OV_NET_SVG_W}" y2="18" stroke="rgba(238,241,247,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="34" x2="${OV_NET_SVG_W}" y2="34" stroke="rgba(238,241,247,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="${OV_NET_BOTTOM}" x2="${OV_NET_SVG_W}" y2="${OV_NET_BOTTOM}" stroke="rgba(238,241,247,0.08)"/>
       <g clip-path="url(#overview-net-clip)">
         <path id="ov-net-in-area" d="" fill="url(#overviewNetGradIn)"/>
         <path id="ov-net-out-area" d="" fill="url(#overviewNetGradOut)"/>
         <path id="ov-net-in-glow" d="" fill="none" stroke="rgba(76, 195, 138, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="ov-net-out-glow" d="" fill="none" stroke="rgba(59, 130, 246, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-out-glow" d="" fill="none" stroke="rgba(79, 142, 247, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
         <path id="ov-net-in-line" d="" fill="none" stroke="#4cc38a" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="ov-net-out-line" d="" fill="none" stroke="#3b82f6" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-out-line" d="" fill="none" stroke="#4f8ef7" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>
     <div id="ov-net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>

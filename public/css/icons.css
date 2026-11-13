@@ -40,7 +40,7 @@
   width: 64px;
   height: 64px;
   border-radius: var(--radius-lg);
-  background: rgba(237, 237, 237, 0.03);
+  background: rgba(238, 241, 247, 0.03);
   border: 1px dashed var(--border-medium);
   display: inline-flex;
   align-items: center;

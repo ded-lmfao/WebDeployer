@@ -148,16 +148,16 @@
   justify-content: center;
   gap: 8px;
   margin-top: 16px;
-  background: #ededed;
-  border-color: #ededed;
-  color: #0f0f10;
+  background: var(--text-main);
+  border-color: var(--text-main);
+  color: var(--text-inverse);
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .btn-login-submit:hover {
   background: #ffffff;
   border-color: #ffffff;
-  color: #0f0f10;
+  color: var(--text-inverse);
 }
 
 /* Minimalist Passkey Section */
@@ -203,7 +203,7 @@
 
 .btn-passkey-sleek:hover {
   background: var(--bg-card-hover);
-  border-color: rgba(237, 237, 237, 0.22);
+  border-color: rgba(238, 241, 247, 0.22);
 }
 
 /* 2FA Challenge */

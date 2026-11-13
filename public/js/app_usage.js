@@ -242,20 +242,20 @@ function ensureOnlineChartDom() {
           <stop offset="100%" stop-color="#4cc38a" stop-opacity="0.01"/>
         </linearGradient>
         <linearGradient id="netGradOut" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.26"/>
-          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.01"/>
+          <stop offset="0%" stop-color="#4f8ef7" stop-opacity="0.26"/>
+          <stop offset="100%" stop-color="#4f8ef7" stop-opacity="0.01"/>
         </linearGradient>
       </defs>
-      <line x1="0" y1="22" x2="${SVG_W}" y2="22" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
-      <line x1="0" y1="46" x2="${SVG_W}" y2="46" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
-      <line x1="0" y1="${PLOT_BOTTOM}" x2="${SVG_W}" y2="${PLOT_BOTTOM}" stroke="rgba(255,255,255,0.08)"/>
+      <line x1="0" y1="22" x2="${SVG_W}" y2="22" stroke="rgba(238,241,247,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="46" x2="${SVG_W}" y2="46" stroke="rgba(238,241,247,0.045)" stroke-dasharray="3 4"/>
+      <line x1="0" y1="${PLOT_BOTTOM}" x2="${SVG_W}" y2="${PLOT_BOTTOM}" stroke="rgba(238,241,247,0.08)"/>
       <g clip-path="url(#app-net-clip)">
         <path id="net-in-area" d="" fill="url(#netGradIn)"/>
         <path id="net-out-area" d="" fill="url(#netGradOut)"/>
         <path id="net-in-glow" d="" fill="none" stroke="rgba(76, 195, 138, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="net-out-glow" d="" fill="none" stroke="rgba(59, 130, 246, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-out-glow" d="" fill="none" stroke="rgba(79, 142, 247, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
         <path id="net-in-line" d="" fill="none" stroke="#4cc38a" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="net-out-line" d="" fill="none" stroke="#3b82f6" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-out-line" d="" fill="none" stroke="#4f8ef7" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>
     <div id="net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
