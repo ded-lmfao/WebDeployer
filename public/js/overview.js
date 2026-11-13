@@ -472,7 +472,7 @@ function renderResourceBreakdown(resources) {
         <td>${portPid}</td>
         <td>
           <span class="status-dot ${isRunning ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
-          <span style="font-size: 12px; font-weight: 600; margin-left: 5px; color: ${isRunning ? 'var(--success)' : isMaintenance ? 'var(--warning)' : 'var(--text-muted)'};">${isRunning ? 'Running' : isMaintenance ? 'Maintenance' : 'Stopped'}</span>
+          <span style="font-size: 12px; font-weight: 500; margin-left: 6px; color: ${isRunning ? 'var(--success)' : isMaintenance ? 'var(--warning)' : 'var(--text-muted)'};">${isRunning ? 'Running' : isMaintenance ? 'Maintenance' : 'Stopped'}</span>
         </td>
         <td>
           <div class="res-metric-cell">
@@ -503,7 +503,7 @@ function renderResourceBreakdown(resources) {
               <span style="color: var(--text-dim); font-size: 11px;">${diskPctVal}% Disk</span>
             </div>
             <div class="res-mini-bar">
-              <div class="res-mini-fill res-disk-fill ${diskWarm}" style="width: ${Math.min(100, Math.max(2, (r.diskPct || 0) * 2))}%;"></div>
+              <div class="res-mini-fill res-disk-fill ${diskWarm}" style="width: ${(r.diskPct || 0) > 0 ? Math.min(100, Math.max(2, (r.diskPct || 0) * 2)) : 0}%;"></div>
             </div>
           </div>
         </td>

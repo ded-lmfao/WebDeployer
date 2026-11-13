@@ -269,10 +269,10 @@ export function renderFilesTable() {
             <span class="file-tag-ext" style="background: ${meta.iconBg}; color: ${meta.iconColor};">${meta.extLabel}</span>
           </div>
         </td>
-        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);">
+        <td style="padding: 8px 16px; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);">
           ${sizeStr}
         </td>
-        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);" title="${escapeHtml(dateObj.full)}">
+        <td style="padding: 8px 16px; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);" title="${escapeHtml(dateObj.full)}">
           ${dateObj.relative}
         </td>
         <td style="padding: 8px 16px; text-align: right;">

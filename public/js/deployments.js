@@ -244,7 +244,7 @@ async function loadDatabaseOverviewSection(db) {
     const canManage = typeof window.hasPower === 'function' ? window.hasPower('databases_manage') : false;
 
     const nextHtml = `
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 14px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px;">
         <div style="background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px;">
           <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Host / Endpoint</div>
           <div style="font-family: var(--font-mono); font-size: 12.5px; color: var(--text-main); font-weight: 600;">${escapeHtml(hostOrDomain)}:${db.port || 5432}</div>
@@ -262,10 +262,10 @@ async function loadDatabaseOverviewSection(db) {
           <div style="font-size: 12.5px; color: var(--text-main); font-weight: 600;">${escapeHtml(linkedName)}</div>
         </div>
       </div>
-      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 9px 12px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 12px;">
         <div style="min-width: 0; flex: 1;">
           <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 2px;">PostgreSQL CLI Command &bull; Data Dir: <code>${escapeHtml(dataDir)}</code></div>
-          <code style="font-size: 12px; color: var(--accent-light); word-break: break-all;">${escapeHtml(psqlCmd)}</code>
+          <code style="font-size: 12px; color: var(--text-main); word-break: break-all;">${escapeHtml(psqlCmd)}</code>
         </div>
         <div style="display: flex; gap: 6px; flex-shrink: 0;">
           ${canCreds ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${db.id})">Connection</button>` : ''}
@@ -409,7 +409,7 @@ async function loadDeploymentsView() {
           <td colspan="7">
             <div class="deployments-empty-state">
               <div class="deployments-empty-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                   <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
                   <path d="M2 17l10 5 10-5"></path>
                   <path d="M2 12l10 5 10-5"></path>

@@ -204,7 +204,7 @@ function renderProjectsList() {
       <div class="project-card website-card" id="project-card-${p.id}" style="cursor: pointer;" onclick="openWebsiteWorkspace(${p.id}, 'deployments')">
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
             <div class="project-card-icon" style="color: ${iconColor};">
               ${icon(typeIconName, { size: 28 })}
             </div>
@@ -224,7 +224,7 @@ function renderProjectsList() {
         </div>
 
         <!-- Command Line -->
-        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 2px 0 0 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
+        <div style="background: var(--bg-alt); padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 2px 0 0 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
           <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(p.start_cmd || 'npm start')}">
             $ ${escapeHtml(p.start_cmd || 'npm start')}
           </span>
@@ -233,12 +233,12 @@ function renderProjectsList() {
 
         <!-- Badges & Telemetry Row -->
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
-          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">
             ${icon('git-branch', { size: 10 })} ${escapeHtml(branchText)}${shaText ? ' &bull; ' + escapeHtml(shaText) : ''}
           </span>
-          ${p.port ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">Port ${p.port}</span>` : ''}
+          ${p.port ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">Port ${p.port}</span>` : ''}
           ${accessBadge}
-          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
+          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
           ${p.app_started_at && isOnline ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${icon('clock', { size: 10 })} Started ${formatRelativeTime(p.app_started_at)}</span>` : ''}
         </div>
 
@@ -257,7 +257,7 @@ function renderProjectsList() {
               </button>
             ` : ''}
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')" style="padding: 4px 14px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
+          <button class="btn btn-primary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'deployments')" style="padding: 4px 12px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
             Manage &rarr;
           </button>
         </div>

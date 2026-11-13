@@ -71,7 +71,7 @@
 }
 .nav-item:hover { background: var(--bg-card); color: var(--text-main); }
 .nav-item.active { background: var(--bg-card-hover); color: var(--text-main); }
-.nav-item svg { width: 16px; height: 16px; stroke-width: 1.8; opacity: 0.72; flex-shrink: 0; }
+.nav-item svg { width: 16px; height: 16px; stroke-width: 1.5; opacity: 0.72; flex-shrink: 0; }
 .nav-item.active svg { opacity: 1; }
 
 .nav-badge {

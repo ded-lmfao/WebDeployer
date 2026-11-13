@@ -90,7 +90,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 12px;
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -98,7 +98,7 @@
 .project-meta-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .project-meta-item svg {
@@ -113,7 +113,7 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: auto;
-  padding-top: 14px;
+  padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -131,7 +131,7 @@
 }
 
 .log-toolbar {
-  padding: 8px 14px;
+  padding: 8px 16px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
@@ -150,7 +150,7 @@
 
 .log-terminal {
   flex: 1;
-  padding: 14px 18px;
+  padding: 16px;
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -306,7 +306,7 @@
   color: var(--text-normal);
   background: var(--bg-input);
   border: 1px solid var(--border-subtle);
-  padding: 3px 9px;
+  padding: 4px 8px;
   border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
@@ -339,7 +339,7 @@
   background: var(--bg-terminal);
   border: 1px solid var(--border-medium);
   color: var(--text-normal);
-  padding: 12px 14px;
+  padding: 12px 16px;
   border-radius: var(--radius-md);
   resize: vertical;
   min-height: 300px;
@@ -379,7 +379,7 @@
 }
 
 .overview-stats-grid .stat-card {
-  padding: 12px 14px;
+  padding: 12px 16px;
 }
 
 .overview-stats-grid .stat-card-network {
@@ -642,7 +642,7 @@
 .res-metric-cell {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .res-metric-head {
@@ -657,14 +657,14 @@
   width: 100%;
   height: 5px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .res-mini-fill {
   height: 100%;
-  border-radius: 3px;
-  transition: width 0.3s var(--ease-out);
+  border-radius: 4px;
+  transition: background-color var(--transition-base);
 }
 
 .res-cpu-fill,
@@ -745,7 +745,7 @@
   font-size: 22px;
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
   margin-bottom: 12px;
@@ -764,7 +764,7 @@
   height: 100%;
   border-radius: var(--radius-full);
   background: var(--accent);
-  transition: width 0.35s var(--ease-out), background-color var(--transition-base);
+  transition: background-color var(--transition-base);
 }
 
 .app-usage-sub {
@@ -785,7 +785,7 @@
 .app-net-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 2px 8px;
   border-radius: var(--radius-full);
   font-size: 10.5px;
@@ -926,7 +926,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.015);
 }
 

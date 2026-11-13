@@ -219,7 +219,7 @@ export function renderDatabasesList() {
       <div class="project-card database-card" id="database-card-${d.id}" style="cursor: pointer;" onclick="openDatabaseWorkspace(${d.id}, 'deployments')">
         <!-- Header -->
         <div class="project-card-header" style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
             <div class="project-card-icon">
               ${icon('postgres', { size: 28 })}
             </div>
@@ -237,7 +237,7 @@ export function renderDatabasesList() {
         </div>
 
         <!-- Command / Endpoint Line -->
-        <div style="background: var(--bg-alt); padding: 7px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 2px 0 0 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
+        <div style="background: var(--bg-alt); padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); font-size: 11.5px; font-family: var(--font-mono); margin: 2px 0 0 0; display: flex; justify-content: space-between; align-items: center; overflow: hidden; height: 34px; box-sizing: border-box;">
           <span style="color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 78%;" title="${escapeHtml(psqlCmd)}">
             $ ${escapeHtml(psqlCmd)}
           </span>
@@ -246,12 +246,12 @@ export function renderDatabasesList() {
 
         <!-- Badges & Telemetry Row -->
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px;">
-          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">Port ${d.port || 5432}</span>
-          <span class="badge ${accessBadgeCls}" style="font-size: 10px; padding: 2px 7px;">${icon(accessIconName, { size: 10 })} ${accessLabel}</span>
-          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">DB: ${escapeHtml(dbName)}</span>
-          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">User: ${escapeHtml(dbUser)}</span>
-          ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
-          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">Port ${d.port || 5432}</span>
+          <span class="badge ${accessBadgeCls}" style="font-size: 10px; padding: 2px 8px;">${icon(accessIconName, { size: 10 })} ${accessLabel}</span>
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">DB: ${escapeHtml(dbName)}</span>
+          <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">User: ${escapeHtml(dbUser)}</span>
+          ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
+          ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
         </div>
 
         <!-- Actions Footer -->
@@ -265,7 +265,7 @@ export function renderDatabasesList() {
             ${hasAnyPower(['databases_manage', 'env']) ? `<button class="btn btn-secondary btn-sm" onclick="showDatabaseDetails(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Connection Strings & Password">Connection</button>` : ''}
             ${hasPower('databases_manage') ? `<button class="btn btn-secondary btn-sm" onclick="openDatabaseAccessModal(${d.id})" style="padding: 4px 10px; font-size: 11.5px;" title="Network Access & Domain">Access</button>` : ''}
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openDatabaseWorkspace(${d.id}, 'deployments')" style="padding: 4px 14px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
+          <button class="btn btn-primary btn-sm" onclick="openDatabaseWorkspace(${d.id}, 'deployments')" style="padding: 4px 12px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0;">
             Manage &rarr;
           </button>
         </div>

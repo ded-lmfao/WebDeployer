@@ -72,13 +72,13 @@
   display: block;
   opacity: 1;
   stroke: var(--success-light);
-  stroke-width: 2.5;
+  stroke-width: 1.5;
 }
 .water-node-vial.failed .water-vial-cross {
   display: block;
   opacity: 1;
   stroke: var(--danger-light);
-  stroke-width: 2.5;
+  stroke-width: 1.5;
 }
 .water-node-vial.completed .water-vial-num,
 .water-node-vial.failed .water-vial-num {

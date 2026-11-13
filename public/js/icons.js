@@ -139,7 +139,7 @@ export function icon(name, opts = {}) {
     }
     const body = P[name] || P.file;
     const size = opts.size || 16;
-    const stroke = opts.stroke || (opts.size && opts.size >= 24 ? 2 : 1.75);
+    const stroke = opts.stroke || 1.5;
     const cls = ['icon', `icon-${name}`, opts.cls || ''].filter(Boolean).join(' ');
     const style = opts.style ? ` style="${opts.style}"` : '';
     return `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"${style}>${body}</svg>`;

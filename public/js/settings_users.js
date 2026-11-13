@@ -212,7 +212,7 @@ export function renderUsersTable(users) {
       return `
         <tr>
           <td>
-            <div style="display:flex; align-items:center; gap:7px;">
+            <div style="display:flex; align-items:center; gap:8px;">
               <strong>${escapeHtml(u.username)}</strong>
               ${isMain ? '<span class="badge badge-neutral" style="font-size: 10px;">Main admin</span>' : ''}
               ${u.id === state.user?.id ? '<span style="color:var(--text-dim); font-size:11px;">(You)</span>' : ''}

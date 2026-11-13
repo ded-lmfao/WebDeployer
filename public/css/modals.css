@@ -26,7 +26,6 @@
   max-height: 88vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
   transform: translateY(8px);
   transition: transform var(--transition-base);
   overflow: hidden;

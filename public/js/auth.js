@@ -264,7 +264,7 @@ export async function onAuthenticated(isFreshLogin = false) {
   const curUserEl = document.getElementById('current-user-name');
   if (curUserEl) curUserEl.textContent = state.user.username;
   const curRoleEl = document.getElementById('current-user-role');
-  if (curRoleEl) curRoleEl.textContent = state.user.isMainAdmin ? 'MAIN ADMIN' : 'USER';
+  if (curRoleEl) curRoleEl.textContent = state.user.isMainAdmin ? 'Main admin' : 'User';
   const curAvatarEl = document.getElementById('current-user-avatar');
   if (curAvatarEl) curAvatarEl.textContent = (state.user.username || 'AD').slice(0, 2).toUpperCase();
 
