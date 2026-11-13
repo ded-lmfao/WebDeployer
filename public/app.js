@@ -6,14 +6,13 @@
 // Core Services & Shared Reactive State
 import './js/icons.js';
 import { state, WEBSITE_WORKSPACE_TABS } from './js/state.js';
-import { api, toast } from './js/api.js';
-import { initAuth, showLogin } from './js/auth.js';
+import { initAuth } from './js/auth.js';
 
 // Domain Views & Subsystems
 import { loadOverview } from './js/overview.js';
 import { loadProjects, renderProjectsList, openAddWebsiteModal } from './js/websites.js';
 import { renderServicesList } from './js/services.js';
-import { navigateTo, renderCurrentView, renderWebsiteWorkspaceHeader, globalAddAction } from './js/workspace.js';
+import { navigateTo, renderCurrentView, renderWebsiteWorkspaceHeader } from './js/workspace.js';
 import { loadDatabases, renderDatabasesList } from './js/databases.js';
 import { loadDeploymentsView, loadReleasesView, loadRollbacksView, waterPipelines } from './js/deployments.js';
 import { loadMonitorView } from './js/settings.js';

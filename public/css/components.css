@@ -50,7 +50,6 @@
 
 .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; border-radius: var(--radius-sm); }
 .btn-sm svg { width: 13px; height: 13px; }
-.btn-lg { height: 40px; padding: 0 16px; font-size: 14px; }
 
 /* Button loading spinner */
 .btn-spinner {
@@ -304,8 +303,7 @@ select option, .form-control option { background-color: var(--bg-card) !importan
 
 .form-group > div[style*="display: flex"] > .form-control,
 .form-group > div > input.form-control,
-.form-row > .form-control,
-.input-flex-row > .form-control { flex: 1; min-width: 0; }
+.form-row > .form-control { flex: 1; min-width: 0; }
 
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 

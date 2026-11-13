@@ -1,5 +1,4 @@
 use rusqlite::{params, OptionalExtension};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::db::{now, DbPool};
@@ -11,16 +10,11 @@ pub use models::*;
 pub struct Projects {
     db: DbPool,
     vault: Arc<Vault>,
-    data_dir: PathBuf,
 }
 
 impl Projects {
-    pub fn new(db: DbPool, vault: Arc<Vault>, data_dir: PathBuf) -> Self {
-        Self {
-            db,
-            vault,
-            data_dir,
-        }
+    pub fn new(db: DbPool, vault: Arc<Vault>) -> Self {
+        Self { db, vault }
     }
 
     pub fn list(&self) -> Result<Vec<Project>, rusqlite::Error> {
@@ -451,7 +445,7 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let pool = crate::db::open_db(&temp_dir).unwrap();
         let vault = Arc::new(crate::vault::Vault::new(&temp_dir).unwrap());
-        let projects = Projects::new(pool, vault, temp_dir.clone());
+        let projects = Projects::new(pool, vault);
 
         let json_service = r#"{
             "name": "Discord Music Bot",

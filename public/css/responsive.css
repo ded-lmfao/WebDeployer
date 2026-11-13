@@ -23,7 +23,6 @@
   .settings-cards-grid { grid-template-columns: 1fr; }
   .top-header { padding: 0 16px; height: 50px; }
   .content-area { padding: 16px 16px 80px; }
-  .breadcrumbs .crumb-separator, .breadcrumbs .crumb-project { display: none !important; }
   .env-quick-add-bar { grid-template-columns: 1fr; gap: 10px; }
   .env-quick-submit .env-quick-label { display: none; }
   .gh-token-row,
@@ -149,8 +148,6 @@
   }
   .filter-pills .pill { white-space: nowrap; flex-shrink: 0; }
 
-  /* Hide non-essential container slug metadata in workspace banner on small screens */
-  .ws-meta-optional { display: none; }
   .ws-banner { margin-bottom: 16px; }
   .ws-title { font-size: 17px; }
   .ws-meta-line { font-size: 12px; gap: 6px; }

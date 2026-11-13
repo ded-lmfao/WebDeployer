@@ -31,6 +31,7 @@ pub struct ManagedDatabase {
     pub domain: String,
     pub status: String,
     pub container_id: Option<String>,
+    pub started_at: Option<i64>,
     pub data_dir: String,
     pub linked_project_id: Option<i64>,
     pub linked_project_name: Option<String>,
@@ -64,16 +65,6 @@ pub struct CreateDatabaseInput {
     pub domain: Option<String>,
     #[serde(default, alias = "linkedProjectId", alias = "linked_project_id")]
     pub linked_project_id: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateDatabaseAccessInput {
-    #[serde(alias = "accessMode", alias = "access_mode")]
-    pub access_mode: String,
-    #[serde(default, alias = "allowedIps", alias = "allowed_ips")]
-    pub allowed_ips: Option<String>,
-    #[serde(default)]
-    pub domain: Option<String>,
 }
 
 pub fn encode_uri_userinfo_component(input: &str) -> String {
@@ -141,88 +132,96 @@ impl Databases {
         }
     }
 
-    pub fn set_public_ip(&mut self, ip: String) {
-        if !ip.trim().is_empty() {
-            self.public_ip = ip;
-        }
+    fn row_to_managed_database(&self, r: &rusqlite::Row) -> Result<ManagedDatabase, rusqlite::Error> {
+        let id: i64 = r.get(0)?;
+        let name: String = r.get(1)?;
+        let engine: String = r.get(2)?;
+        let db_name: String = r.get(3)?;
+        let db_user: String = r.get(4)?;
+        let enc_pass: String = r.get(5)?;
+        let port: u16 = r.get(6)?;
+        let is_superuser: bool = r.get::<_, i64>(7)? != 0;
+        let access_mode: String = r.get(8)?;
+        let allowed_ips: String = r.get(9)?;
+        let status: String = r.get(10)?;
+        let container_id: Option<String> = r.get(11)?;
+        let data_dir: String = r.get(12)?;
+        let linked_project_id: Option<i64> = r.get(13)?;
+        let linked_project_name: Option<String> = r.get(14)?;
+        let domain: String = r.get::<_, Option<String>>(15)?.unwrap_or_default();
+        let created_at: i64 = r.get(16)?;
+        let updated_at: i64 = r.get(17)?;
+        let started_at_db: Option<i64> = r.get(18)?;
+        let started_at = if status == "running" {
+            let pg_data = Path::new(&data_dir).join("data");
+            started_at_db
+                .or_else(|| read_pg_started_at(&pg_data))
+                .or(Some(updated_at))
+        } else {
+            None
+        };
+
+        let raw_pass = self.vault.decrypt(&enc_pass).unwrap_or(enc_pass);
+        let internal_url = build_postgres_url(&db_user, &raw_pass, "127.0.0.1", port, &db_name, false);
+        let host = if !domain.trim().is_empty() {
+            domain.trim()
+        } else {
+            &self.public_ip
+        };
+        let external_url = build_postgres_url(&db_user, &raw_pass, host, port, &db_name, true);
+        let psql_command = format!("psql -h {} -p {} -U {} -d {}", host, port, db_user, db_name);
+
+        Ok(ManagedDatabase {
+            id,
+            name,
+            engine,
+            db_name,
+            db_user,
+            db_password: Some(raw_pass),
+            port,
+            is_superuser,
+            access_mode,
+            allowed_ips,
+            domain,
+            status,
+            container_id,
+            started_at,
+            data_dir,
+            linked_project_id,
+            linked_project_name,
+            internal_url,
+            external_url,
+            psql_command,
+            created_at,
+            updated_at,
+        })
     }
 
     pub fn list(&self) -> Result<Vec<ManagedDatabase>, String> {
-        let conn = self.db.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT d.id, d.name, d.engine, d.db_name, d.db_user, d.db_password, d.port,
-                        d.is_superuser, d.access_mode, d.allowed_ips, d.status, d.container_id,
-                        d.data_dir, d.linked_project_id, p.name, d.domain, d.created_at, d.updated_at
-                 FROM databases d
-                 LEFT JOIN projects p ON p.id = d.linked_project_id
-                 ORDER BY d.id DESC",
-            )
-            .map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map([], |r| {
-                let id: i64 = r.get(0)?;
-                let name: String = r.get(1)?;
-                let engine: String = r.get(2)?;
-                let db_name: String = r.get(3)?;
-                let db_user: String = r.get(4)?;
-                let enc_pass: String = r.get(5)?;
-                let port: u16 = r.get(6)?;
-                let is_superuser: bool = r.get::<_, i64>(7)? != 0;
-                let access_mode: String = r.get(8)?;
-                let allowed_ips: String = r.get(9)?;
-                let status: String = r.get(10)?;
-                let container_id: Option<String> = r.get(11)?;
-                let data_dir: String = r.get(12)?;
-                let linked_project_id: Option<i64> = r.get(13)?;
-                let linked_project_name: Option<String> = r.get(14)?;
-                let domain: String = r.get::<_, Option<String>>(15)?.unwrap_or_default();
-                let created_at: i64 = r.get(16)?;
-                let updated_at: i64 = r.get(17)?;
-
-                let raw_pass = self.vault.decrypt(&enc_pass).unwrap_or(enc_pass);
-                let internal_url = build_postgres_url(&db_user, &raw_pass, "127.0.0.1", port, &db_name, false);
-                let host = if !domain.trim().is_empty() {
-                    domain.trim()
-                } else {
-                    &self.public_ip
-                };
-                let external_url = build_postgres_url(&db_user, &raw_pass, host, port, &db_name, true);
-                let psql_command = format!("psql -h {} -p {} -U {} -d {}", host, port, db_user, db_name);
-
-                Ok(ManagedDatabase {
-                    id,
-                    name,
-                    engine,
-                    db_name,
-                    db_user,
-                    db_password: Some(raw_pass),
-                    port,
-                    is_superuser,
-                    access_mode,
-                    allowed_ips,
-                    domain,
-                    status,
-                    container_id,
-                    data_dir,
-                    linked_project_id,
-                    linked_project_name,
-                    internal_url,
-                    external_url,
-                    psql_command,
-                    created_at,
-                    updated_at,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok(rows.flatten().collect())
+        self.query_databases("ORDER BY d.id DESC", rusqlite::params![])
     }
 
     pub fn get(&self, id: i64) -> Result<Option<ManagedDatabase>, String> {
-        let all = self.list()?;
-        Ok(all.into_iter().find(|d| d.id == id))
+        Ok(self.query_databases("WHERE d.id = ? LIMIT 1", params![id])?.into_iter().next())
+    }
+
+    fn query_databases<P: rusqlite::Params>(&self, clause: &str, params: P) -> Result<Vec<ManagedDatabase>, String> {
+        let conn = self.db.lock().map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT d.id, d.name, d.engine, d.db_name, d.db_user, d.db_password, d.port,
+                    d.is_superuser, d.access_mode, d.allowed_ips, d.status, d.container_id,
+                    d.data_dir, d.linked_project_id, p.name, d.domain, d.created_at, d.updated_at,
+                    d.started_at
+             FROM databases d
+             LEFT JOIN projects p ON p.id = d.linked_project_id
+             {}",
+            clause
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params, |r| self.row_to_managed_database(r))
+            .map_err(|e| e.to_string())?;
+        Ok(rows.flatten().collect())
     }
 
     pub fn get_logs(&self, id: i64) -> Result<String, String> {
@@ -342,10 +341,11 @@ impl Databases {
             .await
         {
             Ok(cid) => {
+                let started_ts = read_pg_started_at(&db_dir.join("data")).unwrap_or_else(now);
                 let conn = self.db.lock().map_err(|e| e.to_string())?;
                 let _ = conn.execute(
-                    "UPDATE databases SET status = 'running', container_id = ?, updated_at = ? WHERE id = ?",
-                    params![cid, now(), id],
+                    "UPDATE databases SET status = 'running', container_id = ?, started_at = ?, updated_at = ? WHERE id = ?",
+                    params![cid, started_ts, now(), id],
                 );
             }
             Err(err) => {
@@ -373,10 +373,14 @@ impl Databases {
         let own_pid = read_pg_pid(&db_dir.join("data")).filter(|p| is_process_alive(*p));
         if own_pid.is_some() && tokio::net::TcpStream::connect(format!("127.0.0.1:{}", db_rec.port)).await.is_ok() {
             let pid = own_pid.unwrap_or_else(std::process::id);
+            let started_ts = db_rec
+                .started_at
+                .or_else(|| read_pg_started_at(&db_dir.join("data")))
+                .unwrap_or_else(now);
             let conn = self.db.lock().map_err(|e| e.to_string())?;
             conn.execute(
-                "UPDATE databases SET status = 'running', container_id = ?, updated_at = ? WHERE id = ?",
-                params![format!("pid-{}", pid), now(), id],
+                "UPDATE databases SET status = 'running', container_id = ?, started_at = ?, updated_at = ? WHERE id = ?",
+                params![format!("pid-{}", pid), started_ts, now(), id],
             )
             .map_err(|e| e.to_string())?;
             return Ok(());
@@ -396,10 +400,11 @@ impl Databases {
             )
             .await?;
 
+        let started_ts = read_pg_started_at(&db_dir.join("data")).unwrap_or_else(now);
         let conn = self.db.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "UPDATE databases SET status = 'running', container_id = ?, updated_at = ? WHERE id = ?",
-            params![cid, now(), id],
+            "UPDATE databases SET status = 'running', container_id = ?, started_at = ?, updated_at = ? WHERE id = ?",
+            params![cid, started_ts, now(), id],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -438,7 +443,7 @@ impl Databases {
 
         let conn = self.db.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "UPDATE databases SET status = 'stopped', updated_at = ? WHERE id = ?",
+            "UPDATE databases SET status = 'stopped', started_at = NULL, updated_at = ? WHERE id = ?",
             params![now(), id],
         )
         .map_err(|e| e.to_string())?;
@@ -449,40 +454,6 @@ impl Databases {
         self.stop(id).await?;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         self.start(id).await
-    }
-
-    #[allow(dead_code)] // Database network access & domain are locked once created; retained only for legacy schema compatibility
-    pub async fn update_access(&self, id: i64, input: UpdateDatabaseAccessInput) -> Result<(), String> {
-        let db_rec = self.get(id)?.ok_or_else(|| "Database not found".to_string())?;
-        let allowed_ips = input.allowed_ips.unwrap_or_default().trim().to_string();
-
-        Self::remove_firewall_rules(db_rec.port, &db_rec.allowed_ips).await;
-        Self::sync_firewall_rules(db_rec.port, &input.access_mode, &allowed_ips).await;
-
-        let db_dir = PathBuf::from(&db_rec.data_dir);
-        let data_dir = db_dir.join("data");
-        let hba_content = generate_pg_hba(&input.access_mode, &allowed_ips);
-        let hba_path = data_dir.join("pg_hba.conf");
-        let _ = tokio::fs::write(&hba_path, hba_content).await;
-
-        // Hot reload pg_hba.conf without dropping client connections
-        if let Ok(pg_bins) = PgBinaries::detect() {
-            let data_str = to_clean_path_str(&data_dir);
-            let _ = make_pg_server_command(&pg_bins.pg_ctl, &["-D", &data_str, "reload"])
-                .output()
-                .await;
-        }
-
-        let domain = input.domain.unwrap_or_else(|| db_rec.domain.clone()).trim().to_string();
-        {
-            let conn = self.db.lock().map_err(|e| e.to_string())?;
-            conn.execute(
-                "UPDATE databases SET access_mode = ?, allowed_ips = ?, domain = ?, updated_at = ? WHERE id = ?",
-                params![input.access_mode, allowed_ips, domain, now(), id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        Ok(())
     }
 
     pub async fn delete(&self, id: i64) -> Result<(), String> {
@@ -751,12 +722,6 @@ impl Databases {
             id, port, pid
         );
         Ok(format!("pid-{}", pid))
-    }
-
-    // --- Port Finder Helper ---
-    fn find_next_free_port(&self, start: u16) -> Result<u16, String> {
-        let conn = self.db.lock().map_err(|e| e.to_string())?;
-        crate::db::allocate_global_unique_port(&conn, None, start, None, None)
     }
 
     // --- Firewall Synchronization (UFW / iptables) ---

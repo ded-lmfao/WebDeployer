@@ -1,12 +1,10 @@
 /**
  * WebDep Database Modals & Connection Subsystem
- * Creation wizard, connection details viewer, logs modal, and network allowlist access dialogs.
+ * Creation wizard, connection details viewer, and network allowlist access dialogs.
  */
 
 import { state, showConfirmDialog, copyTextToClipboard, setBtnLoading } from './state.js';
 import { api, toast } from './api.js';
-
-let currentViewedDbId = null;
 
 export function openCreateDatabaseModal() {
   const modal = document.getElementById('modal-create-database');
@@ -218,51 +216,6 @@ export function showDatabaseDetails(id) {
   modal.classList.add('active');
 }
 
-export async function showDatabaseLogs(id) {
-  currentViewedDbId = id;
-  const modal = document.getElementById('modal-database-logs');
-  const title = document.getElementById('db-logs-title');
-  const badge = document.getElementById('db-logs-badge');
-  const pre = document.getElementById('db-logs-content');
-  if (!modal || !pre) return;
-
-  const db = (state.databases || []).find((d) => d.id === Number(id));
-  if (title) title.textContent = db ? `${db.name} — Server Logs` : `Database #${id} Logs`;
-  if (badge) {
-    const st = db?.status ? String(db.status) : '';
-    badge.textContent = st ? (st.charAt(0).toUpperCase() + st.slice(1)) : 'Logs';
-    badge.className = db?.status === 'running'
-      ? 'badge badge-success'
-      : (db?.status === 'starting' || db?.status === 'stopping')
-        ? 'badge badge-warning'
-        : (st ? 'badge badge-danger' : 'badge badge-neutral');
-  }
-
-  pre.textContent = 'Loading PostgreSQL server logs';
-  modal.classList.add('active');
-
-  try {
-    const data = await api(`/api/databases/${id}/logs`, { noCache: true });
-    pre.textContent = data.logs || 'Log file is empty.';
-    pre.scrollTop = pre.scrollHeight;
-  } catch (err) {
-    pre.textContent = `Failed to load logs: ${err.message}`;
-  }
-}
-
-export async function refreshCurrentDatabaseLogs() {
-  if (currentViewedDbId) {
-    await showDatabaseLogs(currentViewedDbId);
-  }
-}
-
-export function copyDatabaseLogs() {
-  const pre = document.getElementById('db-logs-content');
-  if (pre) {
-    void copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard.');
-  }
-}
-
 export async function deleteDatabase(id, name) {
   const ok = await showConfirmDialog({
     title: 'Delete PostgreSQL Database',
@@ -303,9 +256,6 @@ window.togglePasswordVisibility = togglePasswordVisibility;
 window.toggleDatabaseAccessIpFields = toggleDatabaseAccessIpFields;
 window.handleCreateDatabaseSubmit = handleCreateDatabaseSubmit;
 window.showDatabaseDetails = showDatabaseDetails;
-window.showDatabaseLogs = showDatabaseLogs;
-window.refreshCurrentDatabaseLogs = refreshCurrentDatabaseLogs;
-window.copyDatabaseLogs = copyDatabaseLogs;
 window.deleteDatabase = deleteDatabase;
 window.copyElementValue = copyElementValue;
 

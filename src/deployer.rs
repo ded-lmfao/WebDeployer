@@ -7,7 +7,7 @@ pub use retention::MAX_DEPLOYMENT_RECORDS;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 
@@ -57,7 +57,6 @@ pub struct Release {
 }
 
 pub struct Deployer {
-    data_dir: PathBuf,
     db: DbPool,
     cache: Arc<AppCache>,
     logs: Logs,
@@ -101,7 +100,6 @@ impl Deployer {
         projects: Arc<Projects>,
         runtime: Arc<Runtime>,
         cache: Arc<AppCache>,
-        data_dir: PathBuf,
     ) -> Self {
         // Clean up any stale deployments left in active states from a previous server restart/crash
         if let Ok(conn) = db.lock() {
@@ -112,7 +110,6 @@ impl Deployer {
         }
 
         Self {
-            data_dir,
             db,
             cache,
             logs,
@@ -144,16 +141,6 @@ impl Deployer {
             }
         }
         false
-    }
-
-    pub fn last_attempted_sha(&self, project_id: i64) -> Option<String> {
-        let conn = self.db.lock().unwrap();
-        conn.query_row(
-            "SELECT sha FROM deployments WHERE project_id = ? AND sha IS NOT NULL AND trim(sha) != '' ORDER BY id DESC LIMIT 1",
-            params![project_id],
-            |r| r.get(0),
-        )
-        .ok()
     }
 
     pub fn list_deployments(&self, project_id: Option<i64>, limit: usize) -> Vec<Deployment> {

@@ -4,9 +4,8 @@
  */
 
 import { icon } from './icons.js';
-import { state, PAGE_SIZE, paginateAndRender, setHtmlIfChanged, escapeHtml, formatDate } from './state.js';
-import { api, toast } from './api.js';
-import { loadDatabases } from './databases.js';
+import { state, setHtmlIfChanged, escapeHtml } from './state.js';
+import { api } from './api.js';
 import { renderPipelineStages, waterPipelines } from './deployments.js';
 import {
   formatBytesShort,
@@ -442,9 +441,7 @@ function renderResourceBreakdown(resources) {
     if (r.kind === 'panel') {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'settings\')">Settings &rarr;</button>';
     } else if (r.kind === 'database') {
-      actionBtn = dbId
-        ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openDatabaseWorkspace(${dbId}, 'deployments')">Manage &rarr;</button>`
-        : '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'databases\')">Databases &rarr;</button>';
+      actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'databases\')">Databases &rarr;</button>';
     } else if (r.kind === 'service') {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'services\')">Services &rarr;</button>';
     } else {

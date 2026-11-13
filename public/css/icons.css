@@ -25,17 +25,6 @@
 .icon-lg { width: 20px; height: 20px; }
 .icon-xl { width: 24px; height: 24px; }
 
-/* File Explorer Icon Tiles */
-.file-kind-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-}
-
 .empty-icon-tile {
   width: 64px;
   height: 64px;

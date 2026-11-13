@@ -54,7 +54,6 @@ pub struct SetUpdateRepoPayload {
 }
 
 pub struct Updater {
-    data_dir: PathBuf,
     status: Arc<Mutex<UpdateStatus>>,
 }
 
@@ -136,9 +135,8 @@ fn find_cargo() -> PathBuf {
 }
 
 impl Updater {
-    pub fn new(data_dir: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
-            data_dir,
             status: Arc::new(Mutex::new(UpdateStatus::default())),
         }
     }

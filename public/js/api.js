@@ -151,7 +151,6 @@ function prefetchWebsiteWorkspace(projectId) {
     }
   }, 10);
 }
-window.prefetchWebsiteWorkspace = prefetchWebsiteWorkspace;
 
 function prefetchDatabaseWorkspace(dbId) {
   const did = Number(dbId);

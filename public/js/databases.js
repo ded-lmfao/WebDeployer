@@ -4,7 +4,7 @@
  */
 
 import { icon } from './icons.js';
-import { state, escapeHtml, DB_PIPELINE_STAGES, syncOverviewResourceStatus } from './state.js';
+import { state, escapeHtml, DB_PIPELINE_STAGES, syncOverviewResourceStatus, formatRelativeTime } from './state.js';
 import { api, toast } from './api.js';
 import { renderPipelineStages } from './deployments.js';
 
@@ -210,6 +210,7 @@ export function renderDatabasesList() {
       ? Number((d.containerId || d.container_id).slice(4))
       : null;
     const pidVal = isRunning ? (d.pid || resItem?.pid || pidFromContainer || null) : null;
+    const startedAt = d.startedAt || d.started_at;
     const subTitle = 'PostgreSQL Cluster';
 
     return `
@@ -247,6 +248,7 @@ export function renderDatabasesList() {
           <span class="badge ${accessBadgeCls}" style="font-size: 10px; padding: 2px 8px;">${icon(accessIconName, { size: 10 })} ${accessLabel}</span>
           ${d.domain ? `<span class="badge badge-primary" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);">${escapeHtml(d.domain)}</span>` : ''}
           ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 8px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
+          ${isRunning && startedAt ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${icon('clock', { size: 10 })} Started ${formatRelativeTime(startedAt)}</span>` : ''}
         </div>
 
         <!-- Actions Footer -->
@@ -372,6 +374,9 @@ export async function toggleDatabaseState(id) {
         Object.assign(latestDb, updatedDb);
       }
       latestDb.status = updatedDb?.status || 'running';
+      if (!latestDb.startedAt && !latestDb.started_at) {
+        latestDb.startedAt = Date.now();
+      }
       syncOverviewResourceStatus('database', numId, latestDb.status, latestDb.pid ?? null);
       syncDatabaseCardState(numId, latestDb.status);
 
@@ -412,6 +417,8 @@ export async function toggleDatabaseState(id) {
         Object.assign(latestDb, updatedDb);
       }
       latestDb.status = updatedDb?.status || 'stopped';
+      latestDb.startedAt = null;
+      latestDb.started_at = null;
       syncOverviewResourceStatus('database', numId, latestDb.status, null);
       syncDatabaseCardState(numId, latestDb.status);
       renderSingleDatabasePipeline(numId, 'sandbox', 'idle', 'Idle');
@@ -457,6 +464,9 @@ export async function restartDatabase(id) {
       Object.assign(latestDb, updatedDb);
     }
     latestDb.status = updatedDb?.status || 'running';
+    if (!updatedDb?.startedAt && !updatedDb?.started_at) {
+      latestDb.startedAt = Date.now();
+    }
     syncOverviewResourceStatus('database', numId, latestDb.status, latestDb.pid ?? null);
     syncDatabaseCardState(numId, latestDb.status);
     toast(`PostgreSQL database '${latestDb.name || '#' + numId}' restarted.`, 'success');

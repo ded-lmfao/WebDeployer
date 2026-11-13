@@ -15,7 +15,7 @@ import {
   isProjectMaintenance,
   isDatabaseRunning,
 } from './state.js';
-import { toast, prefetchWebsiteWorkspace, prefetchDatabaseWorkspace } from './api.js';
+import { prefetchWebsiteWorkspace, prefetchDatabaseWorkspace } from './api.js';
 
 // Re-export process controls and lifecycle actions submodule
 export * from './workspace_actions.js';

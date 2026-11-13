@@ -5,9 +5,8 @@
 
 import { icon } from './icons.js';
 import { state, escapeHtml, formatRelativeTime } from './state.js';
-import { api, toast } from './api.js';
 import { loadProjects } from './websites.js';
-import { openWebsiteWorkspace, navigateTo } from './workspace.js';
+import { openWebsiteWorkspace } from './workspace.js';
 
 // Re-export modal submodule so consumers have full backward compatibility
 export * from './services_modal.js';

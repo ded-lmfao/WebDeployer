@@ -254,6 +254,7 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             allowed_ips TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'stopped',
             container_id TEXT,
+            started_at INTEGER,
             data_dir TEXT NOT NULL DEFAULT '',
             linked_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
             created_at INTEGER NOT NULL,
@@ -269,6 +270,18 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         INSERT OR REPLACE INTO _meta(key, value) VALUES('schema_version', '3');
         ",
     )?;
+
+    // Idempotent column migrations for existing databases
+    let has_db_started_at: bool = conn
+        .prepare("PRAGMA table_info(databases)")
+        .and_then(|mut s| {
+            let rows = s.query_map([], |r| r.get::<_, String>(1))?;
+            Ok(rows.flatten().any(|name| name == "started_at"))
+        })
+        .unwrap_or(false);
+    if !has_db_started_at {
+        let _ = conn.execute("ALTER TABLE databases ADD COLUMN started_at INTEGER", []);
+    }
 
     // Auto-seed github_token into SQLite settings if not yet configured
     let existing_token: String = conn
@@ -484,6 +497,11 @@ mod tests {
         assert!(!r_cols.iter().any(|c| c == "error"));
         assert!(r_cols.iter().any(|c| c == "deployment_id"));
         drop(r_stmt);
+
+        let mut d_stmt = conn.prepare("PRAGMA table_info(databases)").unwrap();
+        let d_cols: Vec<String> = d_stmt.query_map([], |r| r.get(1)).unwrap().flatten().collect();
+        assert!(d_cols.iter().any(|c| c == "started_at"));
+        drop(d_stmt);
 
         drop(conn);
         drop(pool2);

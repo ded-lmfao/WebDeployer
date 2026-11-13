@@ -69,6 +69,21 @@ pub fn read_pg_pid(data_dir: &Path) -> Option<u32> {
     None
 }
 
+/// Reads PostgreSQL's start timestamp from line 3 of `postmaster.pid` (Unix seconds) in milliseconds.
+pub fn read_pg_started_at(data_dir: &Path) -> Option<i64> {
+    let pid_file = data_dir.join("postmaster.pid");
+    if let Ok(content) = std::fs::read_to_string(pid_file) {
+        if let Some(third_line) = content.lines().nth(2) {
+            if let Ok(secs) = third_line.trim().parse::<i64>() {
+                if secs > 0 {
+                    return Some(secs * 1000);
+                }
+            }
+        }
+    }
+    None
+}
+
 pub async fn wait_for_pg_ready(port: u16, data_dir: &Path, max_wait_ms: u64) -> Option<u32> {
     let start = std::time::Instant::now();
     let addr = format!("127.0.0.1:{}", port);

@@ -103,7 +103,6 @@ function goToTablePage(pageKey, pageNum) {
     state.pageRenderers[pageKey]();
   }
 }
-window.goToTablePage = goToTablePage;
 
 // Pipeline stages in order
 const PIPELINE_STAGES = [
@@ -608,15 +607,6 @@ function getSelectedDatabase() {
   return list.find((d) => d.id === state.selectedDatabaseId) || list[0] || null;
 }
 
-function getActiveWorkspaceEntity() {
-  if (state.selectedEntityKind === 'database') {
-    const db = getSelectedDatabase();
-    return db ? { kind: 'database', id: db.id, name: db.name, db } : null;
-  }
-  const project = getSelectedProject();
-  return project ? { kind: 'project', id: project.id, name: project.name, project } : null;
-}
-
 function getFilesEntityContext() {
   const hp = typeof window.hasPower === 'function' ? window.hasPower : () => false;
   if (state.selectedEntityKind === 'database') {
@@ -664,7 +654,6 @@ window.setHtmlIfChanged = setHtmlIfChanged;
 window.setBtnLoading = setBtnLoading;
 window.getSelectedProject = getSelectedProject;
 window.getSelectedDatabase = getSelectedDatabase;
-window.getActiveWorkspaceEntity = getActiveWorkspaceEntity;
 window.getFilesEntityContext = getFilesEntityContext;
 
 export {
@@ -706,6 +695,5 @@ export {
   setBtnLoading,
   getSelectedProject,
   getSelectedDatabase,
-  getActiveWorkspaceEntity,
   getFilesEntityContext,
 };

@@ -7,29 +7,23 @@ import { icon } from './icons.js';
 import {
   state,
   getSelectedProject,
-  PAGE_SIZE,
-  paginateAndRender,
   setHtmlIfChanged,
   escapeHtml,
   formatRelativeTime,
   openModal,
   closeModal,
-  showConfirmDialog,
   showPromptDialog,
-  invalidateClientCache,
   isProjectOnline,
   isProjectMaintenance,
   syncOverviewResourceStatus,
   WEBSITE_WORKSPACE_TABS,
   PRESETS,
 } from './state.js';
-import { api, toast, prefetchWebsiteWorkspace } from './api.js';
+import { api, toast } from './api.js';
 import { cleanDomainList } from './settings.js';
 import { toggleDatabaseAccessIpFields } from './databases_modal.js';
 import { renderWebsiteWorkspaceHeader, navigateTo, openWebsiteWorkspace } from './workspace.js';
-import { renderServicesList } from './services.js';
-import { startProject, stopProject, restartProject } from './workspace_actions.js';
-import { deployProject } from './deployments.js';
+import { startProject, stopProject } from './workspace_actions.js';
 
 // ============================================================================
 // Projects Management
@@ -79,16 +73,6 @@ async function loadProjectsView() {
   await loadProjects();
   renderProjectsList();
 }
-window.loadProjectsView = loadProjectsView;
-
-async function loadServicesView() {
-  await loadProjects();
-  renderServicesList();
-}
-window.loadServicesView = loadServicesView;
-
-
-
 
 // ============================================================================
 // View 2: Hosted Websites (Projects)

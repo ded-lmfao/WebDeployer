@@ -53,11 +53,6 @@ impl AppCache {
         None
     }
 
-    /// Stores pre-serialized compact JSON string directly as Bytes.
-    pub fn set_json(&self, key: String, json: String, ttl: Duration) {
-        self.set_bytes(key, Bytes::from(json), ttl);
-    }
-
     /// Stores pre-serialized Bytes directly.
     pub fn set_bytes(&self, key: String, bytes: Bytes, ttl: Duration) {
         let now = Instant::now();

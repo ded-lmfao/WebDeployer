@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod api;
 mod auth;
 mod cache;
@@ -63,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let db = open_db(&config.data_dir)?;
     let vault = Arc::new(Vault::new(&config.data_dir)?);
     let auth = Arc::new(Auth::new(db.clone(), config.session_ttl_s));
-    let projects = Arc::new(Projects::new(db.clone(), vault.clone(), config.data_dir.clone()));
+    let projects = Arc::new(Projects::new(db.clone(), vault.clone()));
     let logs = Arc::new(Logs::new(db.clone()));
     tracing::info!("WebDep engine initialized (SQLite database connected and live log stream active)");
     let monitor = Arc::new(Monitor::new());
@@ -78,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         projects.clone(),
         runtime.clone(),
         cache.clone(),
-        config.data_dir.clone(),
     ));
     let databases = Arc::new(crate::databases::Databases::new(
         db.clone(),
@@ -86,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         (*logs).clone(),
         &config.data_dir,
     ));
-    let updater = Arc::new(Updater::new(config.data_dir.clone()));
+    let updater = Arc::new(Updater::new());
 
     // Periodic memory maintenance: prunes expired cache, purges expired sessions, shrinks SQLite pager, and trims Linux heap
     {

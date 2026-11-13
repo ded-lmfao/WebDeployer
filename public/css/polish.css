@@ -7,10 +7,6 @@
   contain: layout style;
 }
 
-.table-row-hover:hover {
-  background: rgba(238, 241, 247, 0.03);
-}
-
 /* Active Nav Row with Focused Cobalt Accent Indicator */
 .nav-item {
   position: relative;

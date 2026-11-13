@@ -6,7 +6,6 @@
 import { icon } from './icons.js';
 import {
   state,
-  PAGE_SIZE,
   paginateAndRender,
   escapeHtml,
   formatDate,
@@ -14,10 +13,7 @@ import {
   formatDuration,
   setHtmlIfChanged,
   openModal,
-  closeModal,
   showConfirmDialog,
-  showPromptDialog,
-  copyTextToClipboard,
   AUDIT_ACTION_META,
   invalidateClientCache,
 } from './state.js';

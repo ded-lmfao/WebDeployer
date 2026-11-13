@@ -231,7 +231,6 @@ pub(crate) async fn update_database_access_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxPath(id): AxPath<i64>,
-    Json(_payload): Json<crate::databases::UpdateDatabaseAccessInput>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let db = state.databases.get(id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
@@ -559,12 +558,11 @@ mod tests {
         update_database_access_handler, verify_db_files_write,
     };
     use crate::databases::{
-        build_postgres_url, encode_uri_userinfo_component, ManagedDatabase, UpdateDatabaseAccessInput,
+        build_postgres_url, encode_uri_userinfo_component, ManagedDatabase,
     };
     use axum::{
         extract::{Path as AxPath, State},
         http::{header, HeaderMap, HeaderValue, StatusCode},
-        Json,
     };
     use std::sync::Arc;
 
@@ -583,6 +581,7 @@ mod tests {
             domain: "db.example.com".to_string(),
             status: "running".to_string(),
             container_id: None,
+            started_at: Some(1_700_000_000_000),
             data_dir: "/tmp/db".to_string(),
             linked_project_id: Some(7),
             linked_project_name: Some("web".to_string()),
@@ -620,8 +619,24 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["diskFormatted"], "2 KB");
         assert_eq!(json["name"], "appdb");
+        assert_eq!(json["startedAt"], 1_700_000_000_000i64);
         assert!(json["dbPassword"].is_null());
 
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_pg_started_at_from_postmaster_pid() {
+        let tmp = std::env::temp_dir().join(format!("webdep-pg-pid-start-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(
+            tmp.join("postmaster.pid"),
+            "264987\n/tmp/db/data\n1794595000\n5432\n/var/run/postgresql\n",
+        )
+        .unwrap();
+
+        assert_eq!(crate::databases::read_pg_started_at(&tmp), Some(1_794_595_000_000));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -681,7 +696,7 @@ mod tests {
         let db = crate::db::open_db(&tmp).unwrap();
         let vault = Arc::new(crate::vault::Vault::new(&tmp).unwrap());
         let auth = Arc::new(crate::auth::Auth::new(db.clone(), 3600));
-        let projects = Arc::new(crate::projects::Projects::new(db.clone(), vault.clone(), tmp.clone()));
+        let projects = Arc::new(crate::projects::Projects::new(db.clone(), vault.clone()));
         let logs = Arc::new(crate::logs::Logs::new(db.clone()));
         let monitor = Arc::new(crate::monitor::Monitor::new());
         let caddy = Arc::new(crate::caddy::Caddy::new(&tmp));
@@ -692,7 +707,6 @@ mod tests {
             projects.clone(),
             runtime.clone(),
             Arc::new(crate::cache::AppCache::new()),
-            tmp.clone(),
         ));
         let databases = Arc::new(crate::databases::Databases::new(
             db.clone(),
@@ -711,7 +725,7 @@ mod tests {
             deployer,
             cache: Arc::new(crate::cache::AppCache::new()),
             databases,
-            updater: Arc::new(crate::updater::Updater::new(tmp.clone())),
+            updater: Arc::new(crate::updater::Updater::new()),
         };
 
         let admin_id: i64 = {
@@ -740,11 +754,6 @@ mod tests {
             State(state.clone()),
             headers,
             AxPath(1),
-            Json(UpdateDatabaseAccessInput {
-                access_mode: "public".to_string(),
-                allowed_ips: None,
-                domain: Some("pg.example.com".to_string()),
-            }),
         )
         .await
         .expect_err("DB access updates must be locked after creation");

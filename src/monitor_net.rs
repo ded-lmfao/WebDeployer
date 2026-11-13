@@ -395,16 +395,6 @@ pub fn get_project_live_telemetry(
         .unwrap_or((NetworkMetrics::default(), None))
 }
 
-/// Return isolated genuine network metrics for a single project.
-/// Offline projects immediately clear active streaming state and return zeroed metrics.
-pub fn get_project_network_metrics(
-    project_id: i64,
-    running: bool,
-    pids: &[u32],
-) -> NetworkMetrics {
-    get_project_live_telemetry(project_id, running, pids).0
-}
-
 fn probe_pids_telemetry(pids: &[u32]) -> PidNetSnapshot {
     let pid_set: HashSet<u32> = pids.iter().copied().collect();
     if pid_set.is_empty() {
@@ -1314,11 +1304,11 @@ mod tests {
         let project_id = 987_654;
         let my_pid = std::process::id();
 
-        let running_first = get_project_network_metrics(project_id, true, &[my_pid]);
+        let (running_first, _) = get_project_live_telemetry(project_id, true, &[my_pid]);
         assert_eq!(running_first.history.len(), 1);
         assert_eq!(running_first.inbound_bps, 0);
 
-        let offline = get_project_network_metrics(project_id, false, &[]);
+        let (offline, _) = get_project_live_telemetry(project_id, false, &[]);
         assert_eq!(offline.inbound_bps, 0);
         assert_eq!(offline.outbound_bps, 0);
         assert_eq!(offline.total_rx_bytes, 0);

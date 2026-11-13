@@ -455,13 +455,6 @@ impl Monitor {
         }
         (total_cpu, total_mem, alive_count, tree_pids)
     }
-
-    /// Aggregate unique process-tree CPU (%) and RSS memory (bytes) across all `seed_pids`
-    /// without double-counting shared descendants. Also returns unique alive PID count.
-    pub fn get_combined_tree_metrics(&self, seed_pids: &[u32]) -> (f32, u64, usize) {
-        let (cpu, mem, alive, _) = self.get_combined_tree_details(seed_pids);
-        (cpu, mem, alive)
-    }
 }
 
 const NET_HISTORY_LIMIT: usize = 60;
@@ -699,7 +692,7 @@ mod network_tests {
             })
             .collect();
         m.refresh_now(true, false);
-        let (raw_cpu, mem, alive) = m.get_combined_tree_metrics(&[pid]);
+        let (raw_cpu, mem, alive, _) = m.get_combined_tree_details(&[pid]);
         let tree_map = m.get_tree_metrics(&[pid]);
         let (single_cpu, single_mem) = tree_map.get(&pid).copied().unwrap_or((0.0, 0));
         eprintln!(

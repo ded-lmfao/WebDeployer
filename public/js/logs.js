@@ -5,7 +5,6 @@
 
 import { state, escapeHtml, copyTextToClipboard, getSelectedProject, getSelectedDatabase } from './state.js';
 import { api, toast } from './api.js';
-import { navigateTo } from './workspace.js';
 
 let dbLogPollTimer = null;
 
@@ -383,17 +382,7 @@ document.getElementById('logs-app-tail-btn')?.addEventListener('click', async ()
   }
 });
 
-function openLogsForProject(projectId) {
-  const lvlSel = document.getElementById('log-level-filter');
-  if (lvlSel) lvlSel.value = '';
-  navigateTo('logs', projectId);
-}
-window.openLogsForProject = openLogsForProject;
-
-
-
 window.loadLogsView = loadLogsView;
-window.openLogsForProject = openLogsForProject;
 window.formatLogLine = formatLogLine;
 
-export { loadLogsView, openLogsForProject, formatLogLine };
+export { loadLogsView, formatLogLine };

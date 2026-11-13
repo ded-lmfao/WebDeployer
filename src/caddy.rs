@@ -124,27 +124,6 @@ impl Caddy {
         let _ = self.reload();
     }
 
-    pub fn validate_config(&self, config_path: &Path) -> Result<(), String> {
-        let out = Command::new("caddy")
-            .args(["validate", "--config", config_path.to_str().unwrap_or("Caddyfile")])
-            .output();
-
-        match out {
-            Ok(o) => {
-                if o.status.success() {
-                    Ok(())
-                } else {
-                    let err = String::from_utf8_lossy(&o.stderr);
-                    Err(err.to_string())
-                }
-            }
-            Err(e) => {
-                // If caddy CLI is not installed on the system, gracefully inform the user
-                Err(format!("Caddy binary not detected in PATH (Config written successfully to {}): {}", config_path.display(), e))
-            }
-        }
-    }
-
     pub fn reload(&self) -> Result<(), String> {
         #[cfg(unix)]
         {

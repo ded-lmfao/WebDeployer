@@ -3025,36 +3025,6 @@
     </div>
   </div>
 
-  <!-- MODAL: DATABASE LOGS VIEWER -->
-  <div class="modal-overlay" id="modal-database-logs">
-    <div class="modal-container" style="max-width: 760px;">
-      <div class="modal-header">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <h3 class="modal-title" id="db-logs-title">PostgreSQL Server Logs</h3>
-          <span class="badge badge-neutral" id="db-logs-badge">Logs</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <button type="button" class="btn btn-secondary btn-sm" id="db-logs-refresh-btn"
-            onclick="refreshCurrentDatabaseLogs()">Refresh</button>
-          <button type="button" class="modal-close" data-close-modal>&times;</button>
-        </div>
-      </div>
-      <div class="modal-body" style="padding: 12px 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);"
-            id="db-logs-path">postgresql.log</span>
-          <button type="button" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 2px 8px;"
-            onclick="copyDatabaseLogs()">Copy Full Log</button>
-        </div>
-        <pre id="db-logs-content"
-          style="background: var(--bg-alt); color: var(--text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); max-height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
-      </div>
-      <div class="modal-footer" style="padding: 10px 16px;">
-        <button type="button" class="btn btn-primary btn-sm" data-close-modal>Close</button>
-      </div>
-    </div>
-  </div>
-
   <!-- UNIVERSAL THEMED DIALOG MODAL (CONFIRM / PROMPT / COPY) -->
   <div class="modal-overlay" id="modal-dialog">
     <div class="modal-container" style="max-width: 460px;">

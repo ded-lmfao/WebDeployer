@@ -678,7 +678,6 @@ mod tests {
         let projects = std::sync::Arc::new(crate::projects::Projects::new(
             db.clone(),
             vault,
-            root.clone(),
         ));
         let logs = crate::logs::Logs::new(db.clone());
         let cache = std::sync::Arc::new(crate::cache::AppCache::new());
@@ -689,7 +688,6 @@ mod tests {
             projects.clone(),
             runtime,
             cache,
-            root.clone(),
         );
 
         let project_id = insert_test_project(&db, &deploy_dir, "website");

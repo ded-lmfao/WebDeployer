@@ -11,12 +11,6 @@ pub struct CommitInfo {
     pub message: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct AheadBehind {
-    pub ahead: u32,
-    pub behind: u32,
-}
-
 pub struct Git;
 
 fn copy_dir_all(src: &Path, dst: &Path, skip_git: bool) -> Result<(), String> {
@@ -458,27 +452,6 @@ impl Git {
             date: date * 1000,
             message,
         })
-    }
-
-    pub fn ahead_behind(repo_dir: &Path, local_sha: &str, remote_ref: &str) -> AheadBehind {
-        let out = Command::new("git")
-            .current_dir(repo_dir)
-            .args(["rev-list", "--left-right", "--count", &format!("{}...{}", local_sha, remote_ref)])
-            .output();
-
-        if let Ok(o) = out {
-            if o.status.success() {
-                let text = String::from_utf8_lossy(&o.stdout);
-                let parts: Vec<&str> = text.split_whitespace().collect();
-                if parts.len() == 2 {
-                    let ahead = parts[0].parse().unwrap_or(0);
-                    let behind = parts[1].parse().unwrap_or(0);
-                    return AheadBehind { ahead, behind };
-                }
-            }
-        }
-
-        AheadBehind { ahead: 0, behind: 0 }
     }
 
     pub fn list_commits(repo_dir: &Path, branch: &str, limit: usize) -> Vec<CommitInfo> {

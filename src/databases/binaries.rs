@@ -3,10 +3,8 @@ use tokio::process::Command;
 
 #[derive(Debug, Clone)]
 pub struct PgBinaries {
-    pub bin_dir: PathBuf,
     pub initdb: PathBuf,
     pub pg_ctl: PathBuf,
-    pub createdb: PathBuf,
     pub psql: PathBuf,
 }
 
@@ -94,15 +92,12 @@ impl PgBinaries {
         let ext = if cfg!(windows) { ".exe" } else { "" };
         let pg_ctl = dir.join(format!("pg_ctl{}", ext));
         let initdb = dir.join(format!("initdb{}", ext));
-        let createdb = dir.join(format!("createdb{}", ext));
         let psql = dir.join(format!("psql{}", ext));
 
         if pg_ctl.is_file() && initdb.is_file() {
             Some(Self {
-                bin_dir: dir.to_path_buf(),
                 initdb,
                 pg_ctl,
-                createdb,
                 psql,
             })
         } else {
@@ -111,6 +106,7 @@ impl PgBinaries {
     }
 }
 
+#[cfg(unix)]
 pub fn is_running_as_root() -> bool {
     #[cfg(unix)]
     {
@@ -178,6 +174,7 @@ pub fn ensure_pg_permissions(_db_dir: &Path, _data_dir: Option<&Path>) {
     }
 }
 
+#[cfg(unix)]
 pub fn ensure_parent_traverse_permissions(_path: &Path) {
     #[cfg(unix)]
     {
