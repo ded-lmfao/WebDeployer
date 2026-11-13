@@ -451,15 +451,15 @@ function renderResourceBreakdown(resources) {
       actionBtn = '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); navigateTo(\'projects\')">Websites &rarr;</button>';
     }
 
-    const rowClick = pId
+    const navClick = pId
       ? `style="cursor: pointer;" onclick="openWebsiteWorkspace(${pId})"`
       : (r.kind === 'database'
         ? (dbId ? `style="cursor: pointer;" onclick="openDatabaseWorkspace(${dbId}, 'deployments')"` : 'style="cursor: pointer;" onclick="navigateTo(\'databases\')"')
         : 'style="cursor: pointer;" onclick="navigateTo(\'settings\')"');
 
     return `
-      <tr ${rowClick}>
-        <td>
+      <tr>
+        <td ${navClick}>
           <div class="res-workload-title">
             <div class="res-workload-icon" style="color: ${iconInfo.color};">${kindIconSvg}</div>
             <div>
@@ -468,7 +468,7 @@ function renderResourceBreakdown(resources) {
             </div>
           </div>
         </td>
-        <td><span class="${kindBadgeClass}">${kindLabel}</span></td>
+        <td ${navClick}><span class="${kindBadgeClass}">${kindLabel}</span></td>
         <td>${portPid}</td>
         <td>
           <span class="status-dot ${isRunning ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
@@ -507,7 +507,7 @@ function renderResourceBreakdown(resources) {
             </div>
           </div>
         </td>
-        <td style="text-align: right;" onclick="event.stopPropagation()">
+        <td style="text-align: right;">
           ${actionBtn}
         </td>
       </tr>
