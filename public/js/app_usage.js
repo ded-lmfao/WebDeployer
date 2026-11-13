@@ -9,7 +9,7 @@ import { api } from './api.js';
 const SVG_W = 320;
 const SVG_H = 84;
 const TOP_PAD = 10;
-const BOTTOM_PAD = 6;
+const BOTTOM_PAD = 8;
 const PLOT_BOTTOM = SVG_H - BOTTOM_PAD;
 const WINDOW_MS = 45000;
 const LAG_MS = 1250;
@@ -241,8 +241,8 @@ function ensureOnlineChartDom() {
           <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.30"/>
           <stop offset="100%" stop-color="#60a5fa" stop-opacity="0.01"/>
         </linearGradient>
-        <filter id="netGlow" x="-15%" y="-15%" width="130%" height="130%">
-          <feGaussianBlur stdDeviation="1.4" result="blur"/>
+        <filter id="netGlow" filterUnits="userSpaceOnUse" x="-10" y="-10" width="${SVG_W + 20}" height="${SVG_H + 20}">
+          <feGaussianBlur stdDeviation="1.3" result="blur"/>
           <feMerge>
             <feMergeNode in="blur"/>
             <feMergeNode in="SourceGraphic"/>
@@ -255,8 +255,8 @@ function ensureOnlineChartDom() {
       <g clip-path="url(#app-net-clip)">
         <path id="net-in-area" d="" fill="url(#netGradIn)"/>
         <path id="net-out-area" d="" fill="url(#netGradOut)"/>
-        <path id="net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
-        <path id="net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
+        <path id="net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
+        <path id="net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" filter="url(#netGlow)"/>
       </g>
     </svg>
     <div id="net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
@@ -355,6 +355,31 @@ function drawNetFrame(nowPerf) {
     ptsOut.push({ x, y: yOut });
   }
 
+  if (ptsIn.length === 0) {
+    const latest = samples[samples.length - 1];
+    const yInLast = PLOT_BOTTOM - Math.min(1, (latest?.inboundBps || 0) / maxRate) * usableH;
+    const yOutLast = PLOT_BOTTOM - Math.min(1, (latest?.outboundBps || 0) / maxRate) * usableH;
+    ptsIn.push({ x: 0, y: PLOT_BOTTOM }, { x: SVG_W, y: yInLast });
+    ptsOut.push({ x: 0, y: PLOT_BOTTOM }, { x: SVG_W, y: yOutLast });
+  } else {
+    // Anchor both edges so lines always flow continuously across the full chart width.
+    const firstX = ptsIn[0].x;
+    if (firstX > 0.5) {
+      if (firstX > 6) {
+        ptsIn.unshift({ x: firstX - 3, y: PLOT_BOTTOM });
+        ptsOut.unshift({ x: firstX - 3, y: PLOT_BOTTOM });
+      }
+      ptsIn.unshift({ x: 0, y: PLOT_BOTTOM });
+      ptsOut.unshift({ x: 0, y: PLOT_BOTTOM });
+    }
+    const lastIn = ptsIn[ptsIn.length - 1];
+    const lastOut = ptsOut[ptsOut.length - 1];
+    if (lastIn.x < SVG_W - 0.5) {
+      ptsIn.push({ x: SVG_W, y: lastIn.y });
+      ptsOut.push({ x: SVG_W, y: lastOut.y });
+    }
+  }
+
   const mIn = computeMonotoneTangents(ptsIn);
   const mOut = computeMonotoneTangents(ptsOut);
   const pathsIn = buildCubicPaths(ptsIn, mIn);
@@ -430,8 +455,10 @@ function applyUsagePayload(p, data) {
   const cpuCores = Number(data.cpu?.hostCores || 1);
   const activePids = Number(data.cpu?.activePids || 0);
 
-  setText('usage-cpu-val', `${cpuPct.toFixed(1)}%`);
-  setMeterWidth('usage-cpu-bar', Math.min(100, cpuPct));
+  const cpuDisplay = cpuPct > 0 && cpuPct < 1 ? `${cpuPct.toFixed(2)}%` : `${cpuPct.toFixed(1)}%`;
+  setText('usage-cpu-val', cpuDisplay);
+  const cpuBarPct = running && cpuPct > 0 ? Math.min(100, Math.max(1.5, cpuPct)) : 0;
+  setMeterWidth('usage-cpu-bar', cpuBarPct);
   const cpuBadge = document.getElementById('usage-cpu-badge');
   if (cpuBadge) {
     cpuBadge.className = running ? 'badge badge-success' : 'badge badge-neutral';
@@ -448,7 +475,8 @@ function applyUsagePayload(p, data) {
   const ramPct = Number(data.ram?.percentOfHost || 0);
   const hostRam = data.ram?.hostTotalFormatted || '0 B';
   setText('usage-ram-val', running ? (data.ram?.formatted || formatBytesShort(ramBytes)) : '0 B');
-  setMeterWidth('usage-ram-bar', running ? ramPct : 0);
+  const ramBarPct = running && ramPct > 0 ? Math.min(100, Math.max(1.5, ramPct)) : 0;
+  setMeterWidth('usage-ram-bar', ramBarPct);
   setText('usage-ram-badge', `${(running ? ramPct : 0).toFixed(1)}%`);
   setText(
     'usage-ram-sub',
@@ -465,7 +493,7 @@ function applyUsagePayload(p, data) {
   setText('usage-disk-sub', `App & releases • ${vpsFree} free`);
 
   const net = data.network || {};
-  const portLabel = data.port ? `• :${data.port}` : '';
+  const portOnly = data.port ? `:${data.port}` : '';
   const rxTot = Number(net.totalRxBytes || 0);
   const txTot = Number(net.totalTxBytes || 0);
   const conns = Number(net.interfaceCount || 0);
@@ -483,7 +511,7 @@ function applyUsagePayload(p, data) {
     _netState.displayMaxRate = 1024;
     setText('usage-net-in-val', '0 B/s');
     setText('usage-net-out-val', '0 B/s');
-    setText('usage-net-iface', ['Offline', portLabel].filter(Boolean).join(' '));
+    setText('usage-net-iface', portOnly ? `Offline • ${portOnly}` : 'Offline');
     setText('usage-net-totals', '↓ 0 B  ↑ 0 B');
     renderOfflineNetChart();
     return;
@@ -503,8 +531,7 @@ function applyUsagePayload(p, data) {
     }
   }
 
-  const connLabel = conns > 0 ? `• ${conns} conn${conns === 1 ? '' : 's'}` : '';
-  setText('usage-net-iface', ['App Traffic', connLabel, portLabel].filter(Boolean).join(' '));
+  setText('usage-net-iface', portOnly);
   setText('usage-net-totals', `↓ ${formatBytesShort(rxTot)}  ↑ ${formatBytesShort(txTot)}`);
 
   if (_netState.hoverRatio === null) {
@@ -521,12 +548,12 @@ async function fetchProjectUsage(project) {
   _netState.fetchInFlight = true;
   _netState.lastFetchAt = Date.now();
   try {
-    const data = await api('GET', `/api/projects/${project.id}/usage`);
+    const data = await api(`/api/projects/${project.id}/usage`, { noCache: true });
     if (getSelectedProject()?.id === project.id) {
       applyUsagePayload(project, data);
     }
-  } catch {
-    // Keep existing frame cleanly when transient poll fails
+  } catch (err) {
+    console.warn('[WebDep] Failed to fetch app usage metrics:', err);
   } finally {
     _netState.fetchInFlight = false;
   }

@@ -378,12 +378,12 @@ fn compute_disk_size(path: &std::path::Path) -> u64 {
 
 
 impl Monitor {
-    /// Aggregate unique process-tree CPU (%) and RSS memory (bytes) across all `seed_pids`
-    /// without double-counting shared descendants. Also returns unique alive PID count.
-    pub fn get_combined_tree_metrics(&self, seed_pids: &[u32]) -> (f32, u64, usize) {
+    /// Aggregate unique process-tree CPU (%), RSS memory (bytes), alive count, and alive tree PIDs
+    /// across all `seed_pids` without double-counting shared descendants.
+    pub fn get_combined_tree_details(&self, seed_pids: &[u32]) -> (f32, u64, usize, Vec<u32>) {
         self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
         if seed_pids.is_empty() {
-            return (0.0, 0, 0);
+            return (0.0, 0, 0, Vec::new());
         }
         let sys = self.sys.lock().unwrap();
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -407,12 +407,14 @@ impl Monitor {
         let mut total_cpu = 0.0f32;
         let mut total_mem = 0u64;
         let mut alive_count = 0usize;
+        let mut tree_pids = Vec::new();
         while let Some(curr) = queue.pop_front() {
             let pid_obj = sysinfo::Pid::from_u32(curr);
             if let Some(proc_info) = sys.process(pid_obj) {
                 total_cpu += proc_info.cpu_usage();
                 total_mem = total_mem.saturating_add(proc_info.memory());
                 alive_count += 1;
+                tree_pids.push(curr);
             }
             if let Some(kids) = children_map.get(&curr) {
                 for &k in kids {
@@ -422,7 +424,14 @@ impl Monitor {
                 }
             }
         }
-        (total_cpu, total_mem, alive_count)
+        (total_cpu, total_mem, alive_count, tree_pids)
+    }
+
+    /// Aggregate unique process-tree CPU (%) and RSS memory (bytes) across all `seed_pids`
+    /// without double-counting shared descendants. Also returns unique alive PID count.
+    pub fn get_combined_tree_metrics(&self, seed_pids: &[u32]) -> (f32, u64, usize) {
+        let (cpu, mem, alive, _) = self.get_combined_tree_details(seed_pids);
+        (cpu, mem, alive)
     }
 }
 
@@ -609,5 +618,27 @@ mod network_tests {
         let metrics = get_network_metrics();
         assert!(!metrics.history.is_empty());
         assert!(metrics.history.len() <= NET_HISTORY_LIMIT);
+    }
+
+    #[test]
+    fn test_monitor_cpu_measures_active_self_process() {
+        let m = Monitor::new();
+        m.refresh_now(true, false);
+        let pid = std::process::id();
+        // Spin briefly on a worker thread so the current process accumulates measurable CPU time.
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(350);
+        let mut acc: u64 = 0;
+        while std::time::Instant::now() < end {
+            acc = acc.wrapping_add(1);
+            std::hint::black_box(acc);
+        }
+        m.refresh_now(true, false);
+        let (raw_cpu, mem, alive) = m.get_combined_tree_metrics(&[pid]);
+        eprintln!(
+            "DIAGNOSTIC CPU TEST -> pid={pid}, alive={alive}, mem={mem}, raw_cpu={raw_cpu}, cores={}",
+            m.sample().cpu.cores
+        );
+        assert!(alive >= 1);
+        assert!(raw_cpu > 0.0, "Expected non-zero raw_cpu, got {raw_cpu}");
     }
 }

@@ -13,7 +13,7 @@ use serde::Serialize;
 use super::overview::format_resource_bytes;
 use crate::api::common::*;
 use crate::monitor::{get_path_disk_size, NetworkMetrics};
-use crate::monitor_net::get_project_network_metrics;
+use crate::monitor_net::get_project_live_telemetry;
 use crate::runtime::Runtime;
 
 #[derive(Serialize)]
@@ -61,6 +61,10 @@ pub(crate) struct AppUsageResponse {
 
 fn round_one_decimal(val: f64) -> f32 {
     ((val * 10.0).round() / 10.0) as f32
+}
+
+fn round_two_decimals(val: f64) -> f32 {
+    ((val * 100.0).round() / 100.0) as f32
 }
 
 fn collect_project_seed_pids(state: &AppState, project_id: i64, slug: &str, deploy_dir: &Path, port: Option<u16>, db_pid: Option<i64>, cwd: &Path) -> Vec<u32> {
@@ -146,7 +150,7 @@ pub(crate) async fn project_usage_handler(
     let total_vps_disk = monitor.disk.as_ref().map(|d| d.total).unwrap_or(1).max(1);
     let free_vps_disk = monitor.disk.as_ref().map(|d| d.free).unwrap_or(0);
 
-    let (raw_cpu, mem_bytes, alive_pids) = state.monitor.get_combined_tree_metrics(&seed_pids);
+    let (raw_cpu, mem_bytes, alive_pids, tree_pids) = state.monitor.get_combined_tree_details(&seed_pids);
     let running = (p.app_status == "running" && !seed_pids.is_empty()) || alive_pids > 0 || state.runtime.is_running(p.id);
     let active_pid_count = if running {
         alive_pids.max(seed_pids.len())
@@ -154,8 +158,17 @@ pub(crate) async fn project_usage_handler(
         0
     };
 
+    let mut all_pids = seed_pids.clone();
+    for pid in tree_pids {
+        if !all_pids.contains(&pid) {
+            all_pids.push(pid);
+        }
+    }
+
+    let (network, live_cpu_pct) = get_project_live_telemetry(p.id, running, &all_pids);
+    let sysinfo_cpu_pct = ((raw_cpu / num_cores as f32).clamp(0.0, 100.0)) as f64;
     let cpu_pct = if running {
-        round_one_decimal(((raw_cpu / num_cores as f32).min(100.0)) as f64)
+        round_two_decimals(live_cpu_pct.unwrap_or(sysinfo_cpu_pct).clamp(0.0, 100.0))
     } else {
         0.0
     };
@@ -177,7 +190,6 @@ pub(crate) async fn project_usage_handler(
     let disk_bytes = deploy_size.saturating_add(container_size);
     let disk_pct = round_one_decimal((disk_bytes as f64 / total_vps_disk as f64) * 100.0);
 
-    let network = get_project_network_metrics(p.id, running, &seed_pids);
     let status = if running && p.app_status != "maintenance" {
         "running".to_string()
     } else {
@@ -222,6 +234,8 @@ mod tests {
     fn test_round_one_decimal_and_usage_serialization() {
         assert_eq!(round_one_decimal(12.349), 12.3);
         assert_eq!(round_one_decimal(12.351), 12.4);
+        assert_eq!(round_two_decimals(0.034), 0.03);
+        assert_eq!(round_two_decimals(12.346), 12.35);
 
         let resp = AppUsageResponse {
             project_id: 7,

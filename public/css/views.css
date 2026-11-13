@@ -895,11 +895,11 @@
 
 .app-net-live-marker {
   position: absolute;
-  right: 2px;
-  width: 6px;
-  height: 6px;
+  right: auto;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  transform: translateY(50%);
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
@@ -918,10 +918,9 @@
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(255, 255, 255, 0.22);
-  opacity: 0;
+  background: rgba(255, 255, 255, 0.25);
+  opacity: 1;
   pointer-events: none;
-  transition: opacity 0.1s ease;
 }
 
 .app-net-scale-chip {

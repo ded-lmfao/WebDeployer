@@ -34,6 +34,10 @@ struct PidNetSnapshot {
     estab_by_pid: HashMap<u32, usize>,
     /// Cumulative OS process I/O `(read_bytes, write_bytes)` per PID.
     io_by_pid: HashMap<u32, (u64, u64)>,
+    /// System-wide total CPU ticks across all logical cores (kernel+idle+user).
+    sys_cpu_total: Option<u64>,
+    /// Cumulative per-PID CPU time `(kernel + user)` in matching OS ticks.
+    cpu_time_by_pid: HashMap<u32, u64>,
 }
 
 struct ProjectNetTracker {
@@ -48,6 +52,9 @@ struct ProjectNetTracker {
     active_sockets: usize,
     conn_last: HashMap<(u32, SocketConnKey), (u64, u64)>,
     pid_io_last: HashMap<u32, (u64, u64)>,
+    sys_cpu_last: Option<u64>,
+    pid_cpu_last: HashMap<u32, u64>,
+    last_cpu_pct: Option<f64>,
     history: VecDeque<NetworkSample>,
 }
 
@@ -66,6 +73,9 @@ impl ProjectNetTracker {
             active_sockets: 0,
             conn_last: HashMap::new(),
             pid_io_last: HashMap::new(),
+            sys_cpu_last: None,
+            pid_cpu_last: HashMap::new(),
+            last_cpu_pct: None,
             history: VecDeque::with_capacity(APP_NET_HISTORY_LIMIT),
         }
     }
@@ -80,6 +90,9 @@ impl ProjectNetTracker {
         self.active_sockets = 0;
         self.conn_last.clear();
         self.pid_io_last.clear();
+        self.sys_cpu_last = None;
+        self.pid_cpu_last.clear();
+        self.last_cpu_pct = None;
         self.history.clear();
     }
 
@@ -162,8 +175,33 @@ impl ProjectNetTracker {
             0
         };
 
+        let mut next_cpu_last = HashMap::new();
+        let mut proc_cpu_delta: u64 = 0;
+        for &pid in &pid_set {
+            if let Some(&cur_cpu) = snap.cpu_time_by_pid.get(&pid) {
+                if self.initialized {
+                    if let Some(&prev_cpu) = self.pid_cpu_last.get(&pid) {
+                        proc_cpu_delta =
+                            proc_cpu_delta.saturating_add(cur_cpu.saturating_sub(prev_cpu));
+                    }
+                }
+                next_cpu_last.insert(pid, cur_cpu);
+            }
+        }
+        if self.initialized {
+            if let (Some(cur_sys), Some(prev_sys)) = (snap.sys_cpu_total, self.sys_cpu_last) {
+                let sys_delta = cur_sys.saturating_sub(prev_sys);
+                if sys_delta > 0 {
+                    let pct = ((proc_cpu_delta as f64) / (sys_delta as f64)) * 100.0;
+                    self.last_cpu_pct = Some(pct.clamp(0.0, 100.0));
+                }
+            }
+        }
+
         self.conn_last = next_conn_last;
         self.pid_io_last = next_io_last;
+        self.sys_cpu_last = snap.sys_cpu_total;
+        self.pid_cpu_last = next_cpu_last;
         self.seen_pids = pid_set;
         self.last_sample_at = now;
         self.initialized = true;
@@ -262,13 +300,13 @@ pub fn sample_active_projects() {
     }
 }
 
-/// Return isolated genuine network metrics for a single project.
+/// Return isolated genuine `(NetworkMetrics, Option<host_cpu_percent>)` for a single project.
 /// Offline projects immediately clear active streaming state and return zeroed metrics.
-pub fn get_project_network_metrics(
+pub fn get_project_live_telemetry(
     project_id: i64,
     running: bool,
     pids: &[u32],
-) -> NetworkMetrics {
+) -> (NetworkMetrics, Option<f64>) {
     let clean_pids = normalize_pids(pids);
     if !running || clean_pids.is_empty() {
         if let Ok(mut map) = registry().lock() {
@@ -276,12 +314,12 @@ pub fn get_project_network_metrics(
                 tr.reset_offline();
             }
         }
-        return NetworkMetrics::default();
+        return (NetworkMetrics::default(), Some(0.0));
     }
 
     let needs_immediate_sample = {
         let Ok(mut map) = registry().lock() else {
-            return NetworkMetrics::default();
+            return (NetworkMetrics::default(), None);
         };
         let tr = map
             .entry(project_id)
@@ -289,7 +327,9 @@ pub fn get_project_network_metrics(
         tr.pids = clean_pids.clone();
         tr.running = true;
         tr.last_queried = Instant::now();
-        !tr.initialized || tr.last_sample_at.elapsed() >= Duration::from_millis(1600)
+        !tr.initialized
+            || tr.last_sample_at.elapsed() >= Duration::from_millis(1600)
+            || (tr.last_cpu_pct.is_none() && tr.last_sample_at.elapsed() >= MIN_RESAMPLE_GAP)
     };
 
     if needs_immediate_sample {
@@ -297,25 +337,35 @@ pub fn get_project_network_metrics(
         let now = Instant::now();
         let ts_ms = now_unix_ms();
         let Ok(mut map) = registry().lock() else {
-            return NetworkMetrics::default();
+            return (NetworkMetrics::default(), None);
         };
         if let Some(tr) = map.get_mut(&project_id) {
             if tr.running && !tr.pids.is_empty() {
                 if !tr.initialized || tr.last_sample_at.elapsed() >= MIN_RESAMPLE_GAP {
                     tr.apply_snapshot(&snap, now, ts_ms);
                 }
-                return tr.to_metrics();
+                return (tr.to_metrics(), tr.last_cpu_pct);
             }
         }
-        return NetworkMetrics::default();
+        return (NetworkMetrics::default(), None);
     }
 
     let Ok(map) = registry().lock() else {
-        return NetworkMetrics::default();
+        return (NetworkMetrics::default(), None);
     };
     map.get(&project_id)
-        .map(ProjectNetTracker::to_metrics)
-        .unwrap_or_default()
+        .map(|tr| (tr.to_metrics(), tr.last_cpu_pct))
+        .unwrap_or((NetworkMetrics::default(), None))
+}
+
+/// Return isolated genuine network metrics for a single project.
+/// Offline projects immediately clear active streaming state and return zeroed metrics.
+pub fn get_project_network_metrics(
+    project_id: i64,
+    running: bool,
+    pids: &[u32],
+) -> NetworkMetrics {
+    get_project_live_telemetry(project_id, running, pids).0
 }
 
 fn probe_pids_telemetry(pids: &[u32]) -> PidNetSnapshot {
@@ -426,6 +476,20 @@ mod platform {
         other_transfer_count: u64,
     }
 
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct FileTime {
+        dw_low_date_time: u32,
+        dw_high_date_time: u32,
+    }
+
+    impl FileTime {
+        #[inline]
+        fn to_u64(self) -> u64 {
+            ((self.dw_high_date_time as u64) << 32) | (self.dw_low_date_time as u64)
+        }
+    }
+
     #[link(name = "iphlpapi")]
     extern "system" {
         fn GetExtendedTcpTable(
@@ -488,6 +552,18 @@ mod platform {
     extern "system" {
         fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> *mut c_void;
         fn GetProcessIoCounters(h_process: *mut c_void, lp_io_counters: *mut IoCounters) -> i32;
+        fn GetProcessTimes(
+            h_process: *mut c_void,
+            lp_creation_time: *mut FileTime,
+            lp_exit_time: *mut FileTime,
+            lp_kernel_time: *mut FileTime,
+            lp_user_time: *mut FileTime,
+        ) -> i32;
+        fn GetSystemTimes(
+            lp_idle_time: *mut FileTime,
+            lp_kernel_time: *mut FileTime,
+            lp_user_time: *mut FileTime,
+        ) -> i32;
         fn CloseHandle(h_object: *mut c_void) -> i32;
     }
 
@@ -777,19 +853,36 @@ mod platform {
 
         snap.socket_stats_ok = table_ok && !estats_denied;
 
-        // Always collect isolated per-PID Win32 IO_COUNTERS so unprivileged environments
-        // get genuine per-app read/write byte rates without global NIC leakage.
+        let mut sys_idle = FileTime::default();
+        let mut sys_kernel = FileTime::default();
+        let mut sys_user = FileTime::default();
+        if unsafe { GetSystemTimes(&mut sys_idle, &mut sys_kernel, &mut sys_user) } != 0 {
+            snap.sys_cpu_total = Some(sys_kernel.to_u64().saturating_add(sys_user.to_u64()));
+        }
+
+        // Collect isolated per-PID Win32 IO_COUNTERS and 1s process CPU times via the same handle.
         for &pid in pid_set {
             let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
             if !handle.is_null() {
                 let mut counters = IoCounters::default();
-                let ok = unsafe { GetProcessIoCounters(handle, &mut counters) };
+                let ok_io = unsafe { GetProcessIoCounters(handle, &mut counters) };
+                let mut creation = FileTime::default();
+                let mut exit = FileTime::default();
+                let mut kernel = FileTime::default();
+                let mut user = FileTime::default();
+                let ok_cpu = unsafe {
+                    GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
+                };
                 unsafe {
                     CloseHandle(handle);
                 }
-                if ok != 0 {
+                if ok_io != 0 {
                     snap.io_by_pid
                         .insert(pid, (counters.read_transfer_count, counters.write_transfer_count));
+                }
+                if ok_cpu != 0 {
+                    snap.cpu_time_by_pid
+                        .insert(pid, kernel.to_u64().saturating_add(user.to_u64()));
                 }
             }
         }
@@ -1058,6 +1151,19 @@ mod platform {
             snap.socket_stats_ok = v4 || v6;
         }
 
+        if let Ok(stat_text) = fs::read_to_string("/proc/stat") {
+            if let Some(cpu_line) = stat_text.lines().find(|l| l.starts_with("cpu ")) {
+                let sum: u64 = cpu_line
+                    .split_whitespace()
+                    .skip(1)
+                    .filter_map(|v| v.parse::<u64>().ok())
+                    .sum();
+                if sum > 0 {
+                    snap.sys_cpu_total = Some(sum);
+                }
+            }
+        }
+
         for &pid in pid_set {
             if let Ok(content) = fs::read_to_string(format!("/proc/{pid}/io")) {
                 let mut rchar = 0u64;
@@ -1070,6 +1176,16 @@ mod platform {
                     }
                 }
                 snap.io_by_pid.insert(pid, (rchar, wchar));
+            }
+            if let Ok(stat_line) = fs::read_to_string(format!("/proc/{pid}/stat")) {
+                if let Some(rparen) = stat_line.rfind(')') {
+                    let fields: Vec<&str> = stat_line[rparen + 1..].split_whitespace().collect();
+                    if fields.len() > 12 {
+                        let utime = fields[11].parse::<u64>().unwrap_or(0);
+                        let stime = fields[12].parse::<u64>().unwrap_or(0);
+                        snap.cpu_time_by_pid.insert(pid, utime.saturating_add(stime));
+                    }
+                }
             }
         }
 
@@ -1171,5 +1287,33 @@ mod tests {
         assert_eq!(offline.total_rx_bytes, 0);
         assert_eq!(offline.total_tx_bytes, 0);
         assert!(offline.history.is_empty());
+    }
+
+    #[test]
+    fn test_live_self_cpu_measurement_reports_activity() {
+        let project_id = 987_655;
+        let my_pid = std::process::id();
+        let pids = vec![my_pid];
+
+        let (net0, cpu0) = get_project_live_telemetry(project_id, true, &pids);
+        assert_eq!(net0.history.len(), 1);
+        assert!(cpu0.is_none(), "initial baseline sample should defer delta cpu to next interval");
+
+        // Burn real user CPU for ~950ms so MIN_RESAMPLE_GAP passes and OS process times advance.
+        let start = Instant::now();
+        let mut acc: u64 = 1;
+        while start.elapsed() < Duration::from_millis(950) {
+            for i in 1..20_000u64 {
+                acc = acc.wrapping_mul(6364136223846793005).wrapping_add(i);
+            }
+        }
+        std::hint::black_box(acc);
+
+        let (_net1, cpu1) = get_project_live_telemetry(project_id, true, &pids);
+        let pct = cpu1.expect("second sample after MIN_RESAMPLE_GAP must yield OS CPU%");
+        assert!(pct > 0.05 && pct <= 100.0, "expected positive CPU%, got {pct}");
+
+        let (_net_off, cpu_off) = get_project_live_telemetry(project_id, false, &[]);
+        assert_eq!(cpu_off, Some(0.0));
     }
 }
