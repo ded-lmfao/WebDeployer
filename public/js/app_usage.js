@@ -492,7 +492,7 @@ function applyUsagePayload(entity, data) {
   const cpuCores = Number(data.cpu?.hostCores || 1);
   const activePids = Number(data.cpu?.activePids || 0);
 
-  const cpuDisplay = cpuPct > 0 && cpuPct < 1 ? `${cpuPct.toFixed(2)}%` : `${cpuPct.toFixed(1)}%`;
+  const cpuDisplay = cpuPct > 0 && cpuPct < 0.1 ? `${cpuPct.toFixed(2)}%` : `${cpuPct.toFixed(1)}%`;
   setText('usage-cpu-val', cpuDisplay);
   const cpuBarPct = running && cpuPct > 0 ? Math.min(100, Math.max(1.5, cpuPct)) : 0;
   setMeterWidth('usage-cpu-bar', cpuBarPct);

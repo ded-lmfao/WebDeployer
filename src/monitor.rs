@@ -58,6 +58,7 @@ pub struct Monitor {
     disks: Mutex<Disks>,
     snapshot: RwLock<SystemMetrics>,
     last_queried_ms: AtomicU64,
+    pid_refresh_hits: Mutex<HashMap<u32, u8>>,
 }
 
 impl Monitor {
@@ -77,6 +78,7 @@ impl Monitor {
             disks: Mutex::new(disks),
             snapshot: RwLock::new(initial),
             last_queried_ms: AtomicU64::new(epoch_ms()),
+            pid_refresh_hits: Mutex::new(HashMap::new()),
         }
     }
 
@@ -161,6 +163,18 @@ impl Monitor {
                 .with_cpu()
                 .with_memory();
             sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true, p_kind);
+            if let Ok(mut hits) = self.pid_refresh_hits.lock() {
+                let mut next_hits = HashMap::with_capacity(sys.processes().len());
+                for (pid, p) in sys.processes() {
+                    if p.thread_kind().is_some() {
+                        continue;
+                    }
+                    let pid_u32 = pid.as_u32();
+                    let prev = hits.get(&pid_u32).copied().unwrap_or(0);
+                    next_hits.insert(pid_u32, prev.saturating_add(1).min(4));
+                }
+                *hits = next_hits;
+            }
         }
         let mut disks = self.disks.lock().unwrap();
         if refresh_disks {
@@ -172,6 +186,20 @@ impl Monitor {
         if let Ok(mut snap) = self.snapshot.write() {
             *snap = next;
         }
+    }
+
+    /// Returns true once `Monitor` has observed at least one PID in `pids` across >= 2 process
+    /// refresh cycles, ensuring `sysinfo` CPU percentages have a valid differential baseline
+    /// matching the Overview view.
+    pub fn has_settled_process_cpu(&self, pids: &[u32]) -> bool {
+        if pids.is_empty() {
+            return false;
+        }
+        let Ok(hits) = self.pid_refresh_hits.lock() else {
+            return false;
+        };
+        pids.iter()
+            .any(|pid| hits.get(pid).copied().unwrap_or(0) >= 2)
     }
 
     pub fn start_background_sampler(self: &Arc<Self>) {
@@ -642,6 +670,7 @@ mod network_tests {
             "DIAGNOSTIC CPU TEST -> pid={pid}, alive={alive}, mem={mem}, single_mem={single_mem}, raw_cpu={raw_cpu}, cores={}",
             m.sample().cpu.cores
         );
+        assert!(m.has_settled_process_cpu(&[pid]), "Expected process CPU baseline to be settled after 2 refreshes");
         assert!(alive >= 1);
         assert_eq!(mem, single_mem, "Combined tree memory must match get_tree_metrics memory");
         assert!((raw_cpu - single_cpu).abs() < 1e-3, "Combined tree CPU must match get_tree_metrics CPU");

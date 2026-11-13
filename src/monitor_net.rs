@@ -54,6 +54,9 @@ struct ProjectNetTracker {
     pid_io_last: HashMap<u32, (u64, u64)>,
     sys_cpu_last: Option<u64>,
     pid_cpu_last: HashMap<u32, u64>,
+    cum_sys_cpu: u64,
+    cum_proc_cpu: u64,
+    cpu_window: VecDeque<(Instant, u64, u64)>,
     last_cpu_pct: Option<f64>,
     history: VecDeque<NetworkSample>,
 }
@@ -75,6 +78,9 @@ impl ProjectNetTracker {
             pid_io_last: HashMap::new(),
             sys_cpu_last: None,
             pid_cpu_last: HashMap::new(),
+            cum_sys_cpu: 0,
+            cum_proc_cpu: 0,
+            cpu_window: VecDeque::with_capacity(8),
             last_cpu_pct: None,
             history: VecDeque::with_capacity(APP_NET_HISTORY_LIMIT),
         }
@@ -92,6 +98,9 @@ impl ProjectNetTracker {
         self.pid_io_last.clear();
         self.sys_cpu_last = None;
         self.pid_cpu_last.clear();
+        self.cum_sys_cpu = 0;
+        self.cum_proc_cpu = 0;
+        self.cpu_window.clear();
         self.last_cpu_pct = None;
         self.history.clear();
     }
@@ -188,12 +197,40 @@ impl ProjectNetTracker {
                 next_cpu_last.insert(pid, cur_cpu);
             }
         }
-        if self.initialized {
-            if let (Some(cur_sys), Some(prev_sys)) = (snap.sys_cpu_total, self.sys_cpu_last) {
-                let sys_delta = cur_sys.saturating_sub(prev_sys);
-                if sys_delta > 0 {
-                    let pct = ((proc_cpu_delta as f64) / (sys_delta as f64)) * 100.0;
-                    self.last_cpu_pct = Some(pct.clamp(0.0, 100.0));
+        if !self.initialized {
+            if snap.sys_cpu_total.is_some() {
+                self.cpu_window.clear();
+                self.cpu_window.push_back((now, 0, 0));
+            }
+        } else if let (Some(cur_sys), Some(prev_sys)) = (snap.sys_cpu_total, self.sys_cpu_last) {
+            let sys_delta = cur_sys.saturating_sub(prev_sys);
+            if sys_delta > 0 {
+                self.cum_sys_cpu = self.cum_sys_cpu.saturating_add(sys_delta);
+                self.cum_proc_cpu = self.cum_proc_cpu.saturating_add(proc_cpu_delta);
+                self.cpu_window
+                    .push_back((now, self.cum_sys_cpu, self.cum_proc_cpu));
+
+                // Average CPU across a rolling ~4s window to eliminate single-jiffy 1s quantization jitter.
+                const CPU_SMOOTH_WINDOW: Duration = Duration::from_secs(4);
+                while self.cpu_window.len() > 2
+                    && now.duration_since(self.cpu_window[1].0) >= CPU_SMOOTH_WINDOW
+                {
+                    self.cpu_window.pop_front();
+                }
+
+                if let (Some(&(_, old_sys, old_proc)), Some(&(_, new_sys, new_proc))) =
+                    (self.cpu_window.front(), self.cpu_window.back())
+                {
+                    let win_sys = new_sys.saturating_sub(old_sys);
+                    let win_proc = new_proc.saturating_sub(old_proc);
+                    if win_sys > 0 {
+                        let raw_pct = ((win_proc as f64) / (win_sys as f64)) * 100.0;
+                        let smoothed = match self.last_cpu_pct {
+                            Some(prev) => prev * 0.3 + raw_pct * 0.7,
+                            None => raw_pct,
+                        };
+                        self.last_cpu_pct = Some(smoothed.clamp(0.0, 100.0));
+                    }
                 }
             }
         }

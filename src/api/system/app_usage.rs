@@ -63,10 +63,6 @@ fn round_one_decimal(val: f64) -> f32 {
     ((val * 10.0).round() / 10.0) as f32
 }
 
-fn round_two_decimals(val: f64) -> f32 {
-    ((val * 100.0).round() / 100.0) as f32
-}
-
 fn collect_project_seed_pids(
     state: &AppState,
     project_id: i64,
@@ -170,8 +166,16 @@ fn compute_entity_usage(state: &AppState, input: EntityUsageInput<'_>) -> AppUsa
 
     let (network, live_cpu_pct) = get_project_live_telemetry(input.tracker_key, running, &all_pids);
     let sysinfo_cpu_pct = ((raw_cpu / num_cores as f32).clamp(0.0, 100.0)) as f64;
+    let monitor_settled = running && state.monitor.has_settled_process_cpu(&all_pids);
     let cpu_pct = if running {
-        round_two_decimals(live_cpu_pct.unwrap_or(sysinfo_cpu_pct).clamp(0.0, 100.0))
+        // Match Overview's stable 4s Monitor CPU baseline once settled; use the 4s-smoothed
+        // live OS delta only during the brief initial warm-up of newly started processes.
+        let chosen = if monitor_settled {
+            sysinfo_cpu_pct
+        } else {
+            live_cpu_pct.unwrap_or(sysinfo_cpu_pct)
+        };
+        round_one_decimal(chosen.clamp(0.0, 100.0))
     } else {
         0.0
     };
@@ -341,8 +345,6 @@ mod tests {
     fn test_round_one_decimal_and_usage_serialization() {
         assert_eq!(round_one_decimal(12.349), 12.3);
         assert_eq!(round_one_decimal(12.351), 12.4);
-        assert_eq!(round_two_decimals(0.034), 0.03);
-        assert_eq!(round_two_decimals(12.346), 12.35);
 
         let resp = AppUsageResponse {
             project_id: 7,
