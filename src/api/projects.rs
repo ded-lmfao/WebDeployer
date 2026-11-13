@@ -30,7 +30,7 @@ fn enrich_project_status(p: &mut Project) {
         p.app_status = "running".to_string();
     } else if p.app_status == "running" {
         if let Some(port) = p.port {
-            if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
+            if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port_cached(port).first() {
                 if crate::runtime::process::is_pid_alive(port_pid) {
                     p.app_pid = Some(port_pid);
                 }
@@ -48,6 +48,14 @@ pub(crate) fn to_project_response(mut p: Project, cwd: &std::path::Path) -> Proj
     }
 }
 
+static CACHED_CWD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+fn cached_cwd() -> &'static std::path::Path {
+    CACHED_CWD
+        .get_or_init(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .as_path()
+}
+
 pub(crate) async fn list_projects_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -59,14 +67,14 @@ pub(crate) async fn list_projects_handler(
         return Ok(res);
     }
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cwd = cached_cwd();
     let list: Vec<ProjectResponse> = state
         .projects
         .list()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .into_iter()
         .filter(|p| user.can_access_project(p.id))
-        .map(|p| to_project_response(p, &cwd))
+        .map(|p| to_project_response(p, cwd))
         .collect();
 
     cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
@@ -87,8 +95,7 @@ pub(crate) async fn get_project_handler(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    Ok(Json(to_project_response(p, &cwd)))
+    Ok(Json(to_project_response(p, cached_cwd())))
 }
 
 fn manage_power_for_kind(kind: &str) -> &'static str {

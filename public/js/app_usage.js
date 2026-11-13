@@ -56,11 +56,51 @@ function formatRate(bps) {
   return `${formatBytesShort(bps)}/s`;
 }
 
-function setText(id, text) {
-  const el = document.getElementById(id);
+function setElText(el, text) {
   if (el && el.textContent !== text) {
     el.textContent = text;
   }
+}
+
+function setText(id, text) {
+  setElText(document.getElementById(id), text);
+}
+
+function setAttrCached(cache, key, el, attr, val) {
+  if (el && cache[key] !== val) {
+    cache[key] = val;
+    el.setAttribute(attr, val);
+  }
+}
+
+function setStyleProp(el, prop, val) {
+  if (el && el.style[prop] !== val) {
+    el.style[prop] = val;
+  }
+}
+
+function getNetChartEls(netState, ids) {
+  let els = netState._els;
+  if (!els || els.ids !== ids || (els.inLineEl && els.inLineEl.isConnected === false)) {
+    els = {
+      ids,
+      attrCache: {},
+      inAreaEl: document.getElementById(ids.inArea),
+      outAreaEl: document.getElementById(ids.outArea),
+      inGlowEl: document.getElementById(ids.inGlow),
+      outGlowEl: document.getElementById(ids.outGlow),
+      inLineEl: document.getElementById(ids.inLine),
+      outLineEl: document.getElementById(ids.outLine),
+      inDotEl: document.getElementById(ids.inDot),
+      outDotEl: document.getElementById(ids.outDot),
+      crossEl: document.getElementById(ids.crosshair),
+      peakEl: document.getElementById(ids.peak),
+      inValEl: document.getElementById(ids.inVal),
+      outValEl: document.getElementById(ids.outVal),
+    };
+    netState._els = els;
+  }
+  return els;
 }
 
 function setMeterWidth(id, pct) {
@@ -73,77 +113,178 @@ function setMeterWidth(id, pct) {
   }
 }
 
-/**
- * Compute Fritsch-Carlson monotone cubic tangents so smoothed lines never overshoot
- * plotted bounds or oscillate on step changes.
- */
-function computeMonotoneTangents(pts) {
-  const n = pts.length;
-  const m = new Array(n).fill(0);
-  if (n < 2) return m;
+const _apiStandaloneScratch = {
+  _splineBuf: null,
+};
 
-  const d = new Array(n - 1);
-  const dx = new Array(n - 1);
+function ensureSplineScratch(stateObj, needed) {
+  let buf = stateObj._splineBuf;
+  if (!buf) {
+    const cap = Math.max(64, needed);
+    buf = {
+      cap,
+      vis: [],
+      xs: new Float64Array(cap),
+      ysIn: new Float64Array(cap),
+      ysOut: new Float64Array(cap),
+      mIn: new Float64Array(cap),
+      mOut: new Float64Array(cap),
+      d: new Float64Array(cap),
+      dx: new Float64Array(cap),
+      parts: [],
+    };
+    stateObj._splineBuf = buf;
+  } else if (needed > buf.cap) {
+    const cap = Math.max(needed, buf.cap * 2);
+    buf.cap = cap;
+    buf.xs = new Float64Array(cap);
+    buf.ysIn = new Float64Array(cap);
+    buf.ysOut = new Float64Array(cap);
+    buf.mIn = new Float64Array(cap);
+    buf.mOut = new Float64Array(cap);
+    buf.d = new Float64Array(cap);
+    buf.dx = new Float64Array(cap);
+  }
+  return buf;
+}
+
+/**
+ * Compute Fritsch-Carlson monotone cubic tangents into preallocated Float64Arrays
+ * so 60fps spline draws avoid heap churn.
+ */
+function fillMonotoneTangentsArrays(xs, ys, n, m, d, dx) {
+  if (n <= 0) return;
+  if (n < 2) {
+    m[0] = 0;
+    return;
+  }
+
   for (let i = 0; i < n - 1; i++) {
-    dx[i] = Math.max(pts[i + 1].x - pts[i].x, 1e-4);
-    d[i] = (pts[i + 1].y - pts[i].y) / dx[i];
+    const stepX = xs[i + 1] - xs[i];
+    const h = stepX > 1e-4 ? stepX : 1e-4;
+    dx[i] = h;
+    d[i] = (ys[i + 1] - ys[i]) / h;
   }
 
   m[0] = d[0];
   m[n - 1] = d[n - 2];
   for (let i = 1; i < n - 1; i++) {
-    if (d[i - 1] === 0 || d[i] === 0 || Math.sign(d[i - 1]) !== Math.sign(d[i])) {
+    const dPrev = d[i - 1];
+    const dCurr = d[i];
+    if (dPrev === 0 || dCurr === 0 || (dPrev > 0) !== (dCurr > 0)) {
       m[i] = 0;
     } else {
       const w1 = 2 * dx[i] + dx[i - 1];
       const w2 = dx[i] + 2 * dx[i - 1];
-      m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+      m[i] = (w1 + w2) / (w1 / dPrev + w2 / dCurr);
     }
   }
 
   for (let i = 0; i < n - 1; i++) {
-    if (Math.abs(d[i]) < 1e-9) {
+    const di = d[i];
+    if (Math.abs(di) < 1e-9) {
       m[i] = 0;
       m[i + 1] = 0;
       continue;
     }
-    const alpha = m[i] / d[i];
-    const beta = m[i + 1] / d[i];
+    const alpha = m[i] / di;
+    const beta = m[i + 1] / di;
     const h = Math.hypot(alpha, beta);
     if (h > 3) {
       const scale = 3 / h;
-      m[i] = scale * alpha * d[i];
-      m[i + 1] = scale * beta * d[i];
+      m[i] = scale * alpha * di;
+      m[i + 1] = scale * beta * di;
     }
   }
-  return m;
+}
+
+function buildCubicPathsArrays(xs, ys, n, m, baseBottom, parts) {
+  if (n === 0) return { line: '', area: '' };
+  if (n === 1) {
+    const x0 = xs[0].toFixed(2);
+    const y0 = ys[0].toFixed(2);
+    return {
+      line: `M${x0},${y0}`,
+      area: `M${x0},${baseBottom} L${x0},${y0} L${x0},${baseBottom} Z`,
+    };
+  }
+
+  let k = 0;
+  const xStart = xs[0].toFixed(2);
+  parts[k++] = `M${xStart},${ys[0].toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const x0 = xs[i];
+    const y0 = ys[i];
+    const x1 = xs[i + 1];
+    const y1 = ys[i + 1];
+    const step = (x1 - x0) / 3;
+    const c1x = x0 + step;
+    const c1yRaw = y0 + m[i] * step;
+    const c1y = c1yRaw < TOP_PAD ? TOP_PAD : (c1yRaw > PLOT_BOTTOM ? PLOT_BOTTOM : c1yRaw);
+    const c2x = x1 - step;
+    const c2yRaw = y1 - m[i + 1] * step;
+    const c2y = c2yRaw < TOP_PAD ? TOP_PAD : (c2yRaw > PLOT_BOTTOM ? PLOT_BOTTOM : c2yRaw);
+    parts[k++] = ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${x1.toFixed(2)},${y1.toFixed(2)}`;
+  }
+  parts.length = k;
+  const line = parts.join('');
+  const xEnd = xs[n - 1].toFixed(2);
+  const area = `${line} L${xEnd},${baseBottom} L${xStart},${baseBottom} Z`;
+  return { line, area };
+}
+
+function evalHermiteSegment(x0, y0, m0, x1, y1, m1, xTarget) {
+  const dx = x1 - x0;
+  const h = dx > 1e-4 ? dx : 1e-4;
+  const t = Math.max(0, Math.min(1, (xTarget - x0) / h));
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const y =
+    (2 * t3 - 3 * t2 + 1) * y0 +
+    (t3 - 2 * t2 + t) * h * m0 +
+    (-2 * t3 + 3 * t2) * y1 +
+    (t3 - t2) * h * m1;
+  return y < TOP_PAD ? TOP_PAD : (y > PLOT_BOTTOM ? PLOT_BOTTOM : y);
+}
+
+function evalMonotoneYAtXArrays(xs, ys, n, m, xTarget) {
+  if (n === 0) return PLOT_BOTTOM;
+  if (n === 1 || xTarget <= xs[0]) return ys[0];
+  if (xTarget >= xs[n - 1]) return ys[n - 1];
+
+  let lo = 0;
+  for (let i = 0; i < n - 1; i++) {
+    if (xTarget >= xs[i] && xTarget <= xs[i + 1]) {
+      lo = i;
+      break;
+    }
+  }
+  return evalHermiteSegment(xs[lo], ys[lo], m[lo], xs[lo + 1], ys[lo + 1], m[lo + 1], xTarget);
+}
+
+function computeMonotoneTangents(pts) {
+  const n = pts.length;
+  const out = new Array(n).fill(0);
+  if (n < 2) return out;
+  const buf = ensureSplineScratch(_apiStandaloneScratch, n);
+  for (let i = 0; i < n; i++) {
+    buf.xs[i] = pts[i].x;
+    buf.ysIn[i] = pts[i].y;
+  }
+  fillMonotoneTangentsArrays(buf.xs, buf.ysIn, n, buf.mIn, buf.d, buf.dx);
+  for (let i = 0; i < n; i++) out[i] = buf.mIn[i];
+  return out;
 }
 
 function buildCubicPaths(pts, m, baseBottom = PLOT_BOTTOM) {
   const n = pts.length;
   if (n === 0) return { line: '', area: '' };
-  if (n === 1) {
-    const p = pts[0];
-    return {
-      line: `M${p.x.toFixed(2)},${p.y.toFixed(2)}`,
-      area: `M${p.x.toFixed(2)},${baseBottom} L${p.x.toFixed(2)},${p.y.toFixed(2)} L${p.x.toFixed(2)},${baseBottom} Z`,
-    };
+  const buf = ensureSplineScratch(_apiStandaloneScratch, n);
+  for (let i = 0; i < n; i++) {
+    buf.xs[i] = pts[i].x;
+    buf.ysIn[i] = pts[i].y;
   }
-
-  let line = `M${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
-  for (let i = 0; i < n - 1; i++) {
-    const step = (pts[i + 1].x - pts[i].x) / 3;
-    const c1x = pts[i].x + step;
-    const c1y = Math.max(TOP_PAD, Math.min(PLOT_BOTTOM, pts[i].y + m[i] * step));
-    const c2x = pts[i + 1].x - step;
-    const c2y = Math.max(TOP_PAD, Math.min(PLOT_BOTTOM, pts[i + 1].y - m[i + 1] * step));
-    line += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${pts[i + 1].x.toFixed(2)},${pts[i + 1].y.toFixed(2)}`;
-  }
-
-  const last = pts[n - 1];
-  const first = pts[0];
-  const area = `${line} L${last.x.toFixed(2)},${baseBottom} L${first.x.toFixed(2)},${baseBottom} Z`;
-  return { line, area };
+  return buildCubicPathsArrays(buf.xs, buf.ysIn, n, m, baseBottom, buf.parts);
 }
 
 function evalMonotoneYAtX(pts, m, xTarget) {
@@ -159,20 +300,15 @@ function evalMonotoneYAtX(pts, m, xTarget) {
       break;
     }
   }
-  const h = Math.max(pts[lo + 1].x - pts[lo].x, 1e-4);
-  const t = Math.max(0, Math.min(1, (xTarget - pts[lo].x) / h));
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const h00 = 2 * t3 - 3 * t2 + 1;
-  const h10 = t3 - 2 * t2 + t;
-  const h01 = -2 * t3 + 3 * t2;
-  const h11 = t3 - t2;
-  const y =
-    h00 * pts[lo].y +
-    h10 * h * m[lo] +
-    h01 * pts[lo + 1].y +
-    h11 * h * m[lo + 1];
-  return Math.max(TOP_PAD, Math.min(PLOT_BOTTOM, y));
+  return evalHermiteSegment(
+    pts[lo].x,
+    pts[lo].y,
+    m[lo],
+    pts[lo + 1].x,
+    pts[lo + 1].y,
+    m[lo + 1],
+    xTarget
+  );
 }
 
 function stopNetChartRaf() {
@@ -203,11 +339,11 @@ function renderOfflineNetChart() {
   const chartEl = document.getElementById('usage-net-chart');
   if (!chartEl) return;
 
-  setOfflinePills(true);
-  chartEl.classList.add('is-offline');
-
   if (_netState.domMode !== 'offline') {
+    setOfflinePills(true);
+    chartEl.classList.add('is-offline');
     _netState.domMode = 'offline';
+    _netState._chartEl = null;
     chartEl.innerHTML = `
       <div class="app-net-offline-state">
         <span class="app-net-offline-pill">
@@ -220,6 +356,14 @@ function renderOfflineNetChart() {
 }
 
 function ensureOnlineChartDom() {
+  if (
+    _netState.domMode === 'online' &&
+    _netState._chartEl &&
+    _netState._chartEl.isConnected !== false
+  ) {
+    return _netState._chartEl;
+  }
+
   const chartEl = document.getElementById('usage-net-chart');
   if (!chartEl) return null;
 
@@ -227,10 +371,12 @@ function ensureOnlineChartDom() {
   chartEl.classList.remove('is-offline');
 
   if (_netState.domMode === 'online' && chartEl.querySelector('#net-in-line')) {
+    _netState._chartEl = chartEl;
     return chartEl;
   }
 
   _netState.domMode = 'online';
+  _netState._chartEl = chartEl;
   chartEl.innerHTML = `
     <svg class="app-net-svg" viewBox="0 0 ${SVG_W} ${SVG_H}" preserveAspectRatio="none" aria-label="Inbound and outbound network traffic">
       <defs>
@@ -297,16 +443,22 @@ function renderSmoothNetFrame(cfg, netState, nowPerf) {
 
   const { svgW, svgH, topPad, yZeroIn, yZeroOut, windowMs, lagMs, ids } = cfg;
   const samples = netState.samples;
-  const inAreaEl = document.getElementById(ids.inArea);
-  const outAreaEl = document.getElementById(ids.outArea);
-  const inGlowEl = document.getElementById(ids.inGlow);
-  const outGlowEl = document.getElementById(ids.outGlow);
-  const inLineEl = document.getElementById(ids.inLine);
-  const outLineEl = document.getElementById(ids.outLine);
-  const inDotEl = document.getElementById(ids.inDot);
-  const outDotEl = document.getElementById(ids.outDot);
-  const crossEl = document.getElementById(ids.crosshair);
-  const peakEl = document.getElementById(ids.peak);
+  const els = getNetChartEls(netState, ids);
+  const {
+    attrCache,
+    inAreaEl,
+    outAreaEl,
+    inGlowEl,
+    outGlowEl,
+    inLineEl,
+    outLineEl,
+    inDotEl,
+    outDotEl,
+    crossEl,
+    peakEl,
+    inValEl,
+    outValEl,
+  } = els;
   if (!inLineEl || !outLineEl || !inAreaEl || !outAreaEl) return false;
 
   if (samples.length < 2) {
@@ -314,27 +466,26 @@ function renderSmoothNetFrame(cfg, netState, nowPerf) {
     const flatOutLine = `M0.00,${yZeroOut.toFixed(2)} L${svgW}.00,${yZeroOut.toFixed(2)}`;
     const flatInArea = `M0.00,${yZeroIn.toFixed(2)} L${svgW}.00,${yZeroIn.toFixed(2)} Z`;
     const flatOutArea = `M0.00,${yZeroOut.toFixed(2)} L${svgW}.00,${yZeroOut.toFixed(2)} Z`;
-    inLineEl.setAttribute('d', flatInLine);
-    outLineEl.setAttribute('d', flatOutLine);
-    if (inGlowEl) inGlowEl.setAttribute('d', flatInLine);
-    if (outGlowEl) outGlowEl.setAttribute('d', flatOutLine);
-    inAreaEl.setAttribute('d', flatInArea);
-    outAreaEl.setAttribute('d', flatOutArea);
+    setAttrCached(attrCache, 'inLine', inLineEl, 'd', flatInLine);
+    setAttrCached(attrCache, 'outLine', outLineEl, 'd', flatOutLine);
+    setAttrCached(attrCache, 'inGlow', inGlowEl, 'd', flatInLine);
+    setAttrCached(attrCache, 'outGlow', outGlowEl, 'd', flatOutLine);
+    setAttrCached(attrCache, 'inArea', inAreaEl, 'd', flatInArea);
+    setAttrCached(attrCache, 'outArea', outAreaEl, 'd', flatOutArea);
     if (inDotEl) {
-      inDotEl.style.opacity = '1';
-      inDotEl.style.left = '100%';
-      inDotEl.style.top = `${(yZeroIn / svgH) * 100}%`;
+      setStyleProp(inDotEl, 'opacity', '1');
+      setStyleProp(inDotEl, 'left', '100%');
+      setStyleProp(inDotEl, 'top', `${(yZeroIn / svgH) * 100}%`);
     }
     if (outDotEl) {
-      outDotEl.style.opacity = '1';
-      outDotEl.style.left = '100%';
-      outDotEl.style.top = `${(yZeroOut / svgH) * 100}%`;
+      setStyleProp(outDotEl, 'opacity', '1');
+      setStyleProp(outDotEl, 'left', '100%');
+      setStyleProp(outDotEl, 'top', `${(yZeroOut / svgH) * 100}%`);
     }
-    if (peakEl) {
-      peakEl.textContent = samples.length === 1
-        ? (cfg.singleSamplePeakText || 'Sampling')
-        : 'Starting';
-    }
+    setElText(
+      peakEl,
+      samples.length === 1 ? (cfg.singleSamplePeakText || 'Sampling') : 'Starting'
+    );
     return true;
   }
 
@@ -358,17 +509,29 @@ function renderSmoothNetFrame(cfg, netState, nowPerf) {
   const viewEnd = netState.playheadTs;
   const viewStart = viewEnd - windowMs;
 
-  // Include at most 1 look-behind / look-ahead bracket beyond the margin so clipped tangents stay smooth
-  const visible = samples.filter((s) => s.ts >= viewStart - 3000 && s.ts <= viewEnd + 3000);
-  const inWindow = visible.filter((s) => s.ts >= viewStart && s.ts <= viewEnd);
-  const peakBasis = inWindow.length ? inWindow : visible;
-
-  let rawPeak = cfg.minRawPeak ?? 512;
-  for (let i = 0; i < peakBasis.length; i++) {
-    const s = peakBasis[i];
-    if (s.inboundBps > rawPeak) rawPeak = s.inboundBps;
-    if (s.outboundBps > rawPeak) rawPeak = s.outboundBps;
+  // Single-pass extraction: keep at most 1 bracket beyond view margins while tracking peak in-window
+  const minRawPeak = cfg.minRawPeak ?? 512;
+  let visPeak = minRawPeak;
+  let inWinPeak = minRawPeak;
+  let hasInWin = false;
+  const buf = ensureSplineScratch(netState, samples.length + 4);
+  const visible = buf.vis;
+  visible.length = 0;
+  const winLeft = viewStart - 3000;
+  const winRight = viewEnd + 3000;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    if (s.ts < winLeft) continue;
+    if (s.ts > winRight) break;
+    visible.push(s);
+    const maxSample = s.inboundBps > s.outboundBps ? s.inboundBps : s.outboundBps;
+    if (maxSample > visPeak) visPeak = maxSample;
+    if (s.ts >= viewStart && s.ts <= viewEnd) {
+      hasInWin = true;
+      if (maxSample > inWinPeak) inWinPeak = maxSample;
+    }
   }
+  const rawPeak = hasInWin ? inWinPeak : visPeak;
   const targetPeak = Math.max(1024, rawPeak * 1.15);
   const scaleAlpha = 1 - Math.exp(-dt * 3.5);
   netState.displayMaxRate += (targetPeak - netState.displayMaxRate) * scaleAlpha;
@@ -376,66 +539,82 @@ function renderSmoothNetFrame(cfg, netState, nowPerf) {
 
   const inUsableH = yZeroIn - topPad;
   const outUsableH = yZeroOut - topPad;
-  const ptsIn = [];
-  const ptsOut = [];
-  for (let i = 0; i < visible.length; i++) {
-    const s = visible[i];
-    const x = ((s.ts - viewStart) / windowMs) * svgW;
-    const yIn = yZeroIn - Math.min(1, s.inboundBps / maxRate) * inUsableH;
-    const yOut = yZeroOut - Math.min(1, s.outboundBps / maxRate) * outUsableH;
-    ptsIn.push({ x, y: yIn });
-    ptsOut.push({ x, y: yOut });
-  }
-
-  if (ptsIn.length === 0) {
+  const visLen = visible.length;
+  let count = 0;
+  if (visLen === 0) {
     const latest = samples[samples.length - 1];
     const yInLast = yZeroIn - Math.min(1, (latest?.inboundBps || 0) / maxRate) * inUsableH;
     const yOutLast = yZeroOut - Math.min(1, (latest?.outboundBps || 0) / maxRate) * outUsableH;
-    ptsIn.push({ x: 0, y: yZeroIn }, { x: svgW, y: yInLast });
-    ptsOut.push({ x: 0, y: yZeroOut }, { x: svgW, y: yOutLast });
+    buf.xs[0] = 0;
+    buf.ysIn[0] = yZeroIn;
+    buf.ysOut[0] = yZeroOut;
+    buf.xs[1] = svgW;
+    buf.ysIn[1] = yInLast;
+    buf.ysOut[1] = yOutLast;
+    count = 2;
   } else {
-    const firstX = ptsIn[0].x;
-    if (firstX > 0.5) {
-      if (firstX > 6) {
-        ptsIn.unshift({ x: firstX - 3, y: yZeroIn });
-        ptsOut.unshift({ x: firstX - 3, y: yZeroOut });
-      }
-      ptsIn.unshift({ x: 0, y: yZeroIn });
-      ptsOut.unshift({ x: 0, y: yZeroOut });
+    const firstX = ((visible[0].ts - viewStart) / windowMs) * svgW;
+    const lead = firstX > 0.5 ? (firstX > 6 ? 2 : 1) : 0;
+    const lastVisX = ((visible[visLen - 1].ts - viewStart) / windowMs) * svgW;
+    const tail = lastVisX < svgW - 0.5 ? 1 : 0;
+    count = lead + visLen + tail;
+    if (count > buf.cap) {
+      ensureSplineScratch(netState, count);
     }
-    const lastIn = ptsIn[ptsIn.length - 1];
-    const lastOut = ptsOut[ptsOut.length - 1];
-    if (lastIn.x < svgW - 0.5) {
-      ptsIn.push({ x: svgW, y: lastIn.y });
-      ptsOut.push({ x: svgW, y: lastOut.y });
+    const { xs, ysIn, ysOut } = buf;
+    if (lead >= 1) {
+      xs[0] = 0;
+      ysIn[0] = yZeroIn;
+      ysOut[0] = yZeroOut;
+      if (lead === 2) {
+        xs[1] = firstX - 3;
+        ysIn[1] = yZeroIn;
+        ysOut[1] = yZeroOut;
+      }
+    }
+    for (let i = 0; i < visLen; i++) {
+      const s = visible[i];
+      const idx = lead + i;
+      xs[idx] = ((s.ts - viewStart) / windowMs) * svgW;
+      const inRatio = s.inboundBps / maxRate;
+      const outRatio = s.outboundBps / maxRate;
+      ysIn[idx] = yZeroIn - (inRatio < 1 ? inRatio : 1) * inUsableH;
+      ysOut[idx] = yZeroOut - (outRatio < 1 ? outRatio : 1) * outUsableH;
+    }
+    if (tail === 1) {
+      const lastIdx = lead + visLen - 1;
+      xs[lastIdx + 1] = svgW;
+      ysIn[lastIdx + 1] = ysIn[lastIdx];
+      ysOut[lastIdx + 1] = ysOut[lastIdx];
     }
   }
 
-  const mIn = computeMonotoneTangents(ptsIn);
-  const mOut = computeMonotoneTangents(ptsOut);
-  const pathsIn = buildCubicPaths(ptsIn, mIn, yZeroIn);
-  const pathsOut = buildCubicPaths(ptsOut, mOut, yZeroOut);
+  const { xs, ysIn, ysOut, mIn, mOut, d, dx, parts } = buf;
+  fillMonotoneTangentsArrays(xs, ysIn, count, mIn, d, dx);
+  fillMonotoneTangentsArrays(xs, ysOut, count, mOut, d, dx);
+  const pathsIn = buildCubicPathsArrays(xs, ysIn, count, mIn, yZeroIn, parts);
+  const pathsOut = buildCubicPathsArrays(xs, ysOut, count, mOut, yZeroOut, parts);
 
-  inAreaEl.setAttribute('d', pathsIn.area);
-  outAreaEl.setAttribute('d', pathsOut.area);
-  inLineEl.setAttribute('d', pathsIn.line);
-  outLineEl.setAttribute('d', pathsOut.line);
-  if (inGlowEl) inGlowEl.setAttribute('d', pathsIn.line);
-  if (outGlowEl) outGlowEl.setAttribute('d', pathsOut.line);
+  setAttrCached(attrCache, 'inArea', inAreaEl, 'd', pathsIn.area);
+  setAttrCached(attrCache, 'outArea', outAreaEl, 'd', pathsOut.area);
+  setAttrCached(attrCache, 'inLine', inLineEl, 'd', pathsIn.line);
+  setAttrCached(attrCache, 'outLine', outLineEl, 'd', pathsOut.line);
+  setAttrCached(attrCache, 'inGlow', inGlowEl, 'd', pathsIn.line);
+  setAttrCached(attrCache, 'outGlow', outGlowEl, 'd', pathsOut.line);
 
-  const rightX = Math.max(0, Math.min(svgW, ptsIn[ptsIn.length - 1].x));
-  const dotYIn = evalMonotoneYAtX(ptsIn, mIn, rightX);
-  const dotYOut = evalMonotoneYAtX(ptsOut, mOut, rightX);
+  const rightX = Math.max(0, Math.min(svgW, xs[count - 1]));
+  const dotYIn = evalMonotoneYAtXArrays(xs, ysIn, count, mIn, rightX);
+  const dotYOut = evalMonotoneYAtXArrays(xs, ysOut, count, mOut, rightX);
 
   if (inDotEl) {
-    inDotEl.style.opacity = '1';
-    inDotEl.style.left = `${(rightX / svgW) * 100}%`;
-    inDotEl.style.top = `${(dotYIn / svgH) * 100}%`;
+    setStyleProp(inDotEl, 'opacity', '1');
+    setStyleProp(inDotEl, 'left', `${(rightX / svgW) * 100}%`);
+    setStyleProp(inDotEl, 'top', `${(dotYIn / svgH) * 100}%`);
   }
   if (outDotEl) {
-    outDotEl.style.opacity = '1';
-    outDotEl.style.left = `${(rightX / svgW) * 100}%`;
-    outDotEl.style.top = `${(dotYOut / svgH) * 100}%`;
+    setStyleProp(outDotEl, 'opacity', '1');
+    setStyleProp(outDotEl, 'left', `${(rightX / svgW) * 100}%`);
+    setStyleProp(outDotEl, 'top', `${(dotYOut / svgH) * 100}%`);
   }
 
   if (netState.hoverRatio !== null) {
@@ -452,23 +631,21 @@ function renderSmoothNetFrame(cfg, netState, nowPerf) {
     if (nearest && crossEl) {
       const hx = ((nearest.ts - viewStart) / windowMs) * svgW;
       if (hx >= 0 && hx <= svgW) {
-        crossEl.style.display = 'block';
-        crossEl.style.left = `${(hx / svgW) * 100}%`;
+        setStyleProp(crossEl, 'display', 'block');
+        setStyleProp(crossEl, 'left', `${(hx / svgW) * 100}%`);
       } else {
-        crossEl.style.display = 'none';
+        setStyleProp(crossEl, 'display', 'none');
       }
-      if (peakEl) {
-        peakEl.textContent = `In ${formatRate(nearest.inboundBps)} • Out ${formatRate(nearest.outboundBps)}`;
-      }
-      setText(ids.inVal, formatRate(nearest.inboundBps));
-      setText(ids.outVal, formatRate(nearest.outboundBps));
+      setElText(peakEl, `In ${formatRate(nearest.inboundBps)} • Out ${formatRate(nearest.outboundBps)}`);
+      setElText(inValEl, formatRate(nearest.inboundBps));
+      setElText(outValEl, formatRate(nearest.outboundBps));
     }
   } else {
-    if (crossEl) crossEl.style.display = 'none';
+    setStyleProp(crossEl, 'display', 'none');
     const latest = samples[samples.length - 1];
-    setText(ids.inVal, formatRate(latest.inboundBps));
-    setText(ids.outVal, formatRate(latest.outboundBps));
-    if (peakEl) peakEl.textContent = `Peak ${formatRate(rawPeak)}`;
+    setElText(inValEl, formatRate(latest.inboundBps));
+    setElText(outValEl, formatRate(latest.outboundBps));
+    setElText(peakEl, `Peak ${formatRate(rawPeak)}`);
   }
 
   return true;
@@ -511,13 +688,18 @@ function drawNetFrame(nowPerf) {
   const chartEl = ensureOnlineChartDom();
   if (!chartEl) return;
 
-  if (renderSmoothNetFrame(APP_NET_CHART_CFG, _netState, nowPerf)) {
+  if (renderSmoothNetFrame(APP_NET_CHART_CFG, _netState, nowPerf) && _netState.samples.length >= 2) {
     _netState.rafId = requestAnimationFrame(drawNetFrame);
   }
 }
 
 function startNetChartRaf() {
-  if (_netState.rafId === null && _netState.running && state.currentView === 'deployments' && !document.hidden) {
+  if (!_netState.running || state.currentView !== 'deployments' || document.hidden) return;
+  if (_netState.samples.length < 2) {
+    drawNetFrame(typeof performance !== 'undefined' ? performance.now() : 0);
+    return;
+  }
+  if (_netState.rafId === null) {
     _netState.rafId = requestAnimationFrame(drawNetFrame);
   }
 }
@@ -682,6 +864,8 @@ function resetAppUsageCards(projectId = null, entityKey = null) {
   _netState.displayMaxRate = 1024;
   _netState.hoverRatio = null;
   _netState.domMode = null;
+  _netState._chartEl = null;
+  _netState._els = null;
 
   setText('usage-cpu-val', '0.0%');
   setMeterWidth('usage-cpu-bar', 0);
@@ -734,4 +918,4 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-export { loadAppUsageCards, resetAppUsageCards, formatBytesShort, formatRate, setText, computeMonotoneTangents, buildCubicPaths, evalMonotoneYAtX, syncPerfOffset, renderSmoothNetFrame };
+export { loadAppUsageCards, resetAppUsageCards, formatBytesShort, formatRate, setText, setElText, computeMonotoneTangents, buildCubicPaths, evalMonotoneYAtX, syncPerfOffset, renderSmoothNetFrame };

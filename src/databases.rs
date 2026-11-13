@@ -42,6 +42,18 @@ pub struct ManagedDatabase {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct DatabaseOverviewSummary {
+    pub id: i64,
+    pub name: String,
+    pub port: u16,
+    pub domain: String,
+    pub status: String,
+    pub container_id: Option<String>,
+    pub data_dir: String,
+    pub linked_project_id: Option<i64>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateDatabaseInput {
     pub name: String,
@@ -199,6 +211,32 @@ impl Databases {
 
     pub fn list(&self) -> Result<Vec<ManagedDatabase>, String> {
         self.query_databases("ORDER BY d.id DESC", rusqlite::params![])
+    }
+
+    pub fn list_overview_summaries(&self) -> Result<Vec<DatabaseOverviewSummary>, String> {
+        let conn = self.db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT d.id, d.name, d.port, d.domain, d.status, d.container_id, d.data_dir, d.linked_project_id
+                 FROM databases d
+                 ORDER BY d.id DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![], |r| {
+                Ok(DatabaseOverviewSummary {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    port: r.get::<_, i64>(2)? as u16,
+                    domain: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    status: r.get(4)?,
+                    container_id: r.get(5)?,
+                    data_dir: r.get(6)?,
+                    linked_project_id: r.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(rows.flatten().collect())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<ManagedDatabase>, String> {

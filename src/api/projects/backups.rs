@@ -164,7 +164,10 @@ pub(crate) async fn create_backup_handler(
             base_dir.clone()
         };
         if src_dir.exists() {
-            total_size += copy_backup_files(&src_dir, &backup_dir.join("files"));
+            let dst_dir = backup_dir.join("files");
+            total_size += tokio::task::spawn_blocking(move || copy_backup_files(&src_dir, &dst_dir))
+                .await
+                .unwrap_or(0);
         }
     }
 

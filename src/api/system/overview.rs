@@ -157,48 +157,126 @@ pub(crate) fn compute_project_disk_formatted(p: &Project, cwd: &std::path::Path)
     (bytes, format_resource_bytes(bytes))
 }
 
-pub(crate) fn compute_database_disk_formatted(
-    db: &crate::databases::ManagedDatabase,
+static CACHED_CWD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+static CACHED_EXE: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+fn cached_cwd() -> &'static std::path::Path {
+    CACHED_CWD
+        .get_or_init(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .as_path()
+}
+
+fn cached_exe() -> Option<&'static std::path::Path> {
+    CACHED_EXE.get_or_init(|| std::env::current_exe().ok()).as_deref()
+}
+
+fn format_usage_metrics(
+    is_running: bool,
+    raw_cpu: f32,
+    mem: u64,
+    num_cores: f32,
+    total_vps_mem: u64,
+) -> (f32, f32, String) {
+    if !is_running {
+        return (0.0, 0.0, "0 MB".to_string());
+    }
+    let cpu = ((raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0;
+    let mem_pct = ((mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0;
+    let mem_fmt = if mem > 0 {
+        format_resource_bytes(mem)
+    } else {
+        "< 1 MB".to_string()
+    };
+    (cpu, mem_pct, mem_fmt)
+}
+
+pub(crate) fn compute_database_disk_formatted_dir(
+    data_dir: &str,
     cwd: &std::path::Path,
 ) -> (u64, String) {
-    let bytes = resolve_workspace_path(&db.data_dir, cwd)
+    let bytes = resolve_workspace_path(data_dir, cwd)
         .as_deref()
         .map(crate::monitor::get_path_disk_size)
         .unwrap_or(0);
     (bytes, format_resource_bytes(bytes))
 }
 
-pub(crate) fn fetch_overview_deployment(
-    conn: &rusqlite::Connection,
-    status_filter: &str,
-    project_id: i64,
+pub(crate) fn compute_database_disk_formatted(
+    db: &crate::databases::ManagedDatabase,
+    cwd: &std::path::Path,
+) -> (u64, String) {
+    compute_database_disk_formatted_dir(&db.data_dir, cwd)
+}
+
+fn row_to_overview_deployment(
+    r: &rusqlite::Row<'_>,
     project_name: &str,
-) -> Option<crate::deployer::Deployment> {
-    let sql = format!(
+) -> rusqlite::Result<crate::deployer::Deployment> {
+    Ok(crate::deployer::Deployment {
+        id: r.get(0)?,
+        project_id: r.get(1)?,
+        project_name: Some(project_name.to_string()),
+        release_id: r.get(2)?,
+        from_release_id: r.get(3)?,
+        kind: r.get(4)?,
+        status: r.get(5)?,
+        stage: r.get(6)?,
+        sha: r.get(7)?,
+        trigger: r.get(8)?,
+        actor: r.get(9)?,
+        error: r.get(10)?,
+        started_at: r.get(11)?,
+        finished_at: r.get(12)?,
+    })
+}
+
+fn load_overview_deployments(
+    conn: &rusqlite::Connection,
+    projects: &[Project],
+) -> (
+    std::collections::HashMap<i64, crate::deployer::Deployment>,
+    std::collections::HashMap<i64, crate::deployer::Deployment>,
+) {
+    let mut last_success_map = std::collections::HashMap::with_capacity(projects.len());
+    let mut active_map = std::collections::HashMap::new();
+    if projects.is_empty() {
+        return (last_success_map, active_map);
+    }
+
+    let proj_names: std::collections::HashMap<i64, &str> =
+        projects.iter().map(|p| (p.id, p.name.as_str())).collect();
+
+    if let Ok(mut active_stmt) = conn.prepare_cached(
         "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at \
-         FROM deployments WHERE project_id = ? AND {} ORDER BY id DESC LIMIT 1",
-        status_filter
-    );
-    conn.query_row(
-        &sql,
-        rusqlite::params![project_id],
-        |r| Ok(crate::deployer::Deployment {
-            id: r.get(0)?,
-            project_id: r.get(1)?,
-            project_name: Some(project_name.to_string()),
-            release_id: r.get(2)?,
-            from_release_id: r.get(3)?,
-            kind: r.get(4)?,
-            status: r.get(5)?,
-            stage: r.get(6)?,
-            sha: r.get(7)?,
-            trigger: r.get(8)?,
-            actor: r.get(9)?,
-            error: r.get(10)?,
-            started_at: r.get(11)?,
-            finished_at: r.get(12)?,
-        }),
-    ).ok()
+         FROM deployments WHERE status IN ('running', 'pending') ORDER BY id DESC",
+    ) {
+        if let Ok(rows) = active_stmt.query_map([], |r| {
+            let pid: i64 = r.get(1)?;
+            let pname = proj_names.get(&pid).copied().unwrap_or("");
+            row_to_overview_deployment(r, pname)
+        }) {
+            for dep in rows.flatten() {
+                if proj_names.contains_key(&dep.project_id) {
+                    active_map.entry(dep.project_id).or_insert(dep);
+                }
+            }
+        }
+    }
+
+    if let Ok(mut success_stmt) = conn.prepare_cached(
+        "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at \
+         FROM deployments WHERE project_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1",
+    ) {
+        for p in projects {
+            if let Ok(dep) = success_stmt.query_row(rusqlite::params![p.id], |r| {
+                row_to_overview_deployment(r, &p.name)
+            }) {
+                last_success_map.insert(p.id, dep);
+            }
+        }
+    }
+
+    (last_success_map, active_map)
 }
 
 pub(crate) async fn overview_handler(
@@ -221,14 +299,14 @@ pub(crate) async fn overview_handler(
     let total_vps_disk = monitor.disk.as_ref().map(|d| d.total).unwrap_or(1).max(1);
     let num_cores = monitor.cpu.cores.max(1) as f32;
     let total_vps_cpu = monitor.cpu.pct as f32;
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cwd = cached_cwd();
 
     let panel_pid = std::process::id();
     // Isolate panel daemon metrics to the WebDep process itself so child workloads are never double-counted into the panel
     let (panel_raw_cpu, panel_mem) = state.monitor.get_process_metrics(panel_pid);
     let mut pids_to_query = Vec::new();
 
-    let mut proj_effective_pids = std::collections::HashMap::new();
+    let mut proj_effective_pids = std::collections::HashMap::with_capacity(projs.len());
     for p in &projs {
         if let Some(pid) = p.app_pid {
             if crate::runtime::process::is_pid_alive(pid) {
@@ -239,7 +317,7 @@ pub(crate) async fn overview_handler(
         }
         if p.app_status == "running" {
             if let Some(port) = p.port {
-                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port(port).first() {
+                if let Some(&port_pid) = crate::runtime::Runtime::find_pids_on_port_cached(port).first() {
                     if crate::runtime::process::is_pid_alive(port_pid) {
                         proj_effective_pids.insert(p.id, port_pid);
                         pids_to_query.push(port_pid);
@@ -249,46 +327,46 @@ pub(crate) async fn overview_handler(
         }
     }
 
-    let dbs = if user.has_any_power(&["databases", "databases_manage"]) {
-        let mut raw = state.databases.list().unwrap_or_default();
+    let db_entries = if user.has_any_power(&["databases", "databases_manage"]) {
+        let mut raw = state.databases.list_overview_summaries().unwrap_or_default();
         let can_unlinked = user.all_projects || user.has_power("databases_manage");
         raw.retain(|db| {
             db.linked_project_id
                 .map(|pid| user.can_access_project(pid))
                 .unwrap_or(can_unlinked)
         });
-        raw
+        let mut entries = Vec::with_capacity(raw.len());
+        for db in raw {
+            let mut d_pid = None;
+            if let Some(ref cid) = db.container_id {
+                if let Some(p_str) = cid.strip_prefix("pid-") {
+                    d_pid = p_str.parse::<u32>().ok();
+                }
+            }
+            if d_pid.is_none() {
+                let data_dir = std::path::PathBuf::from(&db.data_dir).join("data");
+                d_pid = crate::databases::read_pg_pid(&data_dir);
+            }
+            if db.status == "running" {
+                if let Some(pid) = d_pid {
+                    pids_to_query.push(pid);
+                }
+            }
+            entries.push((db, d_pid));
+        }
+        entries
     } else {
         Vec::new()
     };
-    let mut db_pids = Vec::with_capacity(dbs.len());
-    for db in &dbs {
-        let mut d_pid = None;
-        if let Some(ref cid) = db.container_id {
-            if let Some(p_str) = cid.strip_prefix("pid-") {
-                d_pid = p_str.parse::<u32>().ok();
-            }
-        }
-        if d_pid.is_none() {
-            let data_dir = std::path::PathBuf::from(&db.data_dir).join("data");
-            d_pid = crate::databases::read_pg_pid(&data_dir);
-        }
-        if db.status == "running" {
-            if let Some(pid) = d_pid {
-                pids_to_query.push(pid);
-            }
-        }
-        db_pids.push((db.id, d_pid));
-    }
 
     let proc_metrics = state.monitor.get_tree_metrics(&pids_to_query);
-    let mut resources = Vec::new();
+    let mut resources = Vec::with_capacity(1 + projs.len() + db_entries.len());
 
     // 1. WebDep Panel daemon self metrics
     let panel_cpu = ((panel_raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0;
     let panel_mem_pct = ((panel_mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 
-    let panel_exe_size = std::env::current_exe().ok().map(|p| crate::monitor::get_path_disk_size(&p)).unwrap_or(0);
+    let panel_exe_size = cached_exe().map(crate::monitor::get_path_disk_size).unwrap_or(0);
     let panel_db_size = crate::monitor::get_path_disk_size(&cwd.join("data").join("webdep.sqlite"))
         .saturating_add(crate::monitor::get_path_disk_size(&cwd.join("data").join("webdep.sqlite-wal")));
     let panel_disk = panel_exe_size.saturating_add(panel_db_size);
@@ -316,82 +394,48 @@ pub(crate) async fn overview_handler(
         start_cmd: None,
     });
 
-    let mut items = Vec::new();
+    let (mut last_success_map, mut active_map) = if projs.is_empty() {
+        (std::collections::HashMap::new(), std::collections::HashMap::new())
+    } else {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        load_overview_deployments(&conn, &projs)
+    };
+
+    let mut items = Vec::with_capacity(projs.len());
 
     for p in projs {
-        let active_pid = proj_effective_pids.get(&p.id).copied().or(p.app_pid);
-        let is_running = (p.app_status == "running" && active_pid.is_some())
-            || (active_pid.map(crate::runtime::process::is_pid_alive).unwrap_or(false));
-        let (raw_cpu, mem) = if is_running {
-            if let Some(pid) = active_pid {
-                proc_metrics.get(&pid).copied().unwrap_or((0.0, 0))
-            } else {
-                (0.0, 0)
-            }
+        let verified_pid = proj_effective_pids.get(&p.id).copied();
+        let active_pid = verified_pid.or(p.app_pid);
+        let is_running = verified_pid.is_some();
+        let (raw_cpu, mem) = if let Some(pid) = verified_pid {
+            proc_metrics.get(&pid).copied().unwrap_or((0.0, 0))
         } else {
             (0.0, 0)
         };
-        let cpu = if is_running {
-            ((raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0
-        } else {
-            0.0
-        };
-        let mem_pct = if is_running {
-            ((mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0
-        } else {
-            0.0
-        };
-        let mem_fmt = if is_running && mem > 0 {
-            format_resource_bytes(mem)
-        } else if is_running {
-            "< 1 MB".to_string()
-        } else {
-            "0 MB".to_string()
-        };
+        let (cpu, mem_pct, mem_fmt) =
+            format_usage_metrics(is_running, raw_cpu, mem, num_cores, total_vps_mem);
 
-        let (disk_bytes, disk_fmt) = compute_project_disk_formatted(&p, &cwd);
+        let (disk_bytes, disk_fmt) = compute_project_disk_formatted(&p, cwd);
         let disk_pct = ((disk_bytes as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 
-        let (last_success, active) = {
-            let conn = state.db.lock().unwrap();
-            (
-                fetch_overview_deployment(&conn, "status = 'success'", p.id, &p.name),
-                fetch_overview_deployment(&conn, "status IN ('running', 'pending')", p.id, &p.name),
-            )
-        };
-
-        items.push(OverviewProjectItem {
-            app: OverviewAppStatus {
-                running: is_running,
-                pid: active_pid,
-                started_at: p.app_started_at,
-                cpu_pct: if is_running { Some(cpu) } else { None },
-                memory_bytes: if is_running { Some(mem) } else { None },
-                memory_formatted: if is_running { Some(mem_fmt.clone()) } else { None },
-                disk_bytes: Some(disk_bytes),
-                disk_formatted: Some(disk_fmt.clone()),
-            },
-            project: p.clone(),
-            active,
-            behind: Some(0),
-            ahead: Some(0),
-            last_success,
-        });
+        let last_success = last_success_map.remove(&p.id);
+        let active = active_map.remove(&p.id);
 
         let kind = if p.project_kind == "service" { "service" } else { "website" };
+        let res_status = if is_running { "running".to_string() } else { p.app_status.clone() };
         resources.push(ResourceItem {
             id: format!("{}-{}", kind, p.id),
             name: p.name.clone(),
             kind: kind.to_string(),
-            status: if is_running { "running".to_string() } else { p.app_status.clone() },
+            status: res_status,
             pid: active_pid,
             port: p.port,
             cpu_pct: cpu,
             memory_bytes: mem,
-            memory_formatted: mem_fmt,
+            memory_formatted: mem_fmt.clone(),
             memory_pct: mem_pct,
             disk_bytes,
-            disk_formatted: disk_fmt,
+            disk_formatted: disk_fmt.clone(),
             disk_pct,
             project_id: Some(p.id),
             database_id: None,
@@ -400,46 +444,44 @@ pub(crate) async fn overview_handler(
             project_type: Some(p.project_type.clone()),
             start_cmd: Some(p.start_cmd.clone()),
         });
+
+        items.push(OverviewProjectItem {
+            app: OverviewAppStatus {
+                running: is_running,
+                pid: active_pid,
+                started_at: p.app_started_at,
+                cpu_pct: if is_running { Some(cpu) } else { None },
+                memory_bytes: if is_running { Some(mem) } else { None },
+                memory_formatted: if is_running { Some(mem_fmt) } else { None },
+                disk_bytes: Some(disk_bytes),
+                disk_formatted: Some(disk_fmt),
+            },
+            project: p,
+            active,
+            behind: Some(0),
+            ahead: Some(0),
+            last_success,
+        });
     }
 
-    for db in dbs {
-        let d_pid = db_pids.iter().find(|(id, _)| *id == db.id).and_then(|(_, p)| *p);
+    for (db, d_pid) in db_entries {
         let is_running = db.status == "running";
         let (raw_cpu, mem) = if is_running {
-            if let Some(pid) = d_pid {
-                proc_metrics.get(&pid).copied().unwrap_or((0.0, 0))
-            } else {
-                (0.0, 0)
-            }
+            d_pid.and_then(|pid| proc_metrics.get(&pid).copied()).unwrap_or((0.0, 0))
         } else {
             (0.0, 0)
         };
-        let cpu = if is_running {
-            ((raw_cpu / num_cores).min(100.0) * 10.0).round() / 10.0
-        } else {
-            0.0
-        };
-        let mem_pct = if is_running {
-            ((mem as f64 / total_vps_mem as f64 * 100.0) as f32 * 10.0).round() / 10.0
-        } else {
-            0.0
-        };
-        let mem_fmt = if is_running && mem > 0 {
-            format_resource_bytes(mem)
-        } else if is_running {
-            "< 1 MB".to_string()
-        } else {
-            "0 MB".to_string()
-        };
+        let (cpu, mem_pct, mem_fmt) =
+            format_usage_metrics(is_running, raw_cpu, mem, num_cores, total_vps_mem);
 
-        let (db_disk, db_disk_fmt) = compute_database_disk_formatted(&db, &cwd);
+        let (db_disk, db_disk_fmt) = compute_database_disk_formatted_dir(&db.data_dir, cwd);
         let db_disk_pct = ((db_disk as f64 / total_vps_disk as f64 * 100.0) as f32 * 10.0).round() / 10.0;
 
         resources.push(ResourceItem {
             id: format!("database-{}", db.id),
-            name: db.name.clone(),
+            name: db.name,
             kind: "database".to_string(),
-            status: db.status.clone(),
+            status: db.status,
             pid: d_pid,
             port: Some(db.port),
             cpu_pct: cpu,
@@ -452,7 +494,7 @@ pub(crate) async fn overview_handler(
             project_id: None,
             database_id: Some(db.id),
             commit_sha: None,
-            domain: if db.domain.is_empty() { None } else { Some(db.domain.clone()) },
+            domain: if db.domain.is_empty() { None } else { Some(db.domain) },
             project_type: Some("postgres".to_string()),
             start_cmd: None,
         });
@@ -625,5 +667,72 @@ pub(crate) async fn monitor_handler(
 
     cached_json_response(&state.cache, cache_key, &val, std::time::Duration::from_secs(2))
         .map_err(|c| (c, "Serialization error".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_overview_deployments_batch_picks_latest_per_status() {
+        let dir = std::env::temp_dir().join(format!("webdep-ov-test-{}", crate::db::now()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = crate::db::open_db(&dir).unwrap();
+        let vault = std::sync::Arc::new(crate::vault::Vault::new(&dir).unwrap());
+        let projects_mgr = crate::projects::Projects::new(pool.clone(), vault);
+
+        let mut p1: Project = serde_json::from_str(
+            r#"{"name":"Site One","slug":"site-one","repo_url":"https://github.com/o/1"}"#,
+        )
+        .unwrap();
+        p1.deploy_dir = dir.to_string_lossy().to_string();
+        let id1 = projects_mgr.create(&p1).unwrap();
+        let p1 = projects_mgr.get(id1).unwrap().unwrap();
+
+        let mut p2: Project = serde_json::from_str(
+            r#"{"name":"Site Two","slug":"site-two","repo_url":"https://github.com/o/2"}"#,
+        )
+        .unwrap();
+        p2.deploy_dir = dir.to_string_lossy().to_string();
+        let id2 = projects_mgr.create(&p2).unwrap();
+        let p2 = projects_mgr.get(id2).unwrap().unwrap();
+
+        {
+            let conn = pool.lock().unwrap();
+            conn.execute(
+                "INSERT INTO deployments (project_id, kind, status, stage, sha, trigger, actor, started_at)
+                 VALUES (?, 'deploy', 'success', 'done', 'sha1', 'manual', 'admin', 100)",
+                rusqlite::params![id1],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO deployments (project_id, kind, status, stage, sha, trigger, actor, started_at)
+                 VALUES (?, 'deploy', 'success', 'done', 'sha2', 'manual', 'admin', 200)",
+                rusqlite::params![id1],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO deployments (project_id, kind, status, stage, sha, trigger, actor, started_at)
+                 VALUES (?, 'deploy', 'running', 'build', 'sha3', 'manual', 'admin', 300)",
+                rusqlite::params![id1],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO deployments (project_id, kind, status, stage, sha, trigger, actor, started_at)
+                 VALUES (?, 'deploy', 'failed', 'error', 'sha4', 'manual', 'admin', 400)",
+                rusqlite::params![id2],
+            )
+            .unwrap();
+
+            let (succ, act) = load_overview_deployments(&conn, &[p1, p2]);
+            assert_eq!(succ.get(&id1).and_then(|d| d.sha.as_deref()), Some("sha2"));
+            assert_eq!(succ.get(&id1).and_then(|d| d.project_name.as_deref()), Some("Site One"));
+            assert_eq!(act.get(&id1).and_then(|d| d.sha.as_deref()), Some("sha3"));
+            assert!(succ.get(&id2).is_none());
+            assert!(act.get(&id2).is_none());
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 

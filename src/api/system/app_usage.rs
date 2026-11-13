@@ -7,7 +7,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
-use rusqlite::params;
 use serde::Serialize;
 
 use super::overview::format_resource_bytes;
@@ -95,10 +94,12 @@ fn collect_project_seed_pids(
         }
     }
 
-    if let Some(p) = port {
-        for port_pid in Runtime::find_pids_on_port(p) {
-            if port_pid > 1 && port_pid != self_pid {
-                seeds.insert(port_pid);
+    if app_status == "running" || is_tracked_running || !seeds.is_empty() {
+        if let Some(p) = port {
+            for port_pid in Runtime::find_pids_on_port_cached(p) {
+                if port_pid > 1 && port_pid != self_pid {
+                    seeds.insert(port_pid);
+                }
             }
         }
     }
@@ -242,20 +243,21 @@ pub(crate) async fn project_usage_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    let db_pid: Option<i64> = {
-        let conn = state.db.lock().unwrap();
-        conn.query_row(
-            "SELECT app_pid FROM projects WHERE id = ?",
-            params![id],
-            |r| r.get::<_, Option<i64>>(0),
-        )
-        .ok()
-        .flatten()
-    };
-
-    let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
+    static CACHED_CWD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let cwd = CACHED_CWD
+        .get_or_init(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
+        .as_path();
     let deploy_dir = Path::new(&p.deploy_dir);
-    let seed_pids = collect_project_seed_pids(&state, p.id, &p.slug, &p.app_status, deploy_dir, p.port, db_pid, &cwd);
+    let seed_pids = collect_project_seed_pids(
+        &state,
+        p.id,
+        &p.slug,
+        &p.app_status,
+        deploy_dir,
+        p.port,
+        p.app_pid.map(i64::from),
+        cwd,
+    );
 
     // Include workspace deploy directory plus container persistent data outside deploy_dir.
     let mut disk_dirs = vec![deploy_dir.to_path_buf()];
@@ -312,7 +314,7 @@ pub(crate) async fn database_usage_handler(
     }
 
     if db.status == "running" {
-        for port_pid in Runtime::find_pids_on_port(db.port) {
+        for port_pid in Runtime::find_pids_on_port_cached(db.port) {
             if port_pid > 0 && crate::runtime::is_pid_alive(port_pid) {
                 seeds.insert(port_pid);
             }

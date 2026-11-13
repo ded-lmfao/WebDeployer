@@ -42,58 +42,65 @@ pub(crate) async fn security_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let path = req.uri().path().to_string();
-    let method = req.method().clone();
-    let is_api = path.starts_with("/api/");
     let is_mutating = matches!(
-        method,
+        *req.method(),
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
+    let (is_api, invalidate_cache, invalidate_sessions) = {
+        let path = req.uri().path();
+        let is_api = path.starts_with("/api/");
+        let invalidate_cache = is_api && is_mutating && path != "/api/auth/presence";
+        let invalidate_sessions = invalidate_cache
+            && (path.starts_with("/api/users")
+                || (path.starts_with("/api/auth/") && path != "/api/auth/presence"));
 
-    if is_api {
-        let is_public_auth = path == "/api/auth/login"
-            || path == "/api/auth/2fa/verify-login"
-            || path == "/api/auth/passkeys/login/start"
-            || path == "/api/auth/passkeys/login/finish"
-            || path.starts_with("/api/webhooks/github/");
+        if is_api {
+            let is_public_auth = path == "/api/auth/login"
+                || path == "/api/auth/2fa/verify-login"
+                || path == "/api/auth/passkeys/login/start"
+                || path == "/api/auth/passkeys/login/finish"
+                || path.starts_with("/api/webhooks/github/");
 
-        if !is_public_auth {
-            let sid_opt = extract_session_id(req.headers());
-            let session_pair = sid_opt.as_deref().and_then(|sid| state.auth.get_session(sid));
+            if !is_public_auth {
+                let sid_opt = extract_session_id(req.headers());
+                let session_pair = sid_opt.as_deref().and_then(|sid| state.auth.get_session(sid));
 
-            let Some((session, _user)) = session_pair else {
-                let mut res = (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({ "error": "Unauthorized. Please sign in." })),
-                )
-                    .into_response();
-                attach_security_headers(&mut res, true);
-                return res;
-            };
-
-            if is_mutating && path != "/api/auth/logout" {
-                let csrf_hdr = req
-                    .headers()
-                    .get("x-csrf-token")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("");
-                if !constant_time_eq(csrf_hdr, &session.csrf_token) {
+                let Some((session, _user)) = session_pair else {
                     let mut res = (
-                        StatusCode::FORBIDDEN,
-                        Json(serde_json::json!({ "error": "Invalid or missing CSRF security token. Please refresh the page." })),
+                        StatusCode::UNAUTHORIZED,
+                        Json(serde_json::json!({ "error": "Unauthorized. Please sign in." })),
                     )
                         .into_response();
                     attach_security_headers(&mut res, true);
                     return res;
+                };
+
+                if is_mutating && path != "/api/auth/logout" {
+                    let csrf_hdr = req
+                        .headers()
+                        .get("x-csrf-token")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if !constant_time_eq(csrf_hdr, &session.csrf_token) {
+                        let mut res = (
+                            StatusCode::FORBIDDEN,
+                            Json(serde_json::json!({ "error": "Invalid or missing CSRF security token. Please refresh the page." })),
+                        )
+                            .into_response();
+                        attach_security_headers(&mut res, true);
+                        return res;
+                    }
                 }
             }
         }
-    }
+
+        (is_api, invalidate_cache, invalidate_sessions)
+    };
 
     let mut res = next.run(req).await;
-    if is_api && is_mutating && path != "/api/auth/presence" {
+    if invalidate_cache {
         state.cache.invalidate_all();
-        if path.starts_with("/api/users") || (path.starts_with("/api/auth/") && path != "/api/auth/presence") {
+        if invalidate_sessions {
             state.auth.invalidate_sessions();
         }
     }

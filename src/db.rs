@@ -158,6 +158,8 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             finished_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_deployments_proj ON deployments(project_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_deployments_proj_status ON deployments(project_id, status, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_deployments_active ON deployments(status, id DESC) WHERE status IN ('running', 'pending');
 
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,7 +220,9 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_ts_id ON audit(ts DESC, id DESC);
         CREATE INDEX IF NOT EXISTS idx_audit_proj ON audit(project_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_proj_ts_id ON audit(project_id, ts DESC, id DESC);
 
         CREATE TABLE IF NOT EXISTS project_keys (
             project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -526,6 +530,30 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
             .unwrap();
         assert_eq!(remaining, 5);
+        drop(conn);
+        drop(pool);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_audit_query_plan_avoids_temp_btree() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-db-eqp-{}", now()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let pool = open_db(&temp_dir).unwrap();
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT id, project_id, ts, actor, action, target, detail, ip
+                 FROM audit
+                 WHERE project_id = 1 OR LOWER(COALESCE(target, '')) = LOWER('Project 1')
+                 ORDER BY ts DESC, id DESC LIMIT 500",
+            )
+            .unwrap();
+        let plans: Vec<String> = stmt.query_map([], |r| r.get(3)).unwrap().flatten().collect();
+        let joined = plans.join(" | ");
+        assert!(joined.contains("idx_audit_ts_id"), "expected idx_audit_ts_id in {}", joined);
+        assert!(!joined.contains("TEMP B-TREE"), "unexpected temp sort in {}", joined);
+        drop(stmt);
         drop(conn);
         drop(pool);
         std::fs::remove_dir_all(&temp_dir).ok();

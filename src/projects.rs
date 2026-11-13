@@ -20,7 +20,7 @@ impl Projects {
     pub fn list(&self) -> Result<Vec<Project>, rusqlite::Error> {
         let conn = self.db.lock().unwrap();
         let query = format!("SELECT {} FROM projects ORDER BY id DESC", SELECT_PROJECT_FIELDS);
-        let mut stmt = conn.prepare(&query)?;
+        let mut stmt = conn.prepare_cached(&query)?;
 
         let rows = stmt.query_map([], row_to_project)?;
 

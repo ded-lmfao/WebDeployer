@@ -121,6 +121,14 @@ pub(crate) fn to_database_response(
     }
 }
 
+static CACHED_CWD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+fn cached_cwd() -> &'static std::path::Path {
+    CACHED_CWD
+        .get_or_init(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .as_path()
+}
+
 pub(crate) async fn list_databases_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -133,14 +141,14 @@ pub(crate) async fn list_databases_handler(
         return Ok(res);
     }
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cwd = cached_cwd();
     let list: Vec<DatabaseResponse> = state
         .databases
         .list()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .into_iter()
         .filter(|db| can_access_db(&user, db))
-        .map(|db| to_database_response(db, can_creds, &cwd))
+        .map(|db| to_database_response(db, can_creds, cwd))
         .collect();
 
     cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
@@ -157,8 +165,7 @@ pub(crate) async fn get_database_handler(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Database not found".to_string()))?;
     let user = verify_db_access(&state, &headers, &["databases", "databases_manage"], &db)?;
     let can_creds = user.has_any_power(&["databases_manage", "env"]);
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    Ok(Json(to_database_response(db, can_creds, &cwd)))
+    Ok(Json(to_database_response(db, can_creds, cached_cwd())))
 }
 
 pub(crate) async fn create_database_handler(

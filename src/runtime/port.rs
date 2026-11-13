@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use super::Runtime;
+
+static PORT_PIDS_CACHE: OnceLock<Mutex<HashMap<u16, (Instant, Vec<u32>)>>> = OnceLock::new();
 
 impl Runtime {
     /// Automatically open `port/tcp` in UFW and iptables on Linux so newly created servers/websites
@@ -94,6 +97,31 @@ impl Runtime {
         }
 
         pids.into_iter().collect()
+    }
+
+    /// Cached port-to-PID probe (1500ms TTL) for high-frequency read-only telemetry/overview handlers
+    /// so polling does not repeatedly spawn `netstat`/`lsof`.
+    pub fn find_pids_on_port_cached(port: u16) -> Vec<u32> {
+        if port == 0 {
+            return Vec::new();
+        }
+        let ttl = Duration::from_millis(1500);
+        let cache = PORT_PIDS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(guard) = cache.lock() {
+            if let Some((ts, pids)) = guard.get(&port) {
+                if ts.elapsed() < ttl {
+                    return pids.clone();
+                }
+            }
+        }
+        let pids = Self::find_pids_on_port(port);
+        if let Ok(mut guard) = cache.lock() {
+            if guard.len() > 128 {
+                guard.retain(|_, (ts, _)| ts.elapsed() < ttl);
+            }
+            guard.insert(port, (Instant::now(), pids.clone()));
+        }
+        pids
     }
 
 

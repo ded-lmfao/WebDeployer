@@ -1,6 +1,6 @@
 use rusqlite::params;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::db::DbPool;
@@ -24,7 +24,7 @@ pub struct Auth {
     pub(crate) mfa_challenges: Mutex<HashMap<String, (i64, u64)>>,
     pub(crate) passkey_challenges: Mutex<HashMap<String, (Option<i64>, String, u64)>>,
     pub(crate) failures: Mutex<HashMap<String, FailureRecord>>,
-    pub(crate) session_cache: Mutex<HashMap<String, (Session, User, u64)>>,
+    pub(crate) session_cache: RwLock<HashMap<String, (Session, User, u64)>>,
     pub(crate) session_presence: Mutex<HashMap<String, (i64, u64, bool)>>,
 }
 
@@ -37,7 +37,7 @@ impl Auth {
             mfa_challenges: Mutex::new(HashMap::new()),
             passkey_challenges: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
-            session_cache: Mutex::new(HashMap::new()),
+            session_cache: RwLock::new(HashMap::new()),
             session_presence: Mutex::new(HashMap::new()),
         };
         auth.ensure_admin();
@@ -75,9 +75,16 @@ impl Auth {
     pub fn ensure_session_presence(&self, session_id: &str, user_id: i64) {
         let now_ms = Self::now_millis();
         if let Ok(mut map) = self.session_presence.lock() {
-            map.retain(|_, (_, seen_ms, _)| now_ms.saturating_sub(*seen_ms) <= PRESENCE_TTL_MS);
-            map.entry(session_id.to_string())
-                .or_insert((user_id, now_ms, true));
+            if let Some(entry) = map.get_mut(session_id) {
+                if now_ms.saturating_sub(entry.1) >= 15_000 {
+                    entry.1 = now_ms;
+                }
+                return;
+            }
+            if map.len() > 256 {
+                map.retain(|_, (_, seen_ms, _)| now_ms.saturating_sub(*seen_ms) <= PRESENCE_TTL_MS);
+            }
+            map.insert(session_id.to_string(), (user_id, now_ms, true));
         }
     }
 
@@ -109,7 +116,7 @@ impl Auth {
     }
 
     pub fn invalidate_sessions(&self) {
-        if let Ok(mut cache) = self.session_cache.lock() {
+        if let Ok(mut cache) = self.session_cache.write() {
             cache.clear();
         }
     }
@@ -378,7 +385,7 @@ impl Auth {
         let now_s = Self::now_secs();
 
         // Fast-path: check in-memory session cache (30s TTL)
-        if let Ok(cache) = self.session_cache.lock() {
+        if let Ok(cache) = self.session_cache.read() {
             if let Some((sess, usr, cached_until)) = cache.get(session_id) {
                 if *cached_until > now_s && sess.expires_at > (now_s as i64) && !usr.disabled {
                     self.ensure_session_presence(session_id, usr.id);
@@ -417,7 +424,7 @@ impl Auth {
 
         let valid = res.ok().filter(|(_, u)| !u.disabled)?;
         self.ensure_session_presence(session_id, valid.1.id);
-        if let Ok(mut cache) = self.session_cache.lock() {
+        if let Ok(mut cache) = self.session_cache.write() {
             if cache.len() > 256 {
                 cache.retain(|_, (_, _, exp)| *exp > now_s);
             }
@@ -430,7 +437,7 @@ impl Auth {
     }
 
     pub fn delete_session(&self, session_id: &str) {
-        if let Ok(mut cache) = self.session_cache.lock() {
+        if let Ok(mut cache) = self.session_cache.write() {
             cache.remove(session_id);
         }
         if let Ok(mut map) = self.session_presence.lock() {
@@ -467,7 +474,7 @@ impl Auth {
 
     pub fn purge_expired_sessions(&self) {
         let now_s = Self::now_secs();
-        if let Ok(mut cache) = self.session_cache.lock() {
+        if let Ok(mut cache) = self.session_cache.write() {
             cache.retain(|_, (_, _, exp)| *exp > now_s);
         }
         let conn = self.db.lock().unwrap();
@@ -495,7 +502,7 @@ impl Auth {
                 fails.clear();
             }
         }
-        if let Ok(mut cache) = self.session_cache.lock() {
+        if let Ok(mut cache) = self.session_cache.write() {
             cache.retain(|_, (_, _, exp)| *exp > now_s);
             if cache.len() > 1024 {
                 cache.clear();

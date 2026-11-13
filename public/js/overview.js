@@ -11,6 +11,7 @@ import {
   formatBytesShort,
   formatRate,
   setText,
+  setElText,
   syncPerfOffset,
   renderSmoothNetFrame,
 } from './app_usage.js';
@@ -39,6 +40,10 @@ const _ovNetState = {
   lastDrawPerf: 0,
   lastLiveServerTs: 0,
   hasDrawnInitial: false,
+  _chartEl: null,
+  _domReady: false,
+  _labelEls: null,
+  _mergeBuf: [],
 };
 
 const OV_NET_CHART_CFG = {
@@ -84,9 +89,20 @@ function stopOverviewNetPoller() {
 }
 
 function ensureOverviewNetDom() {
+  if (
+    _ovNetState._domReady &&
+    _ovNetState._chartEl &&
+    _ovNetState._chartEl.isConnected !== false
+  ) {
+    return _ovNetState._chartEl;
+  }
   const chartEl = document.getElementById('overview-net-chart');
   if (!chartEl) return null;
-  if (chartEl.querySelector('#ov-net-in-line')) return chartEl;
+  if (chartEl.querySelector('#ov-net-in-line')) {
+    _ovNetState._chartEl = chartEl;
+    _ovNetState._domReady = true;
+    return chartEl;
+  }
 
   chartEl.innerHTML = `
     <svg class="app-net-svg" viewBox="0 0 ${OV_NET_SVG_W} ${OV_NET_SVG_H}" preserveAspectRatio="none" aria-label="Whole VPS global inbound and outbound network traffic">
@@ -131,7 +147,23 @@ function ensureOverviewNetDom() {
     if (cross) cross.style.display = 'none';
   };
 
+  _ovNetState._chartEl = chartEl;
+  _ovNetState._domReady = true;
   return chartEl;
+}
+
+function getOverviewLabelEls() {
+  let els = _ovNetState._labelEls;
+  if (!els || (els.inValEl && els.inValEl.isConnected === false)) {
+    els = {
+      inValEl: document.getElementById('overview-net-in-val'),
+      outValEl: document.getElementById('overview-net-out-val'),
+      ifaceEl: document.getElementById('overview-net-iface'),
+      totalsEl: document.getElementById('overview-net-totals'),
+    };
+    _ovNetState._labelEls = els;
+  }
+  return els;
 }
 
 function drawOverviewNetFrame(nowPerf = 0) {
@@ -147,7 +179,9 @@ function drawOverviewNetFrame(nowPerf = 0) {
 
   if (renderSmoothNetFrame(OV_NET_CHART_CFG, _ovNetState, nowPerf)) {
     _ovNetState.hasDrawnInitial = true;
-    startOverviewNetRaf();
+    if (_ovNetState.samples.length >= 2) {
+      startOverviewNetRaf();
+    }
   }
 }
 
@@ -155,20 +189,33 @@ function startOverviewNetRaf() {
   if (_ovNetState.rafId !== null || state.currentView !== 'overview') return;
   if (typeof document !== 'undefined' && document.hidden) return;
   if (typeof requestAnimationFrame !== 'function') return;
+  if (_ovNetState.samples.length < 2) {
+    drawOverviewNetFrame(typeof performance !== 'undefined' ? performance.now() : 0);
+    return;
+  }
   _ovNetState.rafId = requestAnimationFrame(drawOverviewNetFrame);
 }
 
 function updateOverviewNetwork(net, opts = {}) {
   if (!net || typeof net !== 'object') return;
   const rawHistory = Array.isArray(net.history) ? net.history : [];
-  const normalized = rawHistory
-    .filter((pt) => pt && typeof pt.ts === 'number')
-    .map((pt) => ({
+  const normalized = [];
+  let normSorted = true;
+  let prevNormTs = -Infinity;
+  for (let i = 0; i < rawHistory.length; i++) {
+    const pt = rawHistory[i];
+    if (!pt || typeof pt.ts !== 'number') continue;
+    if (pt.ts < prevNormTs) normSorted = false;
+    prevNormTs = pt.ts;
+    normalized.push({
       ts: pt.ts,
       inboundBps: Math.max(0, Number(pt.inboundBps ?? pt.inbound_bps) || 0),
       outboundBps: Math.max(0, Number(pt.outboundBps ?? pt.outbound_bps) || 0),
-    }))
-    .sort((a, b) => a.ts - b.ts);
+    });
+  }
+  if (!normSorted) {
+    normalized.sort((a, b) => a.ts - b.ts);
+  }
 
   const inBps = Math.max(0, Number(net.inboundBps ?? net.inbound_bps) || 0);
   const outBps = Math.max(0, Number(net.outboundBps ?? net.outbound_bps) || 0);
@@ -188,30 +235,44 @@ function updateOverviewNetwork(net, opts = {}) {
     }
 
     const cutoff = latestServerTs - (OV_NET_WINDOW_MS + 12000);
-    const merged = new Map();
-    for (const s of _ovNetState.samples) {
-      if (s.ts >= cutoff) merged.set(s.ts, s);
+    const existing = _ovNetState.samples;
+    const out = _ovNetState._mergeBuf;
+    out.length = 0;
+    let i = 0;
+    let j = 0;
+    while (i < existing.length && existing[i].ts < cutoff) i++;
+    while (j < normalized.length && normalized[j].ts < cutoff) j++;
+    while (i < existing.length && j < normalized.length) {
+      if (existing[i].ts < normalized[j].ts) {
+        out.push(existing[i++]);
+      } else if (normalized[j].ts < existing[i].ts) {
+        out.push(normalized[j++]);
+      } else {
+        out.push(normalized[j++]);
+        i++;
+      }
     }
-    for (const s of normalized) {
-      if (s.ts >= cutoff) merged.set(s.ts, s);
-    }
-    _ovNetState.samples = Array.from(merged.values()).sort((a, b) => a.ts - b.ts);
+    while (i < existing.length) out.push(existing[i++]);
+    while (j < normalized.length) out.push(normalized[j++]);
+    _ovNetState._mergeBuf = existing;
+    _ovNetState.samples = out;
     syncPerfOffset(_ovNetState, _ovNetState.samples, 0.05);
 
+    const { inValEl, outValEl, ifaceEl, totalsEl } = getOverviewLabelEls();
     if (_ovNetState.hoverRatio === null) {
-      setText('overview-net-in-val', formatRate(inBps));
-      setText('overview-net-out-val', formatRate(outBps));
+      setElText(inValEl, formatRate(inBps));
+      setElText(outValEl, formatRate(outBps));
     }
 
     const ifaces = Number(net.interfaceCount ?? net.interface_count ?? 0);
-    setText(
-      'overview-net-iface',
+    setElText(
+      ifaceEl,
       ifaces > 0 ? `Whole VPS • ${ifaces} NIC${ifaces === 1 ? '' : 's'}` : 'Whole VPS NIC'
     );
 
     const rxTotal = Number(net.totalRxBytes ?? net.total_rx_bytes ?? 0);
     const txTotal = Number(net.totalTxBytes ?? net.total_tx_bytes ?? 0);
-    setText('overview-net-totals', `↓ ${formatBytesShort(rxTotal)}  ↑ ${formatBytesShort(txTotal)}`);
+    setElText(totalsEl, `↓ ${formatBytesShort(rxTotal)}  ↑ ${formatBytesShort(txTotal)}`);
   }
 
   ensureOverviewNetDom();
@@ -394,6 +455,14 @@ function renderResourceBreakdown(resources) {
     return;
   }
 
+  const projById = new Map();
+  for (const item of (state.overview?.projects || [])) {
+    if (item && item.project) projById.set(item.project.id, item.project);
+  }
+  for (const x of (state.projects || [])) {
+    if (x) projById.set(x.id, x);
+  }
+
   setHtmlIfChanged(tbody, filtered.map((r) => {
     const isRunning = r.status === 'running';
     const isMaintenance = r.status === 'maintenance';
@@ -417,9 +486,7 @@ function renderResourceBreakdown(resources) {
     }
 
     const pId = r.projectId ?? r.project_id;
-    const p = (state.projects || []).find((x) => x.id === pId)
-      || (state.overview?.projects || []).map((x) => x.project).find((x) => x && x.id === pId)
-      || {};
+    const p = (pId != null && projById.get(pId)) || {};
     const effectivePid = r.pid || p.app_pid || p.status?.pid;
 
     const portPid = [

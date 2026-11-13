@@ -117,15 +117,21 @@ impl Monitor {
             }
         });
 
-        // Sort lightweight references first so String allocations only happen for the top 8 processes
+        // Partition top 8 processes in O(P) so String allocations only happen for the top 8
         let mut raw_procs: Vec<(u32, f32, u64, &std::ffi::OsStr)> = sys
             .processes()
             .iter()
             .filter(|(_, p)| p.thread_kind().is_none())
             .map(|(pid, p)| (pid.as_u32(), p.cpu_usage(), p.memory(), p.name()))
             .collect();
-        raw_procs.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        raw_procs.truncate(8);
+        let cmp_desc = |a: &(u32, f32, u64, &std::ffi::OsStr), b: &(u32, f32, u64, &std::ffi::OsStr)| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        };
+        if raw_procs.len() > 8 {
+            raw_procs.select_nth_unstable_by(7, cmp_desc);
+            raw_procs.truncate(8);
+        }
+        raw_procs.sort_unstable_by(cmp_desc);
 
         let procs: Vec<ProcessMetrics> = raw_procs
             .into_iter()
@@ -278,15 +284,22 @@ impl Monitor {
 
     pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
         self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+        if root_pids.is_empty() {
+            return HashMap::new();
+        }
         let sys = self.sys.lock().unwrap();
         let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
 
+        let root_set: Option<HashSet<u32>> = (root_pids.len() > 8)
+            .then(|| root_pids.iter().copied().collect());
         let mut results = HashMap::with_capacity(root_pids.len());
+        let mut visited = HashSet::with_capacity(16);
+        let mut queue = VecDeque::with_capacity(16);
         for &root in root_pids {
             let mut total_cpu = 0.0f32;
             let mut total_mem = 0u64;
-            let mut visited = HashSet::new();
-            let mut queue = VecDeque::new();
+            visited.clear();
+            queue.clear();
 
             if metrics_map.contains_key(&root) {
                 queue.push_back(root);
@@ -301,7 +314,12 @@ impl Monitor {
                 if let Some(kids) = children_map.get(&curr) {
                     for &k in kids {
                         // Do not cross into another monitored root workload to avoid double-counting
-                        if k != root && root_pids.contains(&k) {
+                        let is_other_root = k != root
+                            && match &root_set {
+                                Some(set) => set.contains(&k),
+                                None => root_pids.contains(&k),
+                            };
+                        if is_other_root {
                             continue;
                         }
                         if visited.insert(k) {
@@ -359,8 +377,22 @@ pub fn get_path_disk_size(path: &std::path::Path) -> u64 {
     if let Ok(guard) = DISK_USAGE_CACHE.read() {
         if let Some(map) = guard.as_ref() {
             if let Some(&(bytes, last_updated)) = map.get(&key) {
-                if last_updated.elapsed() < Duration::from_secs(120) {
+                let ttl = if bytes == 0 {
+                    Duration::from_secs(10)
+                } else {
+                    Duration::from_secs(120)
+                };
+                if last_updated.elapsed() < ttl {
                     return bytes;
+                }
+                if bytes == 0 && !path.exists() {
+                    drop(guard);
+                    if let Ok(mut wguard) = DISK_USAGE_CACHE.write() {
+                        if let Some(wmap) = wguard.as_mut() {
+                            wmap.insert(key, (0, std::time::Instant::now()));
+                        }
+                    }
+                    return 0;
                 }
                 // Stale cache hit: mark refreshed timestamp and recompute asynchronously in background
                 drop(guard);
@@ -383,6 +415,10 @@ pub fn get_path_disk_size(path: &std::path::Path) -> u64 {
     }
 
     if !path.exists() {
+        if let Ok(mut guard) = DISK_USAGE_CACHE.write() {
+            let map = guard.get_or_insert_with(HashMap::new);
+            map.insert(key, (0, std::time::Instant::now()));
+        }
         return 0;
     }
 
@@ -704,5 +740,16 @@ mod network_tests {
         assert_eq!(mem, single_mem, "Combined tree memory must match get_tree_metrics memory");
         assert!((raw_cpu - single_cpu).abs() < 1e-3, "Combined tree CPU must match get_tree_metrics CPU");
         assert!(raw_cpu > 0.0, "Expected non-zero raw_cpu, got {raw_cpu}");
+    }
+
+    #[test]
+    fn test_get_tree_metrics_empty_and_top_processes_sorted() {
+        let m = Monitor::new();
+        assert!(m.get_tree_metrics(&[]).is_empty());
+        let snap = m.sample();
+        assert!(snap.processes.len() <= 8);
+        for pair in snap.processes.windows(2) {
+            assert!(pair[0].cpu >= pair[1].cpu);
+        }
     }
 }
