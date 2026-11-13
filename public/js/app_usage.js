@@ -238,12 +238,12 @@ function ensureOnlineChartDom() {
           <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}"></rect>
         </clipPath>
         <linearGradient id="netGradIn" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#34d399" stop-opacity="0.32"/>
-          <stop offset="100%" stop-color="#34d399" stop-opacity="0.01"/>
+          <stop offset="0%" stop-color="#4cc38a" stop-opacity="0.28"/>
+          <stop offset="100%" stop-color="#4cc38a" stop-opacity="0.01"/>
         </linearGradient>
         <linearGradient id="netGradOut" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.28"/>
-          <stop offset="100%" stop-color="#60a5fa" stop-opacity="0.01"/>
+          <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.26"/>
+          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.01"/>
         </linearGradient>
       </defs>
       <line x1="0" y1="22" x2="${SVG_W}" y2="22" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
@@ -252,10 +252,10 @@ function ensureOnlineChartDom() {
       <g clip-path="url(#app-net-clip)">
         <path id="net-in-area" d="" fill="url(#netGradIn)"/>
         <path id="net-out-area" d="" fill="url(#netGradOut)"/>
-        <path id="net-in-glow" d="" fill="none" stroke="rgba(52, 211, 153, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="net-out-glow" d="" fill="none" stroke="rgba(96, 165, 250, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-in-glow" d="" fill="none" stroke="rgba(76, 195, 138, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-out-glow" d="" fill="none" stroke="rgba(59, 130, 246, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-in-line" d="" fill="none" stroke="#4cc38a" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="net-out-line" d="" fill="none" stroke="#3b82f6" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>
     <div id="net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
@@ -332,8 +332,8 @@ function renderSmoothNetFrame(cfg, netState, nowPerf) {
     }
     if (peakEl) {
       peakEl.textContent = samples.length === 1
-        ? (cfg.singleSamplePeakText || 'Sampling...')
-        : 'Starting...';
+        ? (cfg.singleSamplePeakText || 'Sampling')
+        : 'Starting';
     }
     return true;
   }
@@ -483,7 +483,7 @@ const APP_NET_CHART_CFG = {
   windowMs: WINDOW_MS,
   lagMs: LAG_MS,
   minRawPeak: 512,
-  singleSamplePeakText: 'Sampling...',
+  singleSamplePeakText: 'Sampling',
   ids: {
     inArea: 'net-in-area',
     outArea: 'net-out-area',
@@ -559,7 +559,7 @@ function applyUsagePayload(entity, data) {
   const cpuBadge = document.getElementById('usage-cpu-badge');
   if (cpuBadge) {
     cpuBadge.className = running ? 'badge badge-success' : 'badge badge-neutral';
-    cpuBadge.textContent = running ? `${activePids} PID${activePids === 1 ? '' : 's'}` : 'STOPPED';
+    cpuBadge.textContent = running ? `${activePids} PID${activePids === 1 ? '' : 's'}` : 'Stopped';
   }
   setText(
     'usage-cpu-sub',
@@ -590,7 +590,7 @@ function applyUsagePayload(entity, data) {
   setText('usage-disk-sub', `${entity.kind === 'database' ? 'Cluster & WAL' : 'App & releases'} • ${vpsFree} free`);
 
   const net = data.network || {};
-  const portOnly = data.port ? `:${data.port}` : '';
+  const portOnly = data.port ? `${data.port}` : '';
   const rxTot = Number(net.totalRxBytes || 0);
   const txTot = Number(net.totalTxBytes || 0);
   const conns = Number(net.interfaceCount || 0);

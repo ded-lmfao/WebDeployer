@@ -98,34 +98,34 @@ export async function handleCreateDatabaseSubmit(e) {
       progressBar.style.width = '20%';
     }
     if (progressStep) progressStep.textContent = 'Stage 1/5';
-    if (progressDetail) progressDetail.textContent = 'Allocating dedicated TCP port and preparing cluster directory...';
+    if (progressDetail) progressDetail.textContent = 'Allocating dedicated TCP port and preparing cluster directory';
   }
 
   const renderPipeline = window.renderDatabasePipeline || (() => {});
-  renderPipeline('sandbox', 'running', 'Allocating Port & Sandbox');
+  renderPipeline('sandbox', 'running', 'Allocating port and sandbox');
 
   const t1 = setTimeout(() => {
     renderPipeline('initdb', 'running', 'Running initdb');
     if (progressBar) progressBar.style.width = '45%';
     if (progressStep) progressStep.textContent = 'Stage 2/5';
-    if (progressDetail) progressDetail.textContent = 'Initializing cluster via initdb with SCRAM-SHA-256 credentials...';
+    if (progressDetail) progressDetail.textContent = 'Initializing cluster via initdb with SCRAM-SHA-256 credentials';
   }, 750);
 
   const t2 = setTimeout(() => {
-    renderPipeline('security', 'running', 'Applying HBA Rules');
+    renderPipeline('security', 'running', 'Applying HBA rules');
     if (progressBar) progressBar.style.width = '70%';
     if (progressStep) progressStep.textContent = 'Stage 3/5';
-    if (progressDetail) progressDetail.textContent = 'Configuring pg_hba.conf client auth & UFW firewall rules...';
+    if (progressDetail) progressDetail.textContent = 'Configuring pg_hba.conf client auth and UFW firewall rules';
   }, 1600);
 
   const t3 = setTimeout(() => {
-    renderPipeline('spawning', 'running', 'Spawning pg_ctl Engine');
+    renderPipeline('spawning', 'running', 'Spawning pg_ctl engine');
     if (progressBar) progressBar.style.width = '90%';
     if (progressStep) progressStep.textContent = 'Stage 4/5';
-    if (progressDetail) progressDetail.textContent = 'Spawning isolated PostgreSQL process container via pg_ctl...';
+    if (progressDetail) progressDetail.textContent = 'Spawning isolated PostgreSQL process container via pg_ctl';
   }, 2500);
 
-  setBtnLoading(btn, true, 'Create & Start Database', 'Provisioning...');
+  setBtnLoading(btn, true, 'Create & Start Database', 'Provisioning');
   try {
     const created = await api('/api/databases', {
       method: 'POST',
@@ -147,15 +147,15 @@ export async function handleCreateDatabaseSubmit(e) {
     clearTimeout(t2);
     clearTimeout(t3);
 
-    renderPipeline('healthy', 'success', `ONLINE (${created.name.toUpperCase()})`);
+    renderPipeline('healthy', 'success', `Online (${created.name})`);
     if (progressBar) progressBar.style.width = '100%';
     if (progressStep) {
       progressStep.textContent = 'Ready (5/5)';
       progressStep.className = 'badge badge-success';
     }
-    if (progressDetail) progressDetail.textContent = `PostgreSQL database '${created.name}' listening on port ${created.port}!`;
+    if (progressDetail) progressDetail.textContent = `PostgreSQL database '${created.name}' listening on port ${created.port}.`;
 
-    toast(`PostgreSQL database '${created.name}' provisioned and started on port ${created.port}!`, 'success');
+    toast(`PostgreSQL database '${created.name}' provisioned and started on port ${created.port}.`, 'success');
 
     setTimeout(() => {
       document.getElementById('modal-create-database')?.classList.remove('active');
@@ -168,7 +168,7 @@ export async function handleCreateDatabaseSubmit(e) {
     clearTimeout(t1);
     clearTimeout(t2);
     clearTimeout(t3);
-    renderPipeline('initdb', 'failed', 'PROVISIONING FAILED');
+    renderPipeline('initdb', 'failed', 'Provisioning failed');
     if (progressBar) {
       progressBar.style.width = '100%';
       progressBar.className = 'progress-fill red';
@@ -229,11 +229,12 @@ export async function showDatabaseLogs(id) {
   const db = (state.databases || []).find((d) => d.id === Number(id));
   if (title) title.textContent = db ? `${db.name} — Server Logs` : `Database #${id} Logs`;
   if (badge) {
-    badge.textContent = db ? db.status.toUpperCase() : 'LOGS';
+    const st = db?.status ? String(db.status) : '';
+    badge.textContent = st ? (st.charAt(0).toUpperCase() + st.slice(1)) : 'Logs';
     badge.className = db?.status === 'running' ? 'badge badge-success' : (db?.status === 'error' ? 'badge badge-danger' : 'badge badge-neutral');
   }
 
-  pre.textContent = 'Loading PostgreSQL server logs...';
+  pre.textContent = 'Loading PostgreSQL server logs';
   modal.classList.add('active');
 
   try {
@@ -254,7 +255,7 @@ export async function refreshCurrentDatabaseLogs() {
 export function copyDatabaseLogs() {
   const pre = document.getElementById('db-logs-content');
   if (pre) {
-    void copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard!');
+    void copyTextToClipboard(pre.textContent, 'Database logs copied to clipboard.');
   }
 }
 
@@ -294,7 +295,7 @@ export async function handleUpdateDatabaseAccessSubmit(e) {
         domain: domain,
       },
     });
-    toast('Network access and domain settings updated successfully!', 'success');
+    toast('Network access and domain settings updated.', 'success');
     document.getElementById('modal-database-access')?.classList.remove('active');
     if (window.loadDatabases) await window.loadDatabases();
     if (window.renderDatabasesList) window.renderDatabasesList();
@@ -313,16 +314,16 @@ export async function handleUpdateDatabaseAccessSubmit(e) {
 export async function deleteDatabase(id, name) {
   const ok = await showConfirmDialog({
     title: 'Delete PostgreSQL Database',
-    message: `Are you sure you want to delete database '${name}' (#${id})?\n\nThis will stop and remove its container, delete all its physical data on disk, and revoke associated firewall rules. This action CANNOT be undone!`,
+    message: `Are you sure you want to delete database '${name}' (#${id})?\n\nThis will stop and remove its container, delete all its physical data on disk, and revoke associated firewall rules. This action cannot be undone.`,
     confirmText: 'Delete Database',
     danger: true,
   });
   if (!ok) return;
 
   try {
-    toast(`Deleting database '${name}'...`, 'info');
+    toast(`Deleting database '${name}'`, 'info');
     await api(`/api/databases/${id}`, { method: 'DELETE' });
-    toast(`Database '${name}' deleted successfully!`, 'success');
+    toast(`Database '${name}' deleted.`, 'success');
     const wasInsideDb = window.state?.selectedEntityKind === 'database' && Number(window.state.selectedDatabaseId) === Number(id);
     if (window.loadDatabases) await window.loadDatabases();
     if (wasInsideDb && window.state) {
@@ -340,7 +341,7 @@ export async function deleteDatabase(id, name) {
 export function copyElementValue(elemId) {
   const el = document.getElementById(elemId);
   if (!el) return;
-  void copyTextToClipboard(el.value, 'Copied to clipboard!');
+  void copyTextToClipboard(el.value, 'Copied to clipboard.');
 }
 
 // Bind globals for inline HTML event handlers

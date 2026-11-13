@@ -55,9 +55,9 @@ export function formatFileDate(unixSec) {
 
 const FILE_EXT_GROUPS = [
   { exts: ['jar', 'war', 'class'], icon: 'java', label: null, editable: false, binary: true },
-  { exts: ['java'], icon: 'java', label: 'JAVA', editable: true, binary: false },
-  { exts: ['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2'], icon: 'file-archive', label: 'ZIP', editable: false, binary: true },
-  { exts: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'], icon: 'file-image', label: 'IMG', editable: false, binary: true },
+  { exts: ['java'], icon: 'java', label: 'Java', editable: true, binary: false },
+  { exts: ['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2'], icon: 'file-archive', label: 'Zip', editable: false, binary: true },
+  { exts: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'], icon: 'file-image', label: 'Img', editable: false, binary: true },
   { exts: ['db', 'sqlite', 'sqlite3'], icon: 'sqlite', label: null, editable: false, binary: true },
   { exts: ['sql'], icon: 'postgresql', label: 'SQL', editable: true, binary: false },
   { exts: ['py', 'pyw', 'ipynb'], icon: 'python', label: 'PY', editable: true, binary: false },
@@ -65,7 +65,7 @@ const FILE_EXT_GROUPS = [
   { exts: ['jsx'], icon: 'react', label: 'JSX', editable: true, binary: false },
   { exts: ['tsx'], icon: 'react', label: 'TSX', editable: true, binary: false },
   { exts: ['ts'], icon: 'typescript', label: 'TS', editable: true, binary: false },
-  { exts: ['vue'], icon: 'vuejs', label: 'VUE', editable: true, binary: false },
+  { exts: ['vue'], icon: 'vuejs', label: 'Vue', editable: true, binary: false },
   { exts: ['svelte'], icon: 'svelte', label: null, editable: true, binary: false },
   { exts: ['rs'], icon: 'rust', label: 'RS', editable: true, binary: false },
   { exts: ['go'], icon: 'go', label: 'GO', editable: true, binary: false },
@@ -80,7 +80,7 @@ const FILE_EXT_GROUPS = [
   { exts: ['xml'], icon: 'xml', label: null, editable: true, binary: false },
   { exts: ['ini', 'conf', 'config'], icon: 'file-json', label: null, editable: true, binary: false },
   { exts: ['ps1'], icon: 'powershell', label: 'PS1', editable: true, binary: false },
-  { exts: ['sh', 'bash', 'bat', 'cmd'], icon: 'bash', label: 'SHELL', editable: true, binary: false },
+  { exts: ['sh', 'bash', 'bat', 'cmd'], icon: 'bash', label: 'Shell', editable: true, binary: false },
   { exts: ['md', 'mdx'], icon: 'markdown', label: 'MD', editable: true, binary: false },
   { exts: ['txt', 'log'], icon: 'file-text', label: null, editable: true, binary: false },
 ];
@@ -90,11 +90,11 @@ const FILE_EXT_MAP = Object.fromEntries(
 );
 
 const FILE_NAME_RULES = [
-  { match: (n) => n === '.env' || n.startsWith('.env.'), icon: 'file-lock', label: 'ENV', editable: true, binary: false },
-  { match: (n) => n === 'dockerfile' || n.startsWith('dockerfile.'), icon: 'docker', label: 'DOCKER', editable: true, binary: false },
-  { match: (n) => n === '.dockerignore', icon: 'docker', label: 'DOCK', editable: true, binary: false },
+  { match: (n) => n === '.env' || n.startsWith('.env.'), icon: 'file-lock', label: 'Env', editable: true, binary: false },
+  { match: (n) => n === 'dockerfile' || n.startsWith('dockerfile.'), icon: 'docker', label: 'Docker', editable: true, binary: false },
+  { match: (n) => n === '.dockerignore', icon: 'docker', label: 'Dock', editable: true, binary: false },
   { match: (n) => n.startsWith('docker-compose') || n === 'compose.yaml' || n === 'compose.yml', icon: 'docker', label: null, editable: true, binary: false },
-  { match: (n) => n === '.gitignore' || n === '.gitattributes' || n === '.gitmodules', icon: 'git', label: 'GIT', editable: true, binary: false },
+  { match: (n) => n === '.gitignore' || n === '.gitattributes' || n === '.gitmodules', icon: 'git', label: 'Git', editable: true, binary: false },
   { match: (n) => n === 'package.json' || n === 'package-lock.json', icon: 'npm', label: null, editable: true, binary: false },
   { match: (n) => n.startsWith('vite.config.'), icon: 'vitejs', label: null, editable: true, binary: false },
   { match: (n) => n === 'netlify.toml', icon: 'netlify', label: 'TOML', editable: true, binary: false },
@@ -113,7 +113,7 @@ export function getFileMeta(entry) {
     iconSvg: icon(iconName, { size: 17 }),
   });
 
-  if (entry.is_dir) return make('folder', 'DIR', false, false, true);
+  if (entry.is_dir) return make('folder', 'Dir', false, false, true);
 
   const name = entry.name.toLowerCase();
   const baseName = name.includes('/') ? name.split('/').pop() : name;
@@ -121,15 +121,15 @@ export function getFileMeta(entry) {
 
   const nameRule = FILE_NAME_RULES.find((r) => r.match(baseName));
   if (nameRule) {
-    return make(nameRule.icon, nameRule.label || (ext ? ext.toUpperCase() : 'FILE'), nameRule.editable, nameRule.binary);
+    return make(nameRule.icon, nameRule.label || (ext ? ext.toUpperCase() : 'File'), nameRule.editable, nameRule.binary);
   }
 
   const spec = FILE_EXT_MAP[ext];
   if (spec) {
-    return make(spec.icon, spec.label || ext.toUpperCase() || 'FILE', spec.editable, spec.binary);
+    return make(spec.icon, spec.label || ext.toUpperCase() || 'File', spec.editable, spec.binary);
   }
 
-  return make('file', ext ? ext.toUpperCase().slice(0, 4) : 'FILE', entry.size < 2 * 1024 * 1024, false);
+  return make('file', ext ? ext.toUpperCase().slice(0, 4) : 'File', entry.size < 2 * 1024 * 1024, false);
 }
 
 export async function loadFilesView() {
@@ -360,7 +360,7 @@ export function filesDownload(path) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  toast(`Downloading ${path.split('/').pop()}...`, 'info');
+  toast(`Downloading ${path.split('/').pop()}`, 'info');
 }
 
 export function filesDownloadCurrent() {
@@ -479,7 +479,7 @@ export async function uploadFileList(files) {
   }
 
   try {
-    toast(`Uploading ${files.length} file(s)...`, 'info');
+    toast(`Uploading ${files.length} file(s)`, 'info');
     const pathParam = encodeURIComponent(state.filesPath || '');
     const res = await fetch(`${ctx.baseUrl}/upload?path=${pathParam}`, {
       method: 'POST',
@@ -492,7 +492,7 @@ export async function uploadFileList(files) {
       const errText = await res.text();
       throw new Error(errText || 'Upload failed');
     }
-    toast(`Successfully uploaded ${files.length} file(s)!`, 'success');
+    toast(`Uploaded ${files.length} file(s)`, 'success');
     await loadFilesView();
   } catch (err) {
     toast(`Upload failed: ${err.message}`, 'error');

@@ -39,17 +39,17 @@ export function renderSingleServicePipeline(serviceId, currentStage, currentStat
 
     if (idx < curIdx) {
       cls = 'dot-done';
-      iconStr = '✓';
+      iconStr = icon('check', { size: 12 });
     } else if (idx === curIdx) {
       if (currentStatus === 'building' || currentStatus === 'running' || currentStatus === 'in_progress') {
         cls = 'dot-active';
-        iconStr = '↻';
+        iconStr = icon('refresh', { size: 12, cls: 'icon-spin' });
       } else if (currentStatus === 'success') {
         cls = 'dot-done';
-        iconStr = '✓';
+        iconStr = icon('check', { size: 12 });
       } else if (currentStatus === 'error' || currentStatus === 'failed') {
         cls = 'dot-error';
-        iconStr = '✕';
+        iconStr = icon('x', { size: 12 });
       }
     }
 
@@ -77,7 +77,7 @@ export function syncServiceCardPipeline(p) {
 
   if (isDeploying) {
     if (pipeEl) pipeEl.style.display = 'block';
-    renderSingleServicePipeline(p.id, dep.stage || 'prepare', dep.status, dep.message || 'Building service...');
+    renderSingleServicePipeline(p.id, dep.stage || 'prepare', dep.status, dep.message || 'Building service');
     if (fluidEl) {
       fluidEl.style.display = 'block';
       if (window.renderOrganicFluidPipeline) {
@@ -144,57 +144,48 @@ export function renderServicesList() {
   container.innerHTML = filtered.map((p) => {
     const isOnline = p.app_status === 'running' || p.status?.running;
     const isBuilding = p.deployStatus?.status === 'in_progress' || p.deployStatus?.status === 'building';
-    const statusText = isBuilding ? 'BUILDING' : (isOnline ? 'ONLINE' : 'STOPPED');
+    const statusText = isBuilding ? 'Building' : (isOnline ? 'Online' : 'Stopped');
     const statusBadgeClass = isBuilding ? 'badge-warning' : (isOnline ? 'badge-success' : 'badge-neutral');
 
     const pt = (p.project_type || '').toLowerCase();
     const sc = (p.start_cmd || '').toLowerCase();
     let typeIconName = 'terminal';
     let typeName = 'Backend Service';
-    let iconColor = 'var(--accent-light)';
+    let iconColor = 'var(--text-main)';
 
     if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java')) {
       typeIconName = 'java';
       typeName = 'Java Daemon';
-      iconColor = '#f97316';
     } else if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
       typeIconName = 'python';
       typeName = 'Python Daemon';
-      iconColor = '#38bdf8';
     } else if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
       typeIconName = 'rust';
       typeName = 'Rust Daemon';
-      iconColor = '#dea584';
     } else if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
       typeIconName = 'go';
       typeName = 'Go Daemon';
-      iconColor = '#00add8';
     } else if (pt.includes('node') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
       typeIconName = 'nodejs';
       typeName = 'Node.js Daemon';
-      iconColor = '#22c55e';
     } else if (pt.includes('php') || sc.includes('php')) {
       typeIconName = 'php';
       typeName = 'PHP Daemon';
-      iconColor = '#777bb4';
     } else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails') || sc.includes('puma')) {
       typeIconName = 'ruby';
       typeName = 'Ruby Daemon';
-      iconColor = '#cc342d';
     } else if (pt.includes('docker') || sc.includes('docker')) {
       typeIconName = 'docker';
       typeName = 'Docker Container';
-      iconColor = '#2496ed';
     } else if (pt.includes('worker')) {
       typeIconName = 'cpu';
       typeName = 'Queue Worker';
-      iconColor = '#a855f7';
     }
 
     const isLocal = !p.repo_url || p.repo_url === 'local' || pt.includes('lavalink');
-    const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7).toUpperCase() : (p.deployedSha ? p.deployedSha.slice(0, 7).toUpperCase() : (isLocal ? 'MANUAL' : 'AUTO'));
-    const portText = p.port ? `PORT ${p.port}` : '';
-    const accessText = p.access_mode === 'public' ? 'PUBLIC REVERSE PROXY' : (p.access_mode === 'allowlist' || p.access_mode === 'allowed_ips' ? 'IP WHITELIST' : 'LOCALHOST ONLY');
+    const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7) : (p.deployedSha ? p.deployedSha.slice(0, 7) : (isLocal ? 'Manual' : 'Auto'));
+    const portText = p.port ? `Port ${p.port}` : '';
+    const accessText = p.access_mode === 'public' ? 'Public reverse proxy' : (p.access_mode === 'allowlist' || p.access_mode === 'allowed_ips' ? 'IP whitelist' : 'Localhost only');
     const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
     const uptimeText = isOnline && p.app_started_at ? formatRelativeTime(p.app_started_at) : '';
@@ -225,7 +216,7 @@ export function renderServicesList() {
               </div>
             </div>
           </div>
-          <span class="badge ${statusBadgeClass}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">${statusText}</span>
+          <span class="badge ${statusBadgeClass}" style="flex-shrink: 0; font-size: 11px; font-weight: 500; padding: 2px 8px;">${statusText}</span>
         </div>
 
         <!-- Command Line -->

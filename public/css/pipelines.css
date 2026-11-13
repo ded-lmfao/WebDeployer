@@ -6,7 +6,7 @@
   display: flex;
   align-items: center;
   background: transparent;
-  padding: 18px 20px;
+  padding: 16px 20px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
   margin-bottom: 20px;
@@ -21,8 +21,8 @@
 .water-stage-unit:last-child { flex: 0 0 auto; min-width: auto; }
 
 .water-node-vial {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: var(--bg-card);
   border: 1.5px solid var(--border-medium);
@@ -32,7 +32,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.25s ease;
+  transition: border-color var(--transition-base);
   z-index: 2;
 }
 .water-vial-bg { position: absolute; inset: 0; z-index: 1; }
@@ -55,38 +55,34 @@
 .water-vial-content { position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .water-vial-num {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-dim);
   line-height: 1;
   position: absolute;
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease;
+  transition: opacity var(--transition-base), color var(--transition-fast);
 }
-.water-node-vial.active .water-vial-num { color: var(--text-main); transform: scale(1.05); }
+.water-node-vial.active .water-vial-num { color: var(--text-main); }
 .water-vial-icon {
   position: absolute;
   opacity: 0;
-  transform: scale(0.6);
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity var(--transition-base);
   pointer-events: none;
 }
 .water-node-vial.completed .water-vial-check {
   display: block;
   opacity: 1;
-  transform: scale(1);
   stroke: var(--success-light);
-  stroke-width: 3;
+  stroke-width: 2.5;
 }
 .water-node-vial.failed .water-vial-cross {
   display: block;
   opacity: 1;
-  transform: scale(1);
   stroke: var(--danger-light);
-  stroke-width: 3;
+  stroke-width: 2.5;
 }
 .water-node-vial.completed .water-vial-num,
 .water-node-vial.failed .water-vial-num {
   opacity: 0;
-  transform: scale(0.5);
   pointer-events: none;
 }
 
@@ -94,23 +90,23 @@
 .water-node-vial.completed { border-color: var(--success); }
 .water-node-vial.failed { border-color: var(--danger); }
 .water-node-vial.queued { border-color: var(--border-medium); }
-.water-node-vial.draining { border-color: var(--accent); box-shadow: 0 0 10px rgba(56, 189, 248, 0.4); }
+.water-node-vial.draining { border-color: var(--accent); }
 .water-node-vial.draining .water-vial-liquid { background: var(--accent); opacity: 0.35; }
 .water-node-vial.draining .water-vial-num { color: var(--accent-light); }
 
-.water-node-info { display: flex; flex-direction: column; gap: 0; margin-left: 9px; flex-shrink: 0; }
-.water-node-name { font-size: 12.5px; font-weight: 500; color: var(--text-dim); white-space: nowrap; transition: color 0.2s ease; }
-.water-node-name.active { color: var(--text-main); font-weight: 600; }
+.water-node-info { display: flex; flex-direction: column; gap: 0; margin-left: 8px; flex-shrink: 0; }
+.water-node-name { font-size: 12.5px; font-weight: 500; color: var(--text-dim); white-space: nowrap; transition: color var(--transition-fast); }
+.water-node-name.active { color: var(--text-main); font-weight: 500; }
 .water-node-name.completed { color: var(--text-normal); }
-.water-node-name.failed { color: var(--danger-light); font-weight: 600; }
-.water-node-sub { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-dim); }
+.water-node-name.failed { color: var(--danger-light); font-weight: 500; }
+.water-node-sub { font-size: 11px; font-weight: 500; color: var(--text-dim); }
 .water-node-sub.active { color: var(--accent-light); }
 .water-node-sub.completed { color: var(--success-light); }
 .water-node-sub.failed { color: var(--danger-light); }
 .water-node-sub.queued { color: var(--text-dim); }
-.water-node-sub.draining { color: var(--accent-light); font-weight: 600; }
+.water-node-sub.draining { color: var(--accent-light); font-weight: 500; }
 
-.water-pipe-segment { flex: 1; margin: 0 10px; position: relative; height: 4px; display: flex; align-items: center; }
+.water-pipe-segment { flex: 1; margin: 0 12px; position: relative; height: 4px; display: flex; align-items: center; }
 .water-pipe-glass { width: 100%; height: 2px; background: var(--border-medium); border-radius: 1px; position: relative; overflow: hidden; }
 .water-pipe-liquid {
   height: 100%;

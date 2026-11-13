@@ -14,23 +14,23 @@ import {
 import { api, toast } from './api.js';
 
 export const POWER_LABELS = {
-  '*': 'All Powers (*)',
+  '*': 'All powers (*)',
   deploy: 'Deploy',
-  process: 'Start/Stop',
+  process: 'Start/stop',
   logs: 'Logs',
-  files: 'Files (Read)',
-  files_write: 'Files (Write)',
+  files: 'Files (read)',
+  files_write: 'Files (write)',
   env: 'Env (.env)',
   domains: 'Domains/SSL',
   backups: 'Backups',
-  projects_manage: 'Manage Sites',
-  services_manage: 'Manage Services',
-  databases: 'Databases (Ctrl)',
+  projects_manage: 'Manage sites',
+  services_manage: 'Manage services',
+  databases: 'Databases (ctrl)',
   databases_manage: 'Manage DBs',
-  audit: 'Audit Logs',
+  audit: 'Audit logs',
   monitor: 'Telemetry',
-  settings_manage: 'Settings/Cache',
-  system_manage: 'System/Update',
+  settings_manage: 'Settings/cache',
+  system_manage: 'System/update',
 };
 
 const POWER_PRESETS = {
@@ -69,7 +69,7 @@ export function renderGithubTokensRows() {
   container.innerHTML = list.map((item, idx) => `
     <div class="gh-token-row" data-gh-idx="${idx}" style="display: grid; grid-template-columns: 200px 1fr auto auto; gap: 8px; align-items: center;">
       <input type="text" class="form-control gh-token-label-input" value="${escapeHtml(item.label || '')}" placeholder="Account label (e.g. Personal, Org)">
-      <input type="${item.revealed ? 'text' : 'password'}" class="form-control env-mono-input gh-token-value-input" value="${escapeHtml(item.token || '')}" placeholder="ghp_... or github_pat_...">
+      <input type="${item.revealed ? 'text' : 'password'}" class="form-control env-mono-input gh-token-value-input" value="${escapeHtml(item.token || '')}" placeholder="ghp_token or github_pat_token">
       <button type="button" class="btn btn-secondary btn-sm" onclick="toggleGithubTokenRowReveal(${idx})" style="min-width: 62px;">
         ${item.revealed ? 'Hide' : 'Show'}
       </button>
@@ -126,7 +126,7 @@ export function renderUserProjectsChecklist(selectedIds = [], allProjects = true
     return `
       <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; opacity:${allProjects ? '0.6' : '1'};">
         <input type="checkbox" class="user-project-check" value="${p.id}" ${checked ? 'checked' : ''} ${allProjects ? 'disabled' : ''}>
-        <span>${escapeHtml(p.name)} <code style="font-size:11px;">(:${p.port || 3000})</code></span>
+        <span>${escapeHtml(p.name)} <code style="font-size:11px;">(${p.port || 3000})</code></span>
       </label>
     `;
   }).join('');
@@ -140,27 +140,27 @@ function formatNeutralBadgesSummary(labels, fallbackHtml, maxVisible = 4) {
     .map((lbl) => `<span class="badge badge-neutral" style="font-size: 10px;">${escapeHtml(lbl)}</span>`)
     .join('');
   const overflow = labels.length > maxVisible
-    ? `<span class="badge badge-neutral" style="font-size: 10px;" title="${fullTooltip}">+${labels.length - maxVisible} More</span>`
+    ? `<span class="badge badge-neutral" style="font-size: 10px;" title="${fullTooltip}">+${labels.length - maxVisible} more</span>`
     : '';
   return shown + overflow;
 }
 
 function formatUserPowersHtml(u, isMain) {
   if (isMain || (u.permissions && u.permissions.includes('*'))) {
-    return '<span class="badge badge-neutral" style="font-size: 10px;">All Powers (*)</span>';
+    return '<span class="badge badge-neutral" style="font-size: 10px;">All powers (*)</span>';
   }
   const perms = u.permissions || [];
   if (!perms.length) {
-    return '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>';
+    return '<span class="badge badge-neutral" style="font-size: 10px;">Read-only</span>';
   }
   const allKeys = Object.keys(POWER_LABELS).filter((k) => k !== '*');
   if (allKeys.every((k) => perms.includes(k))) {
     const tip = escapeHtml(allKeys.map((k) => POWER_LABELS[k]).join(', '));
-    return `<span class="badge badge-neutral" style="font-size: 10px;" title="${tip}">All Powers (${allKeys.length})</span>`;
+    return `<span class="badge badge-neutral" style="font-size: 10px;" title="${tip}">All powers (${allKeys.length})</span>`;
   }
   return formatNeutralBadgesSummary(
     perms.map((p) => POWER_LABELS[p] || p),
-    '<span class="badge badge-neutral" style="font-size: 10px;">Read-Only</span>',
+    '<span class="badge badge-neutral" style="font-size: 10px;">Read-only</span>',
     4,
   );
 }
@@ -172,7 +172,7 @@ export function renderUsersTable(users) {
   const countBadge = document.getElementById('settings-users-count-badge');
   if (countBadge) {
     const n = Array.isArray(users) ? users.length : 0;
-    countBadge.textContent = `${n} USER${n === 1 ? '' : 'S'}`;
+    countBadge.textContent = `${n} user${n === 1 ? '' : 's'}`;
   }
 
   if (!users || !users.length) {
@@ -186,13 +186,13 @@ export function renderUsersTable(users) {
     tbody.innerHTML = slice.map((u) => {
       const isMain = u.isMainAdmin || u.username.toLowerCase() === 'admin' || u.id === 1;
       const projHtml = (isMain || u.allProjects)
-        ? '<span class="badge badge-neutral" style="font-size: 10px;">All Websites (*)</span>'
+        ? '<span class="badge badge-neutral" style="font-size: 10px;">All websites (*)</span>'
         : formatNeutralBadgesSummary(
             (u.allowedProjects || []).map((pid) => {
               const proj = state.projects.find((p) => p.id === pid);
               return proj ? proj.name : `#${pid}`;
             }),
-            '<span class="badge badge-warning" style="font-size: 10px;">No Websites</span>',
+            '<span class="badge badge-warning" style="font-size: 10px;">No websites</span>',
             3,
           );
 
@@ -214,7 +214,7 @@ export function renderUsersTable(users) {
           <td>
             <div style="display:flex; align-items:center; gap:7px;">
               <strong>${escapeHtml(u.username)}</strong>
-              ${isMain ? '<span class="badge badge-neutral" style="font-size: 9.5px;">MAIN ADMIN</span>' : ''}
+              ${isMain ? '<span class="badge badge-neutral" style="font-size: 10px;">Main admin</span>' : ''}
               ${u.id === state.user?.id ? '<span style="color:var(--text-dim); font-size:11px;">(You)</span>' : ''}
             </div>
           </td>
@@ -239,7 +239,7 @@ export function renderUsersTable(users) {
                 ${u.id !== state.user?.id ? `
                   <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Remove</button>
                 ` : ''}
-              ` : '<span class="badge badge-neutral" style="font-size: 10px;">Full Root Access</span>'}
+              ` : '<span class="badge badge-neutral" style="font-size: 10px;">Full root access</span>'}
             </div>
           </td>
         </tr>

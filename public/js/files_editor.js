@@ -175,7 +175,7 @@ export async function filesOpen(path) {
   if (!ctx) return;
 
   try {
-    toast(`Loading ${path}...`, 'info');
+    toast(`Loading ${path}`, 'info');
     const res = await api(`${ctx.baseUrl}/content?path=${encodeURIComponent(path)}`, { noCache: true });
     state.filesOpenPath = path;
     state.filesEditorInitialContent = res.content || '';
@@ -223,7 +223,7 @@ export async function filesOpen(path) {
     const detectedLang = getSpeedHighlightLang(path);
     const langBadge = document.getElementById('files-editor-lang-badge');
     if (langBadge) {
-      const displayLang = detectedLang === 'py' ? 'PYTHON' : detectedLang === 'js' ? 'JAVASCRIPT' : detectedLang === 'ts' ? 'TYPESCRIPT' : detectedLang.toUpperCase();
+      const displayLang = detectedLang === 'py' ? 'Python' : detectedLang === 'js' ? 'JavaScript' : detectedLang === 'ts' ? 'TypeScript' : detectedLang.toUpperCase();
       langBadge.textContent = displayLang;
       if (meta.iconBg) langBadge.style.background = meta.iconBg;
       if (meta.iconColor) langBadge.style.color = meta.iconColor;

@@ -96,12 +96,12 @@ function ensureOverviewNetDom() {
           <rect x="0" y="0" width="${OV_NET_SVG_W}" height="${OV_NET_SVG_H}"></rect>
         </clipPath>
         <linearGradient id="overviewNetGradIn" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#34d399" stop-opacity="0.32"/>
-          <stop offset="100%" stop-color="#34d399" stop-opacity="0.01"/>
+          <stop offset="0%" stop-color="#4cc38a" stop-opacity="0.28"/>
+          <stop offset="100%" stop-color="#4cc38a" stop-opacity="0.01"/>
         </linearGradient>
         <linearGradient id="overviewNetGradOut" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.28"/>
-          <stop offset="100%" stop-color="#60a5fa" stop-opacity="0.01"/>
+          <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.26"/>
+          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.01"/>
         </linearGradient>
       </defs>
       <line x1="0" y1="18" x2="${OV_NET_SVG_W}" y2="18" stroke="rgba(255,255,255,0.045)" stroke-dasharray="3 4"/>
@@ -110,10 +110,10 @@ function ensureOverviewNetDom() {
       <g clip-path="url(#overview-net-clip)">
         <path id="ov-net-in-area" d="" fill="url(#overviewNetGradIn)"/>
         <path id="ov-net-out-area" d="" fill="url(#overviewNetGradOut)"/>
-        <path id="ov-net-in-glow" d="" fill="none" stroke="rgba(52, 211, 153, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="ov-net-out-glow" d="" fill="none" stroke="rgba(96, 165, 250, 0.24)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="ov-net-in-line" d="" fill="none" stroke="#34d399" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
-        <path id="ov-net-out-line" d="" fill="none" stroke="#60a5fa" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-in-glow" d="" fill="none" stroke="rgba(76, 195, 138, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-out-glow" d="" fill="none" stroke="rgba(59, 130, 246, 0.22)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-in-line" d="" fill="none" stroke="#4cc38a" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="ov-net-out-line" d="" fill="none" stroke="#3b82f6" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>
     <div id="ov-net-in-dot" class="app-net-live-marker net-in" style="opacity:0;"></div>
@@ -278,10 +278,10 @@ if (typeof document !== 'undefined') {
 
 function getWorkloadIconInfo(r) {
   if (r.kind === 'database') {
-    return { name: 'postgres', color: '#336791', typeName: 'PostgreSQL Instance' };
+    return { name: 'postgres', color: 'var(--text-main)', typeName: 'PostgreSQL Instance' };
   }
   if (r.kind === 'panel') {
-    return { name: 'zap', color: '#38bdf8', typeName: 'Core Platform Daemon' };
+    return { name: 'zap', color: 'var(--text-main)', typeName: 'Core Platform Daemon' };
   }
 
   const pId = r.projectId ?? r.project_id;
@@ -296,68 +296,68 @@ function getWorkloadIconInfo(r) {
 
   if (isService) {
     if (pt.includes('lavalink') || sc.includes('lavalink') || sc.includes('.jar') || sc.includes('java') || name.includes('lavalink')) {
-      return { name: 'java', color: '#f97316', typeName: 'Java Daemon' };
+      return { name: 'java', color: 'var(--text-main)', typeName: 'Java Daemon' };
     }
     if (pt.includes('python') || sc.includes('python') || sc.includes('.py') || sc.startsWith('py ') || name.includes('python')) {
-      return { name: 'python', color: '#38bdf8', typeName: 'Python Daemon' };
+      return { name: 'python', color: 'var(--text-main)', typeName: 'Python Daemon' };
     }
     if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
-      return { name: 'rust', color: '#dea584', typeName: 'Rust Daemon' };
+      return { name: 'rust', color: 'var(--text-main)', typeName: 'Rust Daemon' };
     }
     if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
-      return { name: 'go', color: '#00add8', typeName: 'Go Daemon' };
+      return { name: 'go', color: 'var(--text-main)', typeName: 'Go Daemon' };
     }
     if (pt.includes('node') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
-      return { name: 'nodejs', color: '#22c55e', typeName: 'Node.js Daemon' };
+      return { name: 'nodejs', color: 'var(--text-main)', typeName: 'Node.js Daemon' };
     }
     if (pt.includes('php') || sc.includes('php')) {
-      return { name: 'php', color: '#777bb4', typeName: 'PHP Daemon' };
+      return { name: 'php', color: 'var(--text-main)', typeName: 'PHP Daemon' };
     }
     if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails') || sc.includes('puma')) {
-      return { name: 'ruby', color: '#cc342d', typeName: 'Ruby Daemon' };
+      return { name: 'ruby', color: 'var(--text-main)', typeName: 'Ruby Daemon' };
     }
     if (pt.includes('docker') || sc.includes('docker')) {
-      return { name: 'docker', color: '#2496ed', typeName: 'Docker Daemon' };
+      return { name: 'docker', color: 'var(--text-main)', typeName: 'Docker Daemon' };
     }
     if (pt.includes('discord') || sc.includes('discord') || name.includes('discord')) {
-      return { name: 'nodejs', color: '#22c55e', typeName: 'Backend Service' };
+      return { name: 'nodejs', color: 'var(--text-main)', typeName: 'Backend Service' };
     }
     if (pt.includes('telegram') || sc.includes('telegram') || name.includes('telegram')) {
-      return { name: 'python', color: '#38bdf8', typeName: 'Backend Service' };
+      return { name: 'python', color: 'var(--text-main)', typeName: 'Backend Service' };
     }
-    return { name: 'terminal', color: 'var(--accent-light)', typeName: 'Backend Service' };
+    return { name: 'terminal', color: 'var(--text-main)', typeName: 'Backend Service' };
   }
 
   // Website kind
   if (pt.includes('node') || pt.includes('express') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
-    return { name: 'nodejs', color: '#22c55e', typeName: 'Node.js App' };
+    return { name: 'nodejs', color: 'var(--text-main)', typeName: 'Node.js App' };
   }
   if (pt.includes('next')) {
-    return { name: 'typescript', color: '#3b82f6', typeName: 'Next.js App' };
+    return { name: 'typescript', color: 'var(--text-main)', typeName: 'Next.js App' };
   }
   if (pt.includes('react') || pt.includes('typescript')) {
-    return { name: 'typescript', color: '#3b82f6', typeName: 'React / TS App' };
+    return { name: 'typescript', color: 'var(--text-main)', typeName: 'React / TS App' };
   }
   if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
-    return { name: 'python', color: '#38bdf8', typeName: 'Python Web' };
+    return { name: 'python', color: 'var(--text-main)', typeName: 'Python Web' };
   }
   if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
-    return { name: 'go', color: '#00add8', typeName: 'Go Web App' };
+    return { name: 'go', color: 'var(--text-main)', typeName: 'Go Web App' };
   }
   if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
-    return { name: 'rust', color: '#dea584', typeName: 'Rust Web App' };
+    return { name: 'rust', color: 'var(--text-main)', typeName: 'Rust Web App' };
   }
   if (pt.includes('php') || sc.includes('php')) {
-    return { name: 'php', color: '#777bb4', typeName: 'PHP Site' };
+    return { name: 'php', color: 'var(--text-main)', typeName: 'PHP Site' };
   }
   if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) {
-    return { name: 'ruby', color: '#cc342d', typeName: 'Ruby Web App' };
+    return { name: 'ruby', color: 'var(--text-main)', typeName: 'Ruby Web App' };
   }
   if (pt.includes('docker') || sc.includes('docker')) {
-    return { name: 'docker', color: '#2496ed', typeName: 'Docker Container' };
+    return { name: 'docker', color: 'var(--text-main)', typeName: 'Docker Container' };
   }
 
-  return { name: 'globe', color: 'var(--accent-light)', typeName: p.project_type || 'Website' };
+  return { name: 'globe', color: 'var(--text-main)', typeName: p.project_type || 'Website' };
 }
 
 // ============================================================================
@@ -398,7 +398,7 @@ function renderResourceBreakdown(resources) {
   setHtmlIfChanged(tbody, filtered.map((r) => {
     const isRunning = r.status === 'running';
     const isMaintenance = r.status === 'maintenance';
-    const kindUpper = r.kind.toUpperCase();
+    const kindLabel = r.kind ? r.kind.charAt(0).toUpperCase() + r.kind.slice(1).toLowerCase() : 'Workload';
     const kindBadgeClass = `badge-res-${r.kind}`;
     const iconInfo = getWorkloadIconInfo(r);
     const kindIconSvg = icon(iconInfo.name, { size: 24, cls: `res-icon-${r.kind}` });
@@ -412,7 +412,7 @@ function renderResourceBreakdown(resources) {
       const sha = r.commitSha ? `<span class="sha-pill" style="font-size:10px; margin-left:4px;">${r.commitSha.slice(0, 7)}</span>` : '';
       subtitle = `<span style="color:var(--text-dim)">Backend Service</span>${sha}`;
     } else {
-      const dom = r.domain ? `<a href="http://${escapeHtml(r.domain)}" target="_blank" class="domain-badge" style="font-size:11px;" onclick="event.stopPropagation()">${escapeHtml(r.domain)}</a>` : (r.port ? `<span style="color:var(--text-dim)">:${r.port}</span>` : '<span style="color:var(--text-dim)">Local only</span>');
+      const dom = r.domain ? `<a href="http://${escapeHtml(r.domain)}" target="_blank" class="domain-badge" style="font-size:11px;" onclick="event.stopPropagation()">${escapeHtml(r.domain)}</a>` : (r.port ? `<span style="color:var(--text-dim)">${r.port}</span>` : '<span style="color:var(--text-dim)">Local only</span>');
       const sha = r.commitSha ? `<span class="sha-pill" style="font-size:10px; margin-left:4px;">${r.commitSha.slice(0, 7)}</span>` : '';
       subtitle = `${dom}${sha}`;
     }
@@ -424,7 +424,7 @@ function renderResourceBreakdown(resources) {
     const effectivePid = r.pid || p.app_pid || p.status?.pid;
 
     const portPid = [
-      r.port ? `:${r.port}` : null,
+      r.port ? `${r.port}` : null,
       effectivePid ? `<span class="res-pid-chip">PID ${effectivePid}</span>` : null,
     ].filter(Boolean).join(' ') || '<span style="color:var(--text-dim)">--</span>';
 
@@ -468,7 +468,7 @@ function renderResourceBreakdown(resources) {
             </div>
           </div>
         </td>
-        <td><span class="${kindBadgeClass}">${kindUpper}</span></td>
+        <td><span class="${kindBadgeClass}">${kindLabel}</span></td>
         <td>${portPid}</td>
         <td>
           <span class="status-dot ${isRunning ? 'online' : isMaintenance ? 'maintenance' : 'offline'}"></span>
@@ -636,11 +636,12 @@ async function loadOverview() {
     if (active && active.active) {
       actBox.style.display = 'block';
       document.getElementById('active-dep-project-name').textContent = active.project.name;
-      document.getElementById('active-dep-kind').textContent = active.active.kind.toUpperCase();
+      const kindRaw = active.active.kind || 'deploy';
+      document.getElementById('active-dep-kind').textContent = kindRaw.charAt(0).toUpperCase() + kindRaw.slice(1).toLowerCase();
       renderPipelineStages('overview-pipeline-track', active.active.stage, active.active.status, active.active.id);
     } else if (pOverview && pOverview.isLooping && pOverview.currentProgress < 6.95) {
       actBox.style.display = 'block';
-      document.getElementById('active-dep-kind').textContent = 'DEPLOYED';
+      document.getElementById('active-dep-kind').textContent = 'Deployed';
       renderPipelineStages('overview-pipeline-track', 'health_checking', 'success', pOverview.lastDeploymentId);
     } else {
       actBox.style.display = 'none';

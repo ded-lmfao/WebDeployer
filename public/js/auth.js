@@ -335,7 +335,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
 
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Signing in...';
+    btn.textContent = 'Signing in';
   }
 
   try {
@@ -380,7 +380,7 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
 
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Verifying 2FA...';
+    btn.textContent = 'Verifying 2FA';
   }
 
   try {
@@ -389,7 +389,7 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
       body: { mfaToken: state.pendingMfaToken, code },
     });
     await applyAuthSuccess(res);
-    toast('Two-Factor Authentication verified!', 'success');
+    toast('Two-Factor Authentication verified.', 'success');
   } catch (err) {
     toast(err.message, 'error');
     if (err.message && (err.message.includes('expired') || err.message.includes('Locked'))) {
@@ -538,8 +538,8 @@ document.getElementById('save-change-password-btn')?.addEventListener('click', a
     renderSecurityStatusSummary();
     toast(
       res.revokedSessions
-        ? `Password updated and ${res.revokedSessions} other session(s) signed out!`
-        : 'Password updated in SQLite!',
+        ? `Password updated and ${res.revokedSessions} other session(s) signed out.`
+        : 'Password updated in SQLite.',
       'success'
     );
     closeModal('modal-change-password');
@@ -584,7 +584,7 @@ export async function start2faSetup() {
 export function copy2faSecret() {
   const raw = state.pending2faSecret || document.getElementById('tfa-secret-display')?.value || '';
   navigator.clipboard.writeText(raw.replace(/\s+/g, '')).then(() => {
-    toast('2FA Base32 secret copied to clipboard!', 'success');
+    toast('2FA Base32 secret copied to clipboard.', 'success');
   }).catch((err) => {
     toast(`Failed to copy to clipboard: ${err.message}`, 'error');
   });
@@ -612,7 +612,7 @@ export async function confirmEnable2fa() {
     if (s2) s2.style.display = 'none';
     const s3 = document.getElementById('sec-2fa-step3-recovery');
     if (s3) s3.style.display = 'block';
-    toast('Two-Factor Authentication enabled!', 'success');
+    toast('Two-Factor Authentication enabled.', 'success');
   } catch (err) {
     toast(`Verification failed: ${err.message}`, 'error');
   }
@@ -643,7 +643,7 @@ export function copyRecoveryCodes() {
   const codes = (state.lastRecoveryCodes || []).join('\n');
   if (!codes) return;
   navigator.clipboard.writeText(codes).then(() => {
-    toast('Recovery codes copied to clipboard!', 'success');
+    toast('Recovery codes copied to clipboard.', 'success');
   }).catch((err) => {
     toast(`Failed to copy to clipboard: ${err.message}`, 'error');
   });
@@ -672,7 +672,7 @@ export async function revokeOtherSessions() {
     const res = await api('/api/auth/sessions/revoke-others', { method: 'POST' });
     state.activeSessions = 1;
     renderSecurityStatusSummary();
-    toast(`Signed out ${res.revoked || 0} other active session(s)!`, 'success');
+    toast(`Signed out ${res.revoked || 0} other active session(s).`, 'success');
   } catch (err) {
     toast(`Failed to revoke sessions: ${err.message}`, 'error');
   }

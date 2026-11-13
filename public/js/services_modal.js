@@ -227,7 +227,7 @@ document.getElementById('service-browse-github-repos-btn')?.addEventListener('cl
   const input = document.getElementById('service-repo');
   if (!sel || !input) return;
   try {
-    toast('Fetching visible GitHub repositories...', 'info');
+    toast('Fetching visible GitHub repositories', 'info');
     const repos = await api('/api/github/repos');
     if (!repos.length) {
       toast('No repositories found for configured token.', 'info');
@@ -273,7 +273,7 @@ document.getElementById('save-service-submit-btn')?.addEventListener('click', as
   const originalText = submitBtn ? submitBtn.textContent : 'Save';
   if (submitBtn) {
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span class="status-dot online" style="display:inline-block; margin-right:6px; animation: pulse 1s infinite;"></span> Saving...';
+    submitBtn.innerHTML = '<span class="status-dot online" style="display:inline-block; margin-right:6px;"></span> Saving';
   }
 
   const id = document.getElementById('service-form-id')?.value;
@@ -328,17 +328,17 @@ document.getElementById('save-service-submit-btn')?.addEventListener('click', as
     let targetId = id;
     if (id) {
       await api(`/api/projects/${id}`, { method: 'PUT', body: payload });
-      toast('Service updated!', 'success');
+      toast('Service updated.', 'success');
     } else {
       const res = await api('/api/projects', { method: 'POST', body: payload });
       targetId = res.project ? res.project.id : res.id;
-      toast(`Service "${payload.name}" created!`, 'success');
+      toast(`Service "${payload.name}" created.`, 'success');
       state.selectedProjectId = targetId;
     }
     closeModal('modal-service');
     if (window.loadProjects) await window.loadProjects();
     if (isManual) {
-      toast(`Service "${payload.name}" ready! Upload your files in the Files tab.`, 'info');
+      toast(`Service "${payload.name}" ready. Upload files in the Files tab.`, 'info');
       if (window.openWebsiteWorkspace) window.openWebsiteWorkspace(targetId, 'files');
     } else {
       if (window.navigateTo) window.navigateTo('services');

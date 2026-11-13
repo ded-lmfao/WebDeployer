@@ -142,8 +142,8 @@ function renderProjectsList() {
     const isOnline = isProjectOnline(p, resItem);
     const isMaintenance = isProjectMaintenance(p, resItem);
 
-    const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7).toUpperCase() : (p.deployedSha ? p.deployedSha.slice(0, 7).toUpperCase() : '');
-    const branchText = (p.branch || 'main').toUpperCase();
+    const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7) : (p.deployedSha ? p.deployedSha.slice(0, 7) : '');
+    const branchText = p.branch || 'main';
 
     const diskStr = resItem?.diskFormatted || resItem?.disk_formatted;
     const pidVal = (isOnline && (p.app_pid || p.status?.pid || resItem?.pid)) ? (p.app_pid || p.status?.pid || resItem?.pid) : null;
@@ -160,44 +160,35 @@ function renderProjectsList() {
     const sc = (p.start_cmd || '').toLowerCase();
     let typeIconName = 'globe';
     let typeName = 'Website Application';
-    let iconColor = 'var(--accent-light)';
+    const iconColor = 'var(--text-main)';
 
     if (pt.includes('node') || pt.includes('express') || sc.includes('node') || sc.includes('npm') || sc.includes('yarn') || sc.includes('pnpm') || sc.includes('bun')) {
       typeIconName = 'nodejs';
       typeName = 'Node.js App';
-      iconColor = '#22c55e';
     } else if (pt.includes('next')) {
       typeIconName = 'typescript';
       typeName = 'Next.js App';
-      iconColor = '#3b82f6';
     } else if (pt.includes('react') || pt.includes('typescript')) {
       typeIconName = 'typescript';
       typeName = 'React / TS App';
-      iconColor = '#3b82f6';
     } else if (pt.includes('python') || sc.includes('python') || sc.includes('.py')) {
       typeIconName = 'python';
       typeName = 'Python Web';
-      iconColor = '#38bdf8';
     } else if (pt.includes('go') || sc.includes('go run') || sc.includes('.go')) {
       typeIconName = 'go';
       typeName = 'Go Web App';
-      iconColor = '#00add8';
     } else if (pt.includes('rust') || sc.includes('cargo') || sc.includes('.rs')) {
       typeIconName = 'rust';
       typeName = 'Rust Web App';
-      iconColor = '#dea584';
     } else if (pt.includes('php') || sc.includes('php')) {
       typeIconName = 'php';
       typeName = 'PHP Site';
-      iconColor = '#777bb4';
     } else if (pt.includes('ruby') || sc.includes('ruby') || sc.includes('rails')) {
       typeIconName = 'ruby';
       typeName = 'Ruby Web App';
-      iconColor = '#cc342d';
     } else if (pt.includes('docker') || sc.includes('docker')) {
       typeIconName = 'docker';
       typeName = 'Docker Container';
-      iconColor = '#2496ed';
     } else if (p.project_type) {
       typeName = p.project_type;
     }
@@ -227,8 +218,8 @@ function renderProjectsList() {
               </div>
             </div>
           </div>
-          <span class="badge ${isOnline ? 'badge-success' : isMaintenance ? 'badge-warning' : 'badge-danger'}" style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; padding: 2px 8px;">
-            ${isOnline ? 'ONLINE' : isMaintenance ? 'MAINTENANCE' : 'OFFLINE'}
+          <span class="badge ${isOnline ? 'badge-success' : isMaintenance ? 'badge-warning' : 'badge-danger'}" style="flex-shrink: 0; font-size: 11px; font-weight: 500; padding: 2px 8px;">
+            ${isOnline ? 'Online' : isMaintenance ? 'Maintenance' : 'Offline'}
           </span>
         </div>
 
@@ -245,7 +236,7 @@ function renderProjectsList() {
           <span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">
             ${icon('git-branch', { size: 10 })} ${escapeHtml(branchText)}${shaText ? ' &bull; ' + escapeHtml(shaText) : ''}
           </span>
-          ${p.port ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">PORT ${p.port}</span>` : ''}
+          ${p.port ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);">Port ${p.port}</span>` : ''}
           ${accessBadge}
           ${diskStr ? `<span class="badge badge-neutral" style="font-size: 10px; padding: 2px 7px; font-family: var(--font-mono);" title="On-Disk Storage">${icon('hard-drive', { size: 10 })} ${diskStr}</span>` : ''}
           ${p.app_started_at && isOnline ? `<span class="badge badge-neutral" style="font-size: 10px; font-family: var(--font-mono);">${icon('clock', { size: 10 })} Started ${formatRelativeTime(p.app_started_at)}</span>` : ''}
@@ -385,7 +376,7 @@ window.openEditWebsiteModal = openEditWebsiteModal;
 async function detectProjectConfiguration() {
   const id = document.getElementById('website-form-id').value;
   if (!id) return;
-  toast('Analyzing repository for build & start commands...', 'info');
+  toast('Analyzing repository for build and start commands', 'info');
   try {
     const res = await api(`/api/projects/${id}/detect`, { method: 'POST' });
     if (res.install) document.getElementById('website-install-cmd').value = res.install;
@@ -396,7 +387,7 @@ async function detectProjectConfiguration() {
         c.classList.toggle('active', c.getAttribute('data-type') === res.type);
       });
     }
-    toast(`Detected ${res.type} application configuration!`, 'success');
+    toast(`Detected ${res.type} application configuration.`, 'success');
   } catch (err) {
     toast(`Detection failed: ${err.message}`, 'error');
   }
@@ -454,7 +445,7 @@ document.getElementById('browse-github-repos-btn')?.addEventListener('click', as
   const sel = document.getElementById('github-repos-select');
   const input = document.getElementById('website-repo');
   try {
-    toast('Fetching visible GitHub repositories...', 'info');
+    toast('Fetching visible GitHub repositories', 'info');
     const repos = await api('/api/github/repos');
     if (!repos.length) {
       toast('No repositories found for configured token.', 'info');
@@ -566,16 +557,16 @@ document.getElementById('save-website-submit-btn')?.addEventListener('click', as
   const oldText = submitBtn ? submitBtn.textContent : '';
   if (submitBtn) {
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span class="btn-spinner"></span> Saving...';
+    submitBtn.innerHTML = '<span class="btn-spinner"></span> Saving';
   }
 
   try {
     if (id) {
       await api(`/api/projects/${id}`, { method: 'PUT', body: payload });
-      toast('Website updated successfully', 'success');
+      toast('Website updated.', 'success');
     } else {
       const res = await api('/api/projects', { method: 'POST', body: payload });
-      toast(`Website "${payload.name}" created successfully!`, 'success');
+      toast(`Website "${payload.name}" created.`, 'success');
       state.selectedProjectId = res.project ? res.project.id : res.id;
     }
     closeModal('modal-website');

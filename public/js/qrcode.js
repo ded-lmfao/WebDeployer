@@ -17,9 +17,9 @@ export function renderTotpQrSvg(text) {
         }
       }
     }
-    return `<svg viewBox="0 0 ${total} ${total}" width="144" height="144" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="${total}" height="${total}" fill="#ffffff"/><path d="${paths}" fill="#0f172a"/></svg>`;
+    return `<svg viewBox="0 0 ${total} ${total}" width="144" height="144" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="${total}" height="${total}" fill="#ffffff"/><path d="${paths}" fill="#0f0f10"/></svg>`;
   } catch {
-    return `<div style="font-size:11px; color:#0f172a; text-align:center; padding:8px;">Use Setup Key</div>`;
+    return `<div style="font-size:11px; color:#0f0f10; text-align:center; padding:8px;">Use Setup Key</div>`;
   }
 }
 

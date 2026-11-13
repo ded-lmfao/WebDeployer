@@ -49,7 +49,7 @@ async function loadGithubView() {
   const tbody = document.getElementById('github-commits-table');
   const commitsPath = `/api/projects/${p.id}/commits`;
   if (!hasCachedApi(commitsPath)) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">Loading commits from mirror...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px;">Loading commits from mirror</td></tr>';
   }
   try {
     const commits = await api(commitsPath, { noCache: true });
@@ -71,7 +71,7 @@ async function loadGithubView() {
             <td>${escapeHtml(c.author || 'Unknown')}</td>
             <td>${formatDate(c.date)}</td>
             <td>
-              ${isLive ? '<span class="badge badge-success">LIVE</span>' : c.deployedBefore ? '<span class="badge badge-neutral">Previously Deployed</span>' : '<span style="color:var(--text-dim)">-</span>'}
+              ${isLive ? '<span class="badge badge-success">Live</span>' : c.deployedBefore ? '<span class="badge badge-neutral">Previously deployed</span>' : '<span style="color:var(--text-dim)">-</span>'}
             </td>
             <td>
               ${hasPower('deploy') ? `
@@ -134,14 +134,14 @@ async function fetchProjectUpdates(projectId) {
     fetchBtn.disabled = true;
     fetchBtn.classList.add('loading');
   }
-  toast('Fetching latest commits from GitHub...', 'info');
+  toast('Fetching latest commits from GitHub', 'info');
   try {
     const res = await api(`/api/projects/${projectId}/fetch`, { method: 'POST', timeoutMs: 30000 });
     const shortSha = res.sha ? res.sha.slice(0, 7) : 'latest';
     if (res.hasNewCommits) {
-      toast(`Fetched new commits (${shortSha}) from GitHub! Ready to deploy.`, 'success');
+      toast(`Fetched new commits (${shortSha}) from GitHub. Ready to deploy.`, 'success');
     } else if (res.needsDeploy) {
-      toast(`Already up to date with GitHub (${shortSha}). Ready to deploy!`, 'success');
+      toast(`Already up to date with GitHub (${shortSha}). Ready to deploy.`, 'success');
     } else {
       toast(`Already up to date with GitHub (${shortSha}). Live deployment matches.`, 'success');
     }
@@ -195,21 +195,21 @@ async function loadDatabaseOverviewSection(db) {
   if (isRunning) {
     stage = 'healthy';
     stageStatus = 'success';
-    if (badge) { badge.textContent = 'ONLINE (LIVE)'; badge.className = 'badge badge-success'; }
+    if (badge) { badge.textContent = 'Online (live)'; badge.className = 'badge badge-success'; }
   } else if (isStarting) {
     stage = 'spawning';
     stageStatus = 'running';
-    if (badge) { badge.textContent = 'STARTING Engine'; badge.className = 'badge badge-warning'; }
+    if (badge) { badge.textContent = 'Starting engine'; badge.className = 'badge badge-warning'; }
   } else if (isStopping) {
     stage = 'spawning';
     stageStatus = 'running';
-    if (badge) { badge.textContent = 'STOPPING Engine'; badge.className = 'badge badge-warning'; }
+    if (badge) { badge.textContent = 'Stopping engine'; badge.className = 'badge badge-warning'; }
   } else if (isError) {
     stage = 'spawning';
     stageStatus = 'failed';
-    if (badge) { badge.textContent = 'ERROR'; badge.className = 'badge badge-danger'; }
+    if (badge) { badge.textContent = 'Error'; badge.className = 'badge badge-danger'; }
   } else {
-    if (badge) { badge.textContent = 'STOPPED'; badge.className = 'badge badge-neutral'; }
+    if (badge) { badge.textContent = 'Stopped'; badge.className = 'badge badge-neutral'; }
   }
   renderPipelineStages('main-pipeline-track', stage, stageStatus, null, DB_PIPELINE_STAGES);
   if (isRunning) {
@@ -221,13 +221,13 @@ async function loadDatabaseOverviewSection(db) {
   const accessBadge = document.getElementById('db-overview-access-badge');
   if (accessBadge) {
     if (accessMode === 'public') {
-      accessBadge.textContent = 'PUBLIC INTERNET';
+      accessBadge.textContent = 'Public internet';
       accessBadge.className = 'badge badge-warning';
     } else if (accessMode === 'allowlist') {
-      accessBadge.textContent = 'IP WHITELIST';
+      accessBadge.textContent = 'IP whitelist';
       accessBadge.className = 'badge badge-info';
     } else {
-      accessBadge.textContent = 'LOCALHOST ONLY';
+      accessBadge.textContent = 'Localhost only';
       accessBadge.className = 'badge badge-neutral';
     }
   }
@@ -322,7 +322,9 @@ async function loadDeploymentsView() {
 
     if (active) {
       if (badge) {
-        badge.textContent = `${active.kind.toUpperCase()} (${active.stage.toUpperCase()})`;
+        const kindLabel = active.kind ? active.kind.charAt(0).toUpperCase() + active.kind.slice(1).toLowerCase() : 'Deploy';
+        const stageLabel = active.stage ? active.stage.replace(/_/g, ' ').toLowerCase() : 'running';
+        badge.textContent = `${kindLabel} (${stageLabel})`;
         badge.className = 'badge badge-warning';
       }
       renderPipelineStages('main-pipeline-track', active.stage, active.status, active.id);
@@ -339,10 +341,10 @@ async function loadDeploymentsView() {
         clearTimeout(deploymentPollTimer);
         deploymentPollTimer = null;
       }
-      // Re-enable any deploy buttons that were in "Deploying..." spinner state
+      // Re-enable any deploy buttons that were in "Deploying" spinner state
       const btns = document.querySelectorAll(`button[onclick*="deployProject"]`);
       btns.forEach((b) => {
-        if (b.disabled && b.innerHTML.includes('Deploying...')) {
+        if (b.disabled && b.innerHTML.includes('Deploying')) {
           b.disabled = false;
           b.innerHTML = 'Deploy';
         }
@@ -353,39 +355,40 @@ async function loadDeploymentsView() {
         if (latest.status === 'success') {
           if (pWater && pWater.isLooping && pWater.currentProgress < 6.95 && pWater.lastDeploymentId === latest.id) {
             if (badge) {
-              badge.textContent = 'FINALIZING DEPLOYMENT...';
+              badge.textContent = 'Finalizing deployment';
               badge.className = 'badge badge-warning';
             }
             renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
           } else {
             if (badge) {
-              badge.textContent = 'DEPLOYED (LIVE)';
+              badge.textContent = 'Deployed (live)';
               badge.className = 'badge badge-success';
             }
             renderPipelineStages('main-pipeline-track', 'health_checking', 'success', latest.id);
           }
         } else if (latest.status === 'failed') {
           if (badge) {
-            badge.textContent = `FAILED (${latest.stage.toUpperCase()})`;
+            const stageLabel = latest.stage ? latest.stage.replace(/_/g, ' ').toLowerCase() : 'error';
+            badge.textContent = `Failed (${stageLabel})`;
             badge.className = 'badge badge-danger';
           }
           renderPipelineStages('main-pipeline-track', latest.stage, 'failed', latest.id);
         } else {
           if (badge) {
-            badge.textContent = 'IDLE';
+            badge.textContent = 'Idle';
             badge.className = 'badge badge-neutral';
           }
           renderPipelineStages('main-pipeline-track', 'idle', 'idle');
         }
       } else if (p && p.app_status === 'running') {
         if (badge) {
-          badge.textContent = 'ONLINE (LIVE)';
+          badge.textContent = 'Online (live)';
           badge.className = 'badge badge-success';
         }
         renderPipelineStages('main-pipeline-track', 'health_checking', 'success', null);
       } else {
         if (badge) {
-          badge.textContent = 'IDLE';
+          badge.textContent = 'Idle';
           badge.className = 'badge badge-neutral';
         }
         renderPipelineStages('main-pipeline-track', 'idle', 'idle');
@@ -439,10 +442,14 @@ function renderDeploymentRow(d, isOverview = false) {
   else if (isRunning) badgeClass = 'badge-warning';
 
   const sha = d.sha ? `<span class="sha-pill">${d.sha.slice(0, 7)}</span>` : '<span style="color:var(--text-dim)">--</span>';
-  const duration = d.finished_at && d.started_at ? `${Math.round((d.finished_at - d.started_at) / 1000)}s` : (isRunning ? 'Running...' : '--');
+  const duration = d.finished_at && d.started_at ? `${Math.round((d.finished_at - d.started_at) / 1000)}s` : (isRunning ? 'Running' : '--');
+  const rawKind = d.kind || 'deploy';
+  const kindLabel = rawKind.charAt(0).toUpperCase() + rawKind.slice(1).toLowerCase().replace(/_/g, ' ');
+  const rawStatus = d.status || '';
+  const statusLabel = rawStatus ? rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase().replace(/_/g, ' ') : '';
   const secondCol = isOverview
     ? `<td><strong>${escapeHtml(d.project_name || 'Website')}</strong></td>`
-    : `<td><span class="badge badge-neutral">${escapeHtml((d.kind || 'deploy').toUpperCase())}</span></td>`;
+    : `<td><span class="badge badge-neutral">${escapeHtml(kindLabel)}</span></td>`;
 
   return `
     <tr>
@@ -450,7 +457,7 @@ function renderDeploymentRow(d, isOverview = false) {
       ${secondCol}
       <td>${sha}</td>
       <td>${duration}</td>
-      <td><span class="badge ${badgeClass}">${escapeHtml((d.status || '').toUpperCase())}</span></td>
+      <td><span class="badge ${badgeClass}">${escapeHtml(statusLabel)}</span></td>
       <td><span style="font-size:12px; color:var(--text-muted);">${formatRelativeTime(d.started_at)}</span></td>
       <td>
         ${hasPower('logs') ? `<button class="btn btn-secondary btn-sm" onclick="openDeploymentDetails(${d.id})">Logs</button>` : '<span style="color:var(--text-dim); font-size:11.5px;">--</span>'}
@@ -467,28 +474,28 @@ async function deployProject(projectId, sha = null) {
   const btns = document.querySelectorAll(`button[onclick*="deployProject(${p.id})"]`);
   btns.forEach((b) => {
     b.disabled = true;
-    b.innerHTML = '<span class="btn-spinner"></span> Deploying...';
+    b.innerHTML = '<span class="btn-spinner"></span> Deploying';
   });
 
   resetWaterPipeline('main-pipeline-track');
   const badge = document.getElementById('pipeline-status-badge');
   if (badge) {
-    badge.textContent = 'STARTING DEPLOYMENT...';
+    badge.textContent = 'Starting deployment';
     badge.className = 'badge badge-warning';
   }
 
   try {
     if (p.project_kind === 'service' && typeof window.renderSingleServicePipeline === 'function') {
-      window.renderSingleServicePipeline(p.id, 'source', 'running', 'DEPLOY (SOURCE)');
+      window.renderSingleServicePipeline(p.id, 'source', 'running', 'Deploy (source)');
     }
     const res = await api(`/api/projects/${p.id}/deploy`, { method: 'POST', body: sha ? { sha } : {} });
-    toast(`Deployment #${res.deploymentId} started for ${p.name}!`, 'success');
+    toast(`Deployment #${res.deploymentId} started for ${p.name}`, 'success');
     if (typeof window.navigateTo === 'function') {
       window.navigateTo('deployments', p.id);
     }
   } catch (err) {
     if (p.project_kind === 'service' && typeof window.renderSingleServicePipeline === 'function') {
-      window.renderSingleServicePipeline(p.id, 'source', 'failed', 'DEPLOY FAILED');
+      window.renderSingleServicePipeline(p.id, 'source', 'failed', 'Deploy failed');
     }
     toast(`Deployment failed to start: ${err.message}`, 'error');
     btns.forEach((b) => {
@@ -505,15 +512,16 @@ async function openDeploymentDetails(depId) {
   const logsDiv = document.getElementById('dep-details-logs');
 
   title.textContent = `Deployment #${depId} Details`;
-  meta.innerHTML = '<span style="color:var(--text-dim)">Loading deployment record...</span>';
-  logsDiv.innerHTML = '<span style="color:var(--text-dim)">Fetching logs...</span>';
+  meta.innerHTML = '<span style="color:var(--text-dim)">Loading deployment record</span>';
+  logsDiv.innerHTML = '<span style="color:var(--text-dim)">Fetching logs</span>';
   openModal('modal-dep-details');
 
   try {
     const data = await api(`/api/deployments/${depId}`);
+    const depStatusLabel = data.status ? data.status.charAt(0).toUpperCase() + data.status.slice(1).toLowerCase().replace(/_/g, ' ') : '';
     meta.innerHTML = `
       <div class="dep-details-meta-row">
-        <div><strong>Status:</strong> <span class="badge ${data.status === 'success' ? 'badge-success' : data.status === 'failed' ? 'badge-danger' : 'badge-warning'}">${data.status.toUpperCase()}</span></div>
+        <div><strong>Status:</strong> <span class="badge ${data.status === 'success' ? 'badge-success' : data.status === 'failed' ? 'badge-danger' : 'badge-warning'}">${escapeHtml(depStatusLabel)}</span></div>
         <div><strong>Commit:</strong> ${data.sha ? `<span class="sha-pill">${data.sha.slice(0, 7)}</span>` : '--'}</div>
         <div><strong>Started:</strong> ${formatDate(data.started_at)}</div>
         <div><strong>Duration:</strong> ${data.finished_at && data.started_at ? Math.round((data.finished_at - data.started_at) / 1000) + 's' : '--'}</div>

@@ -49,11 +49,11 @@ function setActionButtonsLoading(projectId, activeAction) {
     if (isStart || isStop || isRestart || isDeploy) {
       b.disabled = true;
       if (activeAction === 'start' && isStart) {
-        b.innerHTML = '<span class="btn-spinner"></span> Starting...';
+        b.innerHTML = '<span class="btn-spinner"></span> Starting';
       } else if (activeAction === 'stop' && isStop) {
-        b.innerHTML = '<span class="btn-spinner"></span> Stopping...';
+        b.innerHTML = '<span class="btn-spinner"></span> Stopping';
       } else if (activeAction === 'restart' && isRestart) {
-        b.innerHTML = '<span class="btn-spinner"></span> Restarting...';
+        b.innerHTML = '<span class="btn-spinner"></span> Restarting';
       }
     }
   });
@@ -72,7 +72,7 @@ export async function refreshCurrentViewsAfterLifecycle() {
 
 export function handleAutoDeployedRedirect(res, projectId) {
   if (res && res.autoDeployed) {
-    toast(`No release built yet — initial deployment #${res.deploymentId} started automatically!`, 'info');
+    toast(`No release built yet — initial deployment #${res.deploymentId} started automatically.`, 'info');
     if (window.navigateTo) window.navigateTo('deployments', projectId);
     return true;
   }
@@ -87,12 +87,12 @@ export async function startProject(projectId) {
   if (proj) {
     applyProjectLifecycleState(proj, 'starting');
     if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
-      window.renderSingleServicePipeline(projectId, 'source', 'running', 'CHECKING FILES & PORT');
+      window.renderSingleServicePipeline(projectId, 'source', 'running', 'Checking files and port');
       setTimeout(() => {
-        if (proj.app_status === 'starting') window.renderSingleServicePipeline(projectId, 'deps', 'running', 'ENVIRONMENT & DEPS');
+        if (proj.app_status === 'starting') window.renderSingleServicePipeline(projectId, 'deps', 'running', 'Environment and deps');
       }, 700);
       setTimeout(() => {
-        if (proj.app_status === 'starting') window.renderSingleServicePipeline(projectId, 'daemon', 'running', 'SPAWNING DAEMON');
+        if (proj.app_status === 'starting') window.renderSingleServicePipeline(projectId, 'daemon', 'running', 'Spawning daemon');
       }, 1400);
     }
   }
@@ -106,12 +106,12 @@ export async function startProject(projectId) {
         window.renderSingleServicePipeline(projectId, 'online', 'success', '');
       }
     }
-    toast('Process started successfully.', 'success');
+    toast('Process started.', 'success');
   } catch (err) {
     if (proj) {
       applyProjectLifecycleState(proj, 'stopped', null);
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
-        window.renderSingleServicePipeline(projectId, 'daemon', 'failed', 'START FAILED');
+        window.renderSingleServicePipeline(projectId, 'daemon', 'failed', 'Start failed');
       }
     }
     toast(`Start failed: ${err.message}`, 'error');
@@ -131,7 +131,7 @@ export async function stopProject(projectId) {
   if (proj) {
     applyProjectLifecycleState(proj, 'stopping');
     if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
-      window.renderSingleServicePipeline(projectId, 'daemon', 'running', 'STOPPING...');
+      window.renderSingleServicePipeline(projectId, 'daemon', 'running', 'Stopping');
     }
   }
 
@@ -140,10 +140,10 @@ export async function stopProject(projectId) {
     if (proj) {
       applyProjectLifecycleState(proj, 'stopped', null);
       if (proj.project_kind === 'service' && window.renderSingleServicePipeline) {
-        window.renderSingleServicePipeline(projectId, 'source', 'idle', 'STOPPED');
+        window.renderSingleServicePipeline(projectId, 'source', 'idle', 'Stopped');
       }
     }
-    toast('Process stopped successfully.', 'info');
+    toast('Process stopped.', 'info');
   } catch (err) {
     if (proj) {
       applyProjectLifecycleState(proj, prevStatus, prevPid);
@@ -170,7 +170,7 @@ export async function toggleMaintenanceMode(projectId) {
     if (res && res.maintenance) {
       toast('Maintenance Mode enabled — visitors now see the Under Maintenance page.', 'warning');
     } else {
-      toast('Maintenance Mode disabled — live website resumed!', 'success');
+      toast('Maintenance Mode disabled — live website resumed.', 'success');
     }
   } catch (err) {
     toast(`Maintenance toggle failed: ${err.message}`, 'error');

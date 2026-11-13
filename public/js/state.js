@@ -539,7 +539,7 @@ function showCopyDialog({ title = 'Copy Value', message = '', value = '' } = {})
     };
 
     confirmBtn.onclick = async () => {
-      await copyTextToClipboard(value, 'Copied to clipboard!');
+      await copyTextToClipboard(value, 'Copied to clipboard');
       cleanup();
     };
     cancelBtn.onclick = () => cleanup();
@@ -587,7 +587,7 @@ function formatDuration(sec) {
 
 
 
-function setBtnLoading(btn, loading, defaultText, loadingText = 'Saving...') {
+function setBtnLoading(btn, loading, defaultText, loadingText = 'Saving') {
   if (!btn) return;
   btn.disabled = loading;
   if (loading) {

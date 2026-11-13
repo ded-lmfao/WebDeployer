@@ -189,7 +189,7 @@ function updateWaterDOM(pipeline) {
             setDisplay(num, 'block', '_lastNumDisplay');
             setDisplay(check, 'none', '_lastCheckDisplay');
             setDisplay(cross, 'none', '_lastCrossDisplay');
-            setText(sub, 'Emptying...', '_lastSubText');
+            setText(sub, 'Emptying', '_lastSubText');
             setClass(sub, 'water-node-sub draining active', '_lastSubClass');
             setClass(name, 'water-node-name active', '_lastNameClass');
           } else {
@@ -207,7 +207,7 @@ function updateWaterDOM(pipeline) {
             setDisplay(num, 'block', '_lastNumDisplay');
             setDisplay(check, 'none', '_lastCheckDisplay');
             setDisplay(cross, 'none', '_lastCrossDisplay');
-            setText(sub, 'Emptying...', '_lastSubText');
+            setText(sub, 'Emptying', '_lastSubText');
             setClass(sub, 'water-node-sub draining', '_lastSubClass');
             setClass(name, 'water-node-name active', '_lastNameClass');
           }
@@ -217,7 +217,7 @@ function updateWaterDOM(pipeline) {
           setDisplay(num, 'block', '_lastNumDisplay');
           setDisplay(check, 'none', '_lastCheckDisplay');
           setDisplay(cross, 'none', '_lastCrossDisplay');
-          setText(sub, 'Emptying...', '_lastSubText');
+          setText(sub, 'Emptying', '_lastSubText');
           setClass(sub, 'water-node-sub draining', '_lastSubClass');
           setClass(name, 'water-node-name active', '_lastNameClass');
         }
@@ -252,7 +252,7 @@ function updateWaterDOM(pipeline) {
         setDisplay(num, 'block', '_lastNumDisplay');
         setDisplay(check, 'none', '_lastCheckDisplay');
         setDisplay(cross, 'none', '_lastCrossDisplay');
-        const activeSub = vialHeight >= 99 ? `${s.label}...` : 'Filling...';
+        const activeSub = vialHeight >= 99 ? `${s.label}` : 'Filling';
         setText(sub, activeSub, '_lastSubText');
         setClass(sub, 'water-node-sub active', '_lastSubClass');
         setClass(name, 'water-node-name active', '_lastNameClass');
@@ -303,13 +303,13 @@ function updateWaterDOM(pipeline) {
   if (isSuccess && P >= maxP - 0.05) {
     if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
       const badge = document.getElementById('pipeline-status-badge');
-      if (badge && !badge.textContent.includes('DEPLOYED')) {
-        badge.textContent = 'DEPLOYED (LIVE)';
+      if (badge && !badge.textContent.toLowerCase().includes('deployed')) {
+        badge.textContent = 'Deployed (live)';
         badge.className = 'badge badge-success';
       }
       const overviewBadge = document.getElementById('active-dep-kind');
-      if (overviewBadge && !overviewBadge.textContent.includes('LIVE')) {
-        overviewBadge.textContent = 'DEPLOYED';
+      if (overviewBadge && !overviewBadge.textContent.toLowerCase().includes('live')) {
+        overviewBadge.textContent = 'Deployed';
         overviewBadge.className = 'badge badge-success';
       }
       if (typeof window.renderWebsiteWorkspaceHeader === 'function') {
@@ -320,39 +320,39 @@ function updateWaterDOM(pipeline) {
     if (svcMatch) {
       const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
       if (sBadge) {
-        // Redundant status removed when online; main card header already shows ONLINE
+        // Redundant status removed when online; main card header already shows Online
         sBadge.style.display = 'none';
       }
     }
   } else if (isDraining && P > 0.1) {
     if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
       const badge = document.getElementById('pipeline-status-badge');
-      if (badge && !badge.textContent.includes('STOPPING')) {
-        badge.textContent = 'STOPPING...';
+      if (badge && !badge.textContent.toLowerCase().includes('stopping')) {
+        badge.textContent = 'Stopping';
         badge.className = 'badge badge-warning';
       }
     }
     const svcMatch = pipeline.containerId.match(/^service-pipeline-track-(\d+)$/);
     if (svcMatch) {
       const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
-      if (sBadge && !sBadge.textContent.includes('STOPPING')) {
-        sBadge.textContent = 'STOPPING...';
+      if (sBadge && !sBadge.textContent.toLowerCase().includes('stopping')) {
+        sBadge.textContent = 'Stopping';
         sBadge.className = 'badge badge-warning';
       }
     }
   } else if (pipeline.status === 'idle' && P <= 0.05) {
     if (pipeline.containerId === 'main-pipeline-track' || pipeline.containerId === 'overview-pipeline-track') {
       const badge = document.getElementById('pipeline-status-badge');
-      if (badge && badge.textContent !== 'IDLE') {
-        badge.textContent = 'IDLE';
+      if (badge && badge.textContent !== 'Idle') {
+        badge.textContent = 'Idle';
         badge.className = 'badge badge-neutral';
       }
     }
     const svcMatch = pipeline.containerId.match(/^service-pipeline-track-(\d+)$/);
     if (svcMatch) {
       const sBadge = document.getElementById(`service-pipeline-badge-${svcMatch[1]}`);
-      if (sBadge && sBadge.textContent !== 'STOPPED' && sBadge.textContent !== 'IDLE') {
-        sBadge.textContent = 'STOPPED';
+      if (sBadge && sBadge.textContent !== 'Stopped' && sBadge.textContent !== 'Idle') {
+        sBadge.textContent = 'Stopped';
         sBadge.className = 'badge badge-neutral';
       }
     }

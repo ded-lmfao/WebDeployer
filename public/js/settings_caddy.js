@@ -14,12 +14,12 @@ export function renderCaddyModalBanner(p) {
   const activeDomains = Array.isArray(p.domains) ? p.domains.filter(Boolean) : [];
   const domainsHtml = activeDomains.length
     ? activeDomains.map((d) => `
-        <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(37,99,235,0.16); border:1px solid rgba(59,130,246,0.4); border-radius:5px; padding:2px 8px; margin-right:4px;">
-          <a href="https://${escapeHtml(d)}" target="_blank" style="color:#60a5fa; font-family:monospace; font-weight:600; text-decoration:none;">${escapeHtml(d)} &nearr;</a>
-          <button type="button" onclick="removeSingleCaddyDomain('${escapeHtml(d)}')" title="Remove domain" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:13px; line-height:1; padding:0 2px;">&times;</button>
+        <span style="display:inline-flex; align-items:center; gap:6px; background:var(--bg-card-hover); border:1px solid var(--border-medium); border-radius:var(--radius-sm); padding:2px 8px; margin-right:4px;">
+          <a href="https://${escapeHtml(d)}" target="_blank" style="color:var(--accent-light); font-family:var(--font-mono); font-weight:500; text-decoration:none;">${escapeHtml(d)} &nearr;</a>
+          <button type="button" onclick="removeSingleCaddyDomain('${escapeHtml(d)}')" title="Remove domain" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:13px; line-height:1; padding:0 2px;">&times;</button>
         </span>
       `).join('')
-    : '<code style="color:var(--text-muted); font-weight:600;">Local only (127.0.0.1:' + (p.port || 3000) + ')</code>';
+    : '<code style="color:var(--text-muted); font-weight:500;">Local only (127.0.0.1:' + (p.port || 3000) + ')</code>';
 
   banner.innerHTML = `
     <div style="background: var(--bg-card); padding: 12px; border-radius: var(--radius-md); font-size: 13px; border: 1px solid var(--border-subtle);">
@@ -48,7 +48,7 @@ export async function openNginxModal(projectId) {
 
   const preview = document.getElementById('nginx-config-preview');
   renderCaddyModalBanner(p);
-  if (preview) preview.value = 'Generating Caddyfile configuration...';
+  if (preview) preview.value = 'Generating Caddyfile configuration';
   openModal('modal-nginx');
 
   try {
@@ -91,11 +91,11 @@ export async function saveCaddyDomains() {
   const applyBtn = document.getElementById('nginx-apply-btn');
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Saving...';
+    btn.textContent = 'Saving';
   }
   if (applyBtn) {
     applyBtn.disabled = true;
-    applyBtn.textContent = 'Applying Caddy...';
+    applyBtn.textContent = 'Applying Caddy';
   }
 
   try {
@@ -142,10 +142,10 @@ export async function saveCaddyDomains() {
 // Attach event listeners
 document.getElementById('nginx-certbot-btn')?.addEventListener('click', async () => {
   if (!activeNginxProjectId) return;
-  toast('Running Let\'s Encrypt Certbot... This may take up to 30 seconds.', 'info');
+  toast('Running Let\'s Encrypt Certbot. This may take up to 30 seconds.', 'info');
   try {
     await api(`/api/projects/${activeNginxProjectId}/nginx/certbot`, { method: 'POST' });
-    toast('SSL certificate provisioned successfully with Let\'s Encrypt!', 'success');
+    toast('SSL certificate provisioned with Let\'s Encrypt.', 'success');
     await openNginxModal(activeNginxProjectId);
   } catch (err) {
     toast(`Certbot failed: ${err.message}`, 'error');

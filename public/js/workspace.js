@@ -213,19 +213,19 @@ function renderDatabaseWorkspaceHeader(banner) {
   if (badge) {
     if (isRunning) {
       badge.className = 'badge badge-success';
-      badge.textContent = 'ONLINE';
+      badge.textContent = 'Online';
     } else if (isStarting) {
       badge.className = 'badge badge-warning';
-      badge.textContent = 'STARTING';
+      badge.textContent = 'Starting';
     } else if (isStopping) {
       badge.className = 'badge badge-warning';
-      badge.textContent = 'STOPPING';
+      badge.textContent = 'Stopping';
     } else if (isError) {
       badge.className = 'badge badge-danger';
-      badge.textContent = 'ERROR';
+      badge.textContent = 'Error';
     } else {
       badge.className = 'badge badge-neutral';
-      badge.textContent = 'STOPPED';
+      badge.textContent = 'Stopped';
     }
   }
 
@@ -246,8 +246,8 @@ function renderDatabaseWorkspaceHeader(banner) {
     const links = document.getElementById('ws-project-links');
     if (links) {
       let accessText = `${icon('lock', { size: 11 })} Localhost`;
-      if (accessMode === 'allowlist') accessText = `${icon('shield', { size: 11 })} IP Whitelist`;
-      else if (accessMode === 'public') accessText = `${icon('globe', { size: 11 })} Public Internet`;
+      if (accessMode === 'allowlist') accessText = `${icon('shield', { size: 11 })} IP whitelist`;
+      else if (accessMode === 'public') accessText = `${icon('globe', { size: 11 })} Public internet`;
 
       links.innerHTML = `
         ${d.domain ? `
@@ -299,9 +299,9 @@ function renderDatabaseWorkspaceHeader(banner) {
               ${isRunning
                 ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="6" width="12" height="12"></rect></svg><span>Stop</span>`
                 : isStarting
-                  ? `<span class="btn-spinner"></span><span>Starting...</span>`
+                  ? `<span class="btn-spinner"></span><span>Starting</span>`
                   : isStopping
-                    ? `<span class="btn-spinner"></span><span>Stopping...</span>`
+                    ? `<span class="btn-spinner"></span><span>Stopping</span>`
                     : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Start</span>`}
             </button>
             <button class="btn btn-secondary btn-sm ws-btn-restart" onclick="restartDatabase(${d.id})" title="Restart PostgreSQL cluster" ${(isStarting || isStopping) ? 'disabled' : ''}>
@@ -421,13 +421,13 @@ function renderWebsiteWorkspaceHeader() {
   if (badge) {
     if (isOnline) {
       badge.className = 'badge badge-success';
-      badge.textContent = 'ONLINE';
+      badge.textContent = 'Online';
     } else if (isMaintenance) {
       badge.className = 'badge badge-warning';
-      badge.textContent = 'MAINTENANCE';
+      badge.textContent = 'Maintenance';
     } else {
       badge.className = 'badge badge-danger';
-      badge.textContent = 'OFFLINE';
+      badge.textContent = 'Offline';
     }
   }
 
@@ -579,7 +579,7 @@ function renderWebsiteWorkspaceHeader() {
               <span>Restart</span>
             </button>
             ${!isService ? `
-              <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode'}" style="${isMaintenance ? 'background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
+              <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceMode(${p.id})" title="${isMaintenance ? 'Exit Maintenance Mode and resume live website' : 'Enable Maintenance Mode'}" style="${isMaintenance ? 'background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-light);' : ''}">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
                 <span>${isMaintenance ? 'Exit Maint.' : 'Maint.'}</span>
               </button>

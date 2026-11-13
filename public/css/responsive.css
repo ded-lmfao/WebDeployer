@@ -72,10 +72,7 @@
     min-width: 0;
     width: 100%;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.15s ease, transform 0.1s ease;
-  }
-  .mobile-nav-item:active {
-    transform: scale(0.94);
+    transition: color var(--transition-fast);
   }
   .mobile-nav-item svg {
     width: 18px;
@@ -83,17 +80,16 @@
     flex-shrink: 0;
   }
   .mobile-nav-item span {
-    font-size: 10px;
-    line-height: 1.1;
+    font-size: 10.5px;
+    line-height: 1.15;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
-    letter-spacing: -0.2px;
   }
   .mobile-nav-item.active {
     color: var(--accent-light);
-    font-weight: 600;
+    font-weight: 500;
   }
   .mobile-nav-home svg {
     width: 19px;

@@ -78,7 +78,7 @@ async function loadLogsView() {
     }
 
     if (terminal) {
-      terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">Loading PostgreSQL logs for ${escapeHtml(db.name)}...</span></div>`;
+      terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">Loading PostgreSQL logs for ${escapeHtml(db.name)}</span></div>`;
     }
 
     try {
@@ -132,7 +132,7 @@ async function loadLogsView() {
   }
 
   if (terminal) {
-    terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">Connecting to app logs for ${escapeHtml(p.name)}...</span></div>`;
+    terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">Connecting to app logs for ${escapeHtml(p.name)}</span></div>`;
   }
 
   startLogStream();
@@ -208,7 +208,7 @@ function renderTerminalLogs() {
     const targetName = isDb ? (db?.name || 'database') : (p?.name || 'application');
     const filterNote = (lvlFilter || q)
       ? `No log entries match filter (${[lvlFilter, q].filter(Boolean).join(', ')}).`
-      : `Waiting for logs from ${targetName}...`;
+      : `Waiting for logs from ${targetName}`;
     terminal.innerHTML = `<div class="log-line log-empty-placeholder"><span class="log-ts">${new Date().toLocaleTimeString()}</span><span class="log-lvl-info">${escapeHtml(filterNote)}</span></div>`;
     return;
   }

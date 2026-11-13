@@ -86,7 +86,7 @@ export async function loadMonitorView() {
           <td>${p.status?.uptimeMs ? formatDuration(p.status.uptimeMs / 1000) : '--'}</td>
           <td>${p.deployedSha ? `<span class="sha-pill">${p.deployedSha.slice(0, 7)}</span>` : '--'}</td>
           <td>${p.disk ? `${(p.disk.used / 1048576).toFixed(1)} MB` : '--'}</td>
-          <td><span class="badge ${p.deployStatus?.status === 'success' ? 'badge-success' : 'badge-neutral'}">${p.deployStatus?.status || 'idle'}</span></td>
+          <td><span class="badge ${p.deployStatus?.status === 'success' ? 'badge-success' : 'badge-neutral'}">${p.deployStatus?.status ? escapeHtml(p.deployStatus.status.charAt(0).toUpperCase() + p.deployStatus.status.slice(1)) : 'Idle'}</span></td>
         </tr>
       `;
       }).join(''));
@@ -107,26 +107,26 @@ export function renderSecurityStatusSummary() {
   if (badge) {
     const isProtected = is2fa || pkCount > 0;
     badge.className = `badge ${isProtected ? 'badge-success' : 'badge-warning'}`;
-    badge.textContent = isProtected ? 'PROTECTED' : 'UNPROTECTED';
+    badge.textContent = isProtected ? 'Protected' : 'Unprotected';
   }
   const unameEl = document.getElementById('settings-sec-username');
-  if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main Admin' : 'User'})`;
+  if (unameEl) unameEl.textContent = `${state.user.username} (${state.user.isMainAdmin ? 'Main admin' : 'User'})`;
 
   const pkText = document.getElementById('settings-sec-passkeys-text');
   if (pkText) {
-    pkText.textContent = pkCount > 0 ? `${pkCount} Registered` : 'None';
+    pkText.textContent = pkCount > 0 ? `${pkCount} registered` : 'None';
     pkText.style.color = pkCount > 0 ? 'var(--text-main)' : 'var(--text-dim)';
   }
 
   const pkModalBadge = document.getElementById('sec-passkey-modal-badge');
   if (pkModalBadge) {
     pkModalBadge.className = `badge ${pkCount > 0 ? 'badge-success' : 'badge-neutral'}`;
-    pkModalBadge.textContent = `${pkCount} Registered`;
+    pkModalBadge.textContent = `${pkCount} registered`;
   }
 
   const tfaText = document.getElementById('settings-sec-2fa-text');
   if (tfaText) {
-    tfaText.textContent = is2fa ? 'Enabled' : 'Not Enabled';
+    tfaText.textContent = is2fa ? 'Enabled' : 'Not enabled';
     tfaText.style.color = is2fa ? 'var(--text-main)' : 'var(--warning-light)';
   }
 
@@ -204,10 +204,10 @@ export async function loadSettingsView() {
       if (activeCount > 0) {
         if (tokBadge) {
           const maskedTip = s.github_token_masked ? ` title="${escapeHtml(s.github_token_masked)}"` : '';
-          tokBadge.innerHTML = `<span class="badge badge-success"${maskedTip}>${activeCount} ACTIVE</span>`;
+          tokBadge.innerHTML = `<span class="badge badge-success"${maskedTip}>${activeCount} active</span>`;
         }
       } else {
-        if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">NOT SET</span>';
+        if (tokBadge) tokBadge.innerHTML = '<span class="badge badge-neutral">Not set</span>';
       }
       renderGithubTokensRows();
     }
@@ -244,7 +244,7 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
 
   try {
     await api('/api/settings', { method: 'PUT', body: payload });
-    toast(`Global settings & ${cleanTokens.length} GitHub token(s) saved in SQLite!`, 'success');
+    toast(`Global settings and ${cleanTokens.length} GitHub token(s) saved in SQLite.`, 'success');
     await loadSettingsView();
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error');
@@ -388,7 +388,7 @@ document.getElementById('restart-panel-btn')?.addEventListener('click', async ()
     return;
   }
 
-  toast('Panel is restarting... reconnecting', 'info', 8000);
+  toast('Panel is restarting. Reconnecting', 'info', 8000);
   await new Promise((r) => setTimeout(r, 1500));
   for (let i = 0; i < 60; i++) {
     try {
@@ -439,16 +439,16 @@ export async function loadSystemVersionInfo(quiet = false) {
       badgeEl.style.color = '';
       if (v.update_in_progress) {
         badgeEl.className = 'badge badge-warning';
-        badgeEl.textContent = '● Update in Progress';
+        badgeEl.textContent = 'Update in progress';
       } else if (v.ready_to_restart) {
         badgeEl.className = 'badge badge-warning';
-        badgeEl.textContent = 'Restart Required';
+        badgeEl.textContent = 'Restart required';
       } else if (v.has_update) {
         badgeEl.className = 'badge badge-success';
-        badgeEl.textContent = `Update Available (${v.remote_commit})`;
+        badgeEl.textContent = `Update available (${v.remote_commit})`;
       } else {
         badgeEl.className = 'badge badge-neutral';
-        badgeEl.textContent = 'Up to Date';
+        badgeEl.textContent = 'Up to date';
       }
     }
     return v;
@@ -486,18 +486,18 @@ export async function savePlatformUpdateRepo() {
 export async function checkPlatformUpdates(manual = false) {
   const btn = document.getElementById('check-platform-update-btn');
   if (btn) btn.disabled = true;
-  if (manual) toast('Checking remote repository for latest commits...', 'info', 2500);
+  if (manual) toast('Checking remote repository for latest commits', 'info', 2500);
 
   const v = await loadSystemVersionInfo(!manual);
   if (btn) btn.disabled = false;
 
   if (manual && v) {
     if (v.ready_to_restart) {
-      toast('A new release is already compiled and waiting! Click Restart Panel to activate it.', 'warning', 6000);
+      toast('A new release is compiled and waiting. Click Restart Panel to activate it.', 'warning', 6000);
     } else if (v.has_update) {
-      toast(`New commit ${v.remote_commit} available on origin/${v.current_branch}! Click Update to apply.`, 'success', 5000);
+      toast(`New commit ${v.remote_commit} available on origin/${v.current_branch}. Click Update to apply.`, 'success', 5000);
     } else {
-      toast(`WebDep is already up to date with origin/${v.current_branch} (${v.current_commit})`, 'success');
+      toast(`WebDep is already up to date with origin/${v.current_branch} (${v.current_commit}).`, 'success');
     }
   }
 }
@@ -514,17 +514,17 @@ function updatePipelineStepIndicators(progress, isError = false) {
   const card4 = document.getElementById('step-card-4');
 
   if (progress >= 10 && dot1) {
-    dot1.textContent = '✅';
-    if (card1) card1.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+    dot1.innerHTML = icon('check', { size: 12 });
+    if (card1) card1.style.borderColor = 'var(--success-border)';
   }
   if (progress >= 35 && dot2) {
-    dot2.textContent = '✅';
-    if (card2) card2.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+    dot2.innerHTML = icon('check', { size: 12 });
+    if (card2) card2.style.borderColor = 'var(--success-border)';
   }
   if (progress >= 45 && dot3) {
     if (progress >= 95) {
       dot3.innerHTML = icon('check', { size: 12 });
-      if (card3) card3.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+      if (card3) card3.style.borderColor = 'var(--success-border)';
     } else {
       dot3.innerHTML = icon('refresh', { size: 12, cls: 'icon-spin' });
       if (card3) card3.style.borderColor = 'var(--accent-light)';
@@ -532,7 +532,7 @@ function updatePipelineStepIndicators(progress, isError = false) {
   }
   if (progress >= 100 && dot4) {
     dot4.innerHTML = isError ? icon('x', { size: 12 }) : icon('check', { size: 12 });
-    if (card4) card4.style.borderColor = isError ? 'var(--danger)' : 'rgba(16, 185, 129, 0.6)';
+    if (card4) card4.style.borderColor = isError ? 'var(--danger)' : 'var(--success-border)';
   }
 }
 
@@ -543,9 +543,9 @@ export async function startPlatformUpdate() {
   const ok = await showConfirmDialog({
     title: 'Update WebDep to Latest Commit',
     message: `Fetch latest commits from <strong>origin/${escapeHtml(branchName)}</strong> and recompile WebDep?<br><br>
-    &bull; <strong style="color:var(--success);">Safe & Non-Destructive:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file are completely untouched.<br>
-    &bull; <strong style="color:var(--accent-light);">Resource-Safe:</strong> Compiled in low-RAM mode (<code>CARGO_BUILD_JOJOBS=1</code>) to prevent VPS out-of-memory errors.<br>
-    &bull; <strong style="color:var(--text-main);">Zero Unplanned Downtime:</strong> Once compilation finishes, WebDep will pause and ask for your confirmation before restarting.`,
+    &bull; <strong style="color:var(--success);">Preserves data:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file stay untouched.<br>
+    &bull; <strong style="color:var(--accent-light);">Low-RAM build:</strong> Compiled with <code>CARGO_BUILD_JOBS=1</code> to prevent out-of-memory errors.<br>
+    &bull; <strong style="color:var(--text-main);">Controlled restart:</strong> WebDep pauses after compilation and waits for confirmation before restarting.`,
     confirmText: 'Fetch & Compile WebDep',
     danger: false,
   });
@@ -569,13 +569,13 @@ export async function startPlatformUpdate() {
     if (card) card.style.borderColor = 'var(--border)';
   });
 
-  if (stepText) stepText.textContent = 'Initializing update pipeline...';
+  if (stepText) stepText.textContent = 'Initializing update pipeline';
   if (pctText) pctText.textContent = '5%';
   if (progressBar) {
     progressBar.style.width = '5%';
-    progressBar.style.background = 'var(--accent-primary)';
+    progressBar.style.background = 'var(--accent)';
   }
-  if (consoleLogs) consoleLogs.textContent = 'Connecting to backend update service...\n';
+  if (consoleLogs) consoleLogs.textContent = 'Connecting to backend update service\n';
   if (bannerMsg) bannerMsg.textContent = 'Preserving your databases and environment settings while building the latest release.';
   if (statusBanner) statusBanner.style.display = 'flex';
   if (restartPrompt) restartPrompt.style.display = 'none';
@@ -601,7 +601,7 @@ export async function startPlatformUpdate() {
   updatePollTimer = setInterval(async () => {
     try {
       const st = await api('/api/system/update/status');
-      if (stepText) stepText.textContent = st.step || 'Building...';
+      if (stepText) stepText.textContent = st.step || 'Building';
       if (pctText) pctText.textContent = `${st.progress || 0}%`;
       if (progressBar) progressBar.style.width = `${st.progress || 0}%`;
 
@@ -620,17 +620,17 @@ export async function startPlatformUpdate() {
         if (bannerMsg) bannerMsg.textContent = `Update halted: ${st.error || 'Review build logs above'}. Previous binary kept intact.`;
         if (dismissBtn) dismissBtn.disabled = false;
         if (closeBtn) closeBtn.style.display = 'block';
-        toast('Update failed! Previous version was restored with zero downtime.', 'error', 8000);
+        toast('Update failed. Previous version remains active.', 'error', 8000);
       } else if (st.status === 'restarting' || st.status === 'ready_to_restart' || st.status === 'success') {
         clearInterval(updatePollTimer);
         updatePollTimer = null;
-        if (stepText) stepText.textContent = 'Update complete! Restarting WebDep panel...';
+        if (stepText) stepText.textContent = 'Update complete. Restarting WebDep panel';
         if (progressBar) {
           progressBar.style.width = '100%';
           progressBar.style.background = 'var(--success)';
         }
         if (spinner) spinner.style.display = 'block';
-        if (bannerMsg) bannerMsg.textContent = 'Restarting WebDep panel now. Reconnecting automatically...';
+        if (bannerMsg) bannerMsg.textContent = 'Restarting WebDep panel now. Reconnecting automatically.';
 
         void pollReconnectionAfterUpdate();
       }
@@ -643,7 +643,7 @@ export async function startPlatformUpdate() {
 export async function executePostUpdateRestart() {
   const ok = await showConfirmDialog({
     title: 'Restart WebDep Panel',
-    message: 'Restart the WebDep panel now to activate the new version? The dashboard will briefly reconnect in ~3 seconds.',
+    message: 'Restart the WebDep panel now to activate the new version? The dashboard will reconnect in about 3 seconds.',
     confirmText: 'Restart Now',
     danger: false,
   });
@@ -661,8 +661,8 @@ export async function executePostUpdateRestart() {
   if (restartPrompt) restartPrompt.style.display = 'none';
   if (statusBanner) statusBanner.style.display = 'flex';
   if (spinner) spinner.style.display = 'block';
-  if (stepText) stepText.textContent = 'Restarting WebDep service...';
-  if (bannerMsg) bannerMsg.textContent = 'Triggering service restart. Waiting for WebDep to come back online...';
+  if (stepText) stepText.textContent = 'Restarting WebDep service';
+  if (bannerMsg) bannerMsg.textContent = 'Triggering service restart. Waiting for WebDep to come back online';
   if (dismissBtn) dismissBtn.disabled = true;
   if (closeBtn) closeBtn.style.display = 'none';
 
@@ -699,14 +699,14 @@ export async function pollReconnectionAfterUpdate() {
   await new Promise((r) => setTimeout(r, 2000));
 
   for (let attempt = 1; attempt <= 90; attempt++) {
-    if (bannerMsg) bannerMsg.textContent = `Probing WebDep service (Attempt ${attempt}/90)...`;
+    if (bannerMsg) bannerMsg.textContent = `Probing WebDep service (Attempt ${attempt}/90)`;
     try {
       const res = await fetch('/healthz', { cache: 'no-store' });
       if (res.ok) {
-        if (stepText) stepText.textContent = 'WebDep is back online!';
-        if (bannerMsg) bannerMsg.textContent = 'Updated release verified live! Reloading dashboard in 1.5s...';
+        if (stepText) stepText.textContent = 'WebDep is back online.';
+        if (bannerMsg) bannerMsg.textContent = 'Updated release verified live. Reloading dashboard in 1.5s';
         if (spinner) spinner.style.display = 'none';
-        toast('WebDep updated and restarted successfully!', 'success', 4000);
+        toast('WebDep updated and restarted.', 'success', 4000);
         setTimeout(() => window.location.reload(), 1500);
         return;
       }

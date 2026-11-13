@@ -47,9 +47,9 @@ async function loadReleasesView() {
             <td style="max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.message || '')}</td>
             <td>${escapeHtml(r.author || 'Unknown')}</td>
             <td>${formatDate(r.deployed_at || r.created_at)}</td>
-            <td><span class="badge ${r.build_status === 'success' ? 'badge-success' : 'badge-neutral'}">${r.build_status}</span></td>
-            <td><span class="badge ${r.health_status === 'ok' ? 'badge-success' : 'badge-neutral'}">${r.health_status}</span></td>
-            <td>${isLive ? '<span class="badge badge-success">LIVE</span>' : '<span class="badge badge-neutral">Retained</span>'}</td>
+            <td><span class="badge ${r.build_status === 'success' ? 'badge-success' : 'badge-neutral'}">${escapeHtml(r.build_status ? r.build_status.charAt(0).toUpperCase() + r.build_status.slice(1) : '')}</span></td>
+            <td><span class="badge ${r.health_status === 'ok' ? 'badge-success' : 'badge-neutral'}">${escapeHtml(r.health_status ? r.health_status.charAt(0).toUpperCase() + r.health_status.slice(1) : '')}</span></td>
+            <td>${isLive ? '<span class="badge badge-success">Live</span>' : '<span class="badge badge-neutral">Retained</span>'}</td>
             <td>
               <div style="display: flex; gap: 6px;">
                 ${hasPower('deploy') && !isLive && r.status === 'succeeded' ? `<button class="btn btn-primary btn-sm" onclick="rollbackToRelease(${p.id}, ${r.id})">Rollback</button>` : ''}
@@ -123,7 +123,7 @@ async function rollbackToRelease(projectId, releaseId) {
 
   try {
     const res = await api(`/api/projects/${projectId}/rollback`, { method: 'POST', body: { releaseId } });
-    toast(`Rollback #${res.deploymentId} initiated!`, 'info');
+    toast(`Rollback #${res.deploymentId} initiated`, 'info');
     if (typeof window.navigateTo === 'function') {
       window.navigateTo('deployments', projectId);
     }
@@ -221,19 +221,19 @@ async function confirmCreateRelease() {
   const btn = document.getElementById('confirm-create-release-btn');
   if (btn) {
     btn.disabled = true;
-    btn.textContent = source === 'deploy' ? 'Deploying Release...' : 'Creating Snapshot...';
+    btn.textContent = source === 'deploy' ? 'Deploying release' : 'Creating snapshot';
   }
 
   try {
     const res = await api(`/api/projects/${p.id}/releases`, { method: 'POST', body: { source, note } });
     if (source === 'deploy') {
-      toast(`Release deployment #${res.deploymentId} started for ${p.name}!`, 'success');
+      toast(`Release deployment #${res.deploymentId} started for ${p.name}`, 'success');
       closeModal('modal-create-release');
       if (typeof window.navigateTo === 'function') {
         window.navigateTo('deployments', p.id);
       }
     } else {
-      toast(`Release #${res.releaseId} created successfully!`, 'success');
+      toast(`Release #${res.releaseId} created`, 'success');
       closeModal('modal-create-release');
       await loadReleasesView();
     }

@@ -132,32 +132,6 @@ export function devicon(name, opts = {}) {
   return `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 128 128" role="img" aria-hidden="true"${style}>${body}</svg>`;
 }
 
-// File extension / name groups -> [icon, accent colour, tint]
-export const FILE_KINDS = {
-  folder: { icon: 'folder', color: '#eab308', bg: 'rgba(234,179,8,0.12)' },
-  python: { icon: 'python', color: '#38bdf8', bg: 'rgba(56,189,248,0.13)' },
-  javascript: { icon: 'javascript', color: '#facc15', bg: 'rgba(250,204,21,0.13)' },
-  typescript: { icon: 'typescript', color: '#3b82f6', bg: 'rgba(59,130,246,0.14)' },
-  nodejs: { icon: 'nodejs', color: '#22c55e', bg: 'rgba(34,197,94,0.14)' },
-  java: { icon: 'java', color: '#f97316', bg: 'rgba(249,115,22,0.14)' },
-  rust: { icon: 'rust', color: '#dea584', bg: 'rgba(222,165,132,0.14)' },
-  go: { icon: 'go', color: '#00add8', bg: 'rgba(0,173,216,0.14)' },
-  php: { icon: 'php', color: '#777bb4', bg: 'rgba(119,123,180,0.14)' },
-  ruby: { icon: 'ruby', color: '#cc342d', bg: 'rgba(204,52,45,0.14)' },
-  docker: { icon: 'docker', color: '#2496ed', bg: 'rgba(36,150,237,0.14)' },
-  postgres: { icon: 'postgres', color: '#336791', bg: 'rgba(51,103,145,0.14)' },
-  postgresql: { icon: 'postgres', color: '#336791', bg: 'rgba(51,103,145,0.14)' },
-  database: { icon: 'postgres', color: '#336791', bg: 'rgba(51,103,145,0.14)' },
-  env: { icon: 'file-lock', color: '#10b981', bg: 'rgba(16,185,129,0.14)' },
-  config: { icon: 'file-json', color: '#a855f7', bg: 'rgba(168,85,247,0.14)' },
-  shell: { icon: 'terminal', color: '#22c55e', bg: 'rgba(34,197,94,0.14)' },
-  doc: { icon: 'file-text', color: '#60a5fa', bg: 'rgba(96,165,250,0.14)' },
-  web: { icon: 'file-code', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)' },
-  image: { icon: 'file-image', color: '#ec4899', bg: 'rgba(236,72,153,0.14)' },
-  archive: { icon: 'file-archive', color: '#fb923c', bg: 'rgba(251,146,60,0.14)' },
-  file: { icon: 'file', color: 'var(--text-muted)', bg: 'rgba(255,255,255,0.05)' },
-};
-
 export function icon(name, opts = {}) {
   const norm = (name || '').toLowerCase();
     if (DEVICONS[norm]) {
@@ -177,5 +151,4 @@ export function icon(name, opts = {}) {
     window.icon = icon;
     window.devicon = devicon;
     window.DEVICONS = DEVICONS;
-    window.FILE_KINDS = FILE_KINDS;
   }

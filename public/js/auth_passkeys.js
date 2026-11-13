@@ -3,6 +3,7 @@
  * W3C WebAuthn Level 3 client implementation supporting Face ID, Touch ID, Windows Hello, and FIDO2 keys.
  */
 
+import { icon } from './icons.js';
 import {
   state,
   escapeHtml,
@@ -110,7 +111,7 @@ export async function registerNewPasskey() {
   const btn = document.getElementById('register-passkey-btn');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span class="icon-spin" style="display:inline-block; margin-right:6px;">↻</span> Scanning Face ID / Fingerprint...';
+    btn.innerHTML = `${icon('refresh', { size: 14, cls: 'icon-spin', style: 'margin-right:6px;' })} Scanning Face ID / Fingerprint`;
   }
 
   try {
@@ -195,7 +196,7 @@ export async function registerNewPasskey() {
     state.passkeyCount = state.passkeysList.length;
     if (window.renderSecurityStatusSummary) window.renderSecurityStatusSummary();
     await loadPasskeysList();
-    toast(`Passkey "${label}" registered! You can now sign in with Face ID / Fingerprint.`, 'success');
+    toast(`Passkey "${label}" registered. You can now sign in with Face ID / Fingerprint.`, 'success');
   } catch (err) {
     if (err.name === 'NotAllowedError') {
       toast('Biometric / Passkey prompt was cancelled or timed out.', 'info');
@@ -247,7 +248,7 @@ export async function loginWithPasskey() {
   const btn = document.getElementById('login-passkey-btn');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span class="icon-spin" style="display:inline-block; margin-right:6px;">↻</span> Scanning Face ID / Touch ID...';
+    btn.innerHTML = `${icon('refresh', { size: 14, cls: 'icon-spin', style: 'margin-right:6px;' })} Scanning Face ID / Touch ID`;
   }
 
   try {
@@ -288,7 +289,7 @@ export async function loginWithPasskey() {
     });
 
     if (window.applyAuthSuccess) window.applyAuthSuccess(res);
-    toast('Signed in with Passkey / Biometrics!', 'success');
+    toast('Signed in with Passkey / Biometrics.', 'success');
   } catch (err) {
     if (err.name === 'NotAllowedError') {
       toast('Biometric / Passkey sign-in was cancelled.', 'info');

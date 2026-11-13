@@ -25,33 +25,23 @@
 .icon-lg { width: 20px; height: 20px; }
 .icon-xl { width: 24px; height: 24px; }
 
-/* File Explorer Category Tiles */
+/* File Explorer Icon Tiles */
 .file-kind-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.file-row:hover .file-kind-badge {
-  transform: scale(1.08);
-}
-
-.file-kind-folder {
-  background: rgba(234, 179, 8, 0.14);
-  color: #facc15;
 }
 
 .empty-icon-tile {
   width: 64px;
   height: 64px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg);
+  background: rgba(237, 237, 237, 0.03);
+  border: 1px dashed var(--border-medium);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -59,9 +49,11 @@
   color: var(--text-dim);
 }
 
-/* Resource table kind icon tints */
-.res-icon-website { color: #38bdf8; }
-.res-icon-service { color: #a855f7; }
-.res-icon-database { color: #3b82f6; }
-.res-icon-panel { color: #f59e0b; }
+/* Resource table kind icons (monochrome neutral; semantic dots carry status) */
+.res-icon-website,
+.res-icon-service,
+.res-icon-database,
+.res-icon-panel {
+  color: var(--text-muted);
+}
 
