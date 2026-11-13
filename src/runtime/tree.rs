@@ -176,11 +176,17 @@ impl Runtime {
         let self_pid = std::process::id();
 
         let base_dir_str = base_dir.to_string_lossy().to_lowercase();
+        let base_dir_norm = PathBuf::from(&base_dir_str);
+        let has_specific_base_dir = !base_dir_str.is_empty() && base_dir.components().count() > 1;
         let slug_lower = slug.to_lowercase();
         let env_proj_id = format!("WEBDEP_PROJECT_ID={}", project_id);
         let env_slug = format!("WEBDEP_PROJECT_SLUG={}", slug);
 
         for (pid, proc_) in sys.processes() {
+            // Skip OS thread entries (`/proc/<tgid>/task/<tid>` on Linux); only match real processes.
+            if proc_.thread_kind().is_some() {
+                continue;
+            }
             let pid_u32 = pid.as_u32();
             if pid_u32 == 0 || pid_u32 == self_pid {
                 continue;
@@ -214,12 +220,14 @@ impl Runtime {
                 continue;
             }
 
-            // 4. Working directory match (inside base_dir or app dir)
-            if let Some(cwd) = proc_.cwd() {
-                let cwd_str = cwd.to_string_lossy().to_lowercase();
-                if !base_dir_str.is_empty() && (cwd_str == base_dir_str || cwd_str.starts_with(&base_dir_str)) {
-                    matched_pids.insert(pid_u32);
-                    continue;
+            // 4. Working directory match (component-safe inside base_dir)
+            if has_specific_base_dir {
+                if let Some(cwd) = proc_.cwd() {
+                    let cwd_norm = PathBuf::from(cwd.to_string_lossy().to_lowercase());
+                    if cwd_norm == base_dir_norm || cwd_norm.starts_with(&base_dir_norm) {
+                        matched_pids.insert(pid_u32);
+                        continue;
+                    }
                 }
             }
 
@@ -227,7 +235,7 @@ impl Runtime {
             let mut cmd_match = false;
             for arg in proc_.cmd() {
                 let arg_lower = arg.to_string_lossy().to_lowercase();
-                if (!base_dir_str.is_empty() && arg_lower.contains(&base_dir_str))
+                if (has_specific_base_dir && arg_lower.contains(&base_dir_str))
                     || arg_lower.contains(&format!("services\\{}", slug_lower))
                     || arg_lower.contains(&format!("services/{}", slug_lower))
                     || arg_lower.contains(&format!("containers\\{}", slug_lower))
@@ -247,6 +255,9 @@ impl Runtime {
         while expanded {
             expanded = false;
             for (pid, proc_) in sys.processes() {
+                if proc_.thread_kind().is_some() {
+                    continue;
+                }
                 let pid_u32 = pid.as_u32();
                 if pid_u32 == 0 || pid_u32 == self_pid || matched_pids.contains(&pid_u32) {
                     continue;

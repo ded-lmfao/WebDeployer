@@ -221,27 +221,31 @@ impl Monitor {
     /// aggregated for each requested root PID (root process + all descendant children).
     /// Filters out OS threads so thread pools never multiply CPU or memory metrics.
     /// Performs lock-read on in-memory sysinfo cache, zero OS syscalls or disk I/O.
-    pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
-        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
-        let sys = self.sys.lock().unwrap();
+    /// Build parent->children and pid->(cpu_usage, memory_bytes) indices for real OS processes,
+    /// skipping Linux thread entries (`thread_kind().is_some()`) so thread pools never multiply
+    /// CPU or resident memory across threads that share an address space.
+    fn build_process_tree_index(sys: &sysinfo::System) -> (HashMap<u32, Vec<u32>>, HashMap<u32, (f32, u64)>) {
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
-        // Stores (cpu_usage, resident_memory_bytes) for true OS processes
         let mut metrics_map: HashMap<u32, (f32, u64)> = HashMap::new();
 
         for (pid, p) in sys.processes() {
-            let pid_u32 = pid.as_u32();
-            // On Linux /proc, thread entries have `thread_kind().is_some()`.
-            // Threads share the same address space and their CPU times are already reported
-            // in the thread group leader's `/proc/[pid]/stat`.
-            // Skipping threads prevents multiplying memory and CPU across thread pools!
             if p.thread_kind().is_some() {
                 continue;
             }
+            let pid_u32 = pid.as_u32();
             metrics_map.insert(pid_u32, (p.cpu_usage(), p.memory()));
             if let Some(parent) = p.parent() {
                 children_map.entry(parent.as_u32()).or_default().push(pid_u32);
             }
         }
+
+        (children_map, metrics_map)
+    }
+
+    pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+        let sys = self.sys.lock().unwrap();
+        let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
 
         let mut results = HashMap::with_capacity(root_pids.len());
         for &root in root_pids {
@@ -379,27 +383,19 @@ fn compute_disk_size(path: &std::path::Path) -> u64 {
 
 impl Monitor {
     /// Aggregate unique process-tree CPU (%), RSS memory (bytes), alive count, and alive tree PIDs
-    /// across all `seed_pids` without double-counting shared descendants.
+    /// across all `seed_pids` without double-counting shared descendants or OS threads.
     pub fn get_combined_tree_details(&self, seed_pids: &[u32]) -> (f32, u64, usize, Vec<u32>) {
         self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
         if seed_pids.is_empty() {
             return (0.0, 0, 0, Vec::new());
         }
         let sys = self.sys.lock().unwrap();
-        let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
-        for (pid, p) in sys.processes() {
-            if let Some(parent) = p.parent() {
-                children_map
-                    .entry(parent.as_u32())
-                    .or_default()
-                    .push(pid.as_u32());
-            }
-        }
+        let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
 
         let mut visited: HashSet<u32> = HashSet::new();
         let mut queue: VecDeque<u32> = VecDeque::new();
         for &root in seed_pids {
-            if root > 0 && visited.insert(root) {
+            if root > 0 && metrics_map.contains_key(&root) && visited.insert(root) {
                 queue.push_back(root);
             }
         }
@@ -409,10 +405,9 @@ impl Monitor {
         let mut alive_count = 0usize;
         let mut tree_pids = Vec::new();
         while let Some(curr) = queue.pop_front() {
-            let pid_obj = sysinfo::Pid::from_u32(curr);
-            if let Some(proc_info) = sys.process(pid_obj) {
-                total_cpu += proc_info.cpu_usage();
-                total_mem = total_mem.saturating_add(proc_info.memory());
+            if let Some(&(cpu, mem)) = metrics_map.get(&curr) {
+                total_cpu += cpu;
+                total_mem = total_mem.saturating_add(mem);
                 alive_count += 1;
                 tree_pids.push(curr);
             }
@@ -632,13 +627,24 @@ mod network_tests {
             acc = acc.wrapping_add(1);
             std::hint::black_box(acc);
         }
+        let _threads: Vec<_> = (0..4)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                })
+            })
+            .collect();
         m.refresh_now(true, false);
         let (raw_cpu, mem, alive) = m.get_combined_tree_metrics(&[pid]);
+        let tree_map = m.get_tree_metrics(&[pid]);
+        let (single_cpu, single_mem) = tree_map.get(&pid).copied().unwrap_or((0.0, 0));
         eprintln!(
-            "DIAGNOSTIC CPU TEST -> pid={pid}, alive={alive}, mem={mem}, raw_cpu={raw_cpu}, cores={}",
+            "DIAGNOSTIC CPU TEST -> pid={pid}, alive={alive}, mem={mem}, single_mem={single_mem}, raw_cpu={raw_cpu}, cores={}",
             m.sample().cpu.cores
         );
         assert!(alive >= 1);
+        assert_eq!(mem, single_mem, "Combined tree memory must match get_tree_metrics memory");
+        assert!((raw_cpu - single_cpu).abs() < 1e-3, "Combined tree CPU must match get_tree_metrics CPU");
         assert!(raw_cpu > 0.0, "Expected non-zero raw_cpu, got {raw_cpu}");
     }
 }

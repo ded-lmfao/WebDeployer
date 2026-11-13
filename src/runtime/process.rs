@@ -231,6 +231,7 @@ impl Runtime {
         })?;
 
         let pid = child.id().unwrap_or(0);
+        self.clear_container_pids(&container);
         self.record_container_pid(&container, pid);
 
         // Asynchronously drain stdout and stderr to prevent OS pipe buffers from filling and blocking the child process
@@ -254,7 +255,7 @@ impl Runtime {
                             .take_while(|c| c.is_ascii_digit())
                             .collect();
                         if let Ok(cpid) = num_str.parse::<u32>() {
-                            if cpid > 0 {
+                            if cpid > 1 && cpid != std::process::id() {
                                 let pid_file = run_dir_clone.join("pids.txt");
                                 if let Ok(mut f) = tokio::fs::OpenOptions::new()
                                     .create(true)

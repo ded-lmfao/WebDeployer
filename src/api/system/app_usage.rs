@@ -67,20 +67,33 @@ fn round_two_decimals(val: f64) -> f32 {
     ((val * 100.0).round() / 100.0) as f32
 }
 
-fn collect_project_seed_pids(state: &AppState, project_id: i64, slug: &str, deploy_dir: &Path, port: Option<u16>, db_pid: Option<i64>, cwd: &Path) -> Vec<u32> {
+fn collect_project_seed_pids(
+    state: &AppState,
+    project_id: i64,
+    slug: &str,
+    app_status: &str,
+    deploy_dir: &Path,
+    port: Option<u16>,
+    db_pid: Option<i64>,
+    cwd: &Path,
+) -> Vec<u32> {
     let mut seeds: HashSet<u32> = HashSet::new();
 
+    let self_pid = std::process::id();
     if let Some(pid) = db_pid {
-        if pid > 0 && crate::runtime::is_pid_alive(pid as u32) {
-            seeds.insert(pid as u32);
+        let p_u32 = pid as u32;
+        if pid > 1 && p_u32 != self_pid && crate::runtime::is_pid_alive(p_u32) {
+            seeds.insert(p_u32);
         }
     }
 
+    let mut is_tracked_running = false;
     if let Ok(map) = state.runtime.processes.lock() {
         if let Some(child) = map.get(&project_id) {
             if let Some(pid) = child.id() {
-                if pid > 0 {
+                if pid > 1 && pid != self_pid {
                     seeds.insert(pid);
+                    is_tracked_running = true;
                 }
             }
         }
@@ -88,27 +101,31 @@ fn collect_project_seed_pids(state: &AppState, project_id: i64, slug: &str, depl
 
     if let Some(p) = port {
         for port_pid in Runtime::find_pids_on_port(p) {
-            if port_pid > 0 {
+            if port_pid > 1 && port_pid != self_pid {
                 seeds.insert(port_pid);
             }
         }
     }
 
-    let pid_file = cwd.join("data").join("containers").join(slug).join("pids.txt");
-    if let Ok(content) = fs::read_to_string(&pid_file) {
-        for line in content.lines() {
-            if let Ok(pid) = line.trim().parse::<u32>() {
-                if pid > 0 && crate::runtime::is_pid_alive(pid) {
-                    seeds.insert(pid);
+    if app_status == "running" || is_tracked_running {
+        let pid_file = cwd.join("data").join("containers").join(slug).join("pids.txt");
+        if let Ok(content) = fs::read_to_string(&pid_file) {
+            for line in content.lines() {
+                if let Ok(pid) = line.trim().parse::<u32>() {
+                    if pid > 1 && pid != self_pid && crate::runtime::is_pid_alive(pid) {
+                        seeds.insert(pid);
+                    }
                 }
             }
         }
     }
 
-    let sysinfo_pids = Runtime::find_project_processes_sysinfo(project_id, slug, deploy_dir, &seeds);
-    for pid in sysinfo_pids {
-        if pid > 0 {
-            seeds.insert(pid);
+    if app_status == "running" || is_tracked_running || !seeds.is_empty() {
+        let sysinfo_pids = Runtime::find_project_processes_sysinfo(project_id, slug, deploy_dir, &seeds);
+        for pid in sysinfo_pids {
+            if pid > 1 && pid != self_pid {
+                seeds.insert(pid);
+            }
         }
     }
 
@@ -136,17 +153,20 @@ fn compute_entity_usage(state: &AppState, input: EntityUsageInput<'_>) -> AppUsa
     let (raw_cpu, mem_bytes, alive_pids, tree_pids) = state.monitor.get_combined_tree_details(&input.seed_pids);
     let running = (input.status_str == "running" && !input.seed_pids.is_empty()) || alive_pids > 0 || input.runtime_running;
     let active_pid_count = if running {
-        alive_pids.max(input.seed_pids.len())
+        if alive_pids > 0 {
+            alive_pids
+        } else {
+            usize::from(!input.seed_pids.is_empty())
+        }
     } else {
         0
     };
 
-    let mut all_pids = input.seed_pids.clone();
-    for pid in tree_pids {
-        if !all_pids.contains(&pid) {
-            all_pids.push(pid);
-        }
-    }
+    let all_pids = if tree_pids.is_empty() {
+        input.seed_pids.clone()
+    } else {
+        tree_pids
+    };
 
     let (network, live_cpu_pct) = get_project_live_telemetry(input.tracker_key, running, &all_pids);
     let sysinfo_cpu_pct = ((raw_cpu / num_cores as f32).clamp(0.0, 100.0)) as f64;
@@ -231,7 +251,7 @@ pub(crate) async fn project_usage_handler(
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
     let deploy_dir = Path::new(&p.deploy_dir);
-    let seed_pids = collect_project_seed_pids(&state, p.id, &p.slug, deploy_dir, p.port, db_pid, &cwd);
+    let seed_pids = collect_project_seed_pids(&state, p.id, &p.slug, &p.app_status, deploy_dir, p.port, db_pid, &cwd);
 
     // Include workspace deploy directory plus container persistent data outside deploy_dir.
     let mut disk_dirs = vec![deploy_dir.to_path_buf()];
