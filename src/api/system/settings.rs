@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -29,9 +29,18 @@ pub(crate) async fn restart_panel_handler(
 pub(crate) async fn system_version_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
 ) -> Result<Json<crate::updater::GitVersionInfo>, (StatusCode, String)> {
     let _actor = verify_power(&state, &headers, "system_manage", None)?;
-    Ok(Json(state.updater.get_version_info()))
+    let force_refresh = q
+        .get("refresh")
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false);
+    let updater = state.updater.clone();
+    let info = tokio::task::spawn_blocking(move || updater.get_version_info(force_refresh))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Version check task error: {}", e)))?;
+    Ok(Json(info))
 }
 
 pub(crate) async fn system_update_status_handler(
@@ -53,15 +62,15 @@ pub(crate) async fn system_update_handler(
         &actor.username,
         "system.update",
         Some("platform"),
-        Some("Triggered 1-click platform update from Git repository"),
+        Some("Triggered 1-click platform update from GitHub Release"),
     );
-    state.logs.add(None, None, "system", "warn", &format!("1-Click platform update triggered by {}", actor.username));
+    state.logs.add(None, None, "system", "warn", &format!("1-Click platform update from GitHub Release triggered by {}", actor.username));
 
-    let branch = payload.and_then(|p| p.branch.clone());
-    state.updater.start_update(branch)
+    let tag = payload.and_then(|p| p.tag.clone());
+    state.updater.start_update(tag)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    Ok(Json(serde_json::json!({ "ok": true, "message": "Update sequence started" })))
+    Ok(Json(serde_json::json!({ "ok": true, "message": "Release update sequence started" })))
 }
 
 pub(crate) async fn system_update_repo_handler(

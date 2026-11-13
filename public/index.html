@@ -1686,7 +1686,7 @@
                     </div>
                     <div
                       style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
-                      Version &bull; Repository
+                      Version &bull; GitHub Release
                     </div>
                   </div>
                 </div>
@@ -3059,7 +3059,7 @@
         <div>
           <h3 class="modal-title">Updating WebDep</h3>
           <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">
-            Fetching latest commit, compiling, and automatically restarting
+            Downloading prebuilt GitHub Release, verifying SHA-256, and restarting
           </div>
         </div>
         <button class="modal-close" id="modal-platform-update-close" data-close-modal>&times;</button>
@@ -3084,14 +3084,14 @@
           <div class="spinner-sm" id="update-active-spinner"
             style="border: 2px solid rgba(238, 241, 247, 0.16); border-top-color: var(--accent-light); width: 12px; height: 12px; border-radius: 50%; animation: btnSpin 0.8s linear infinite;">
           </div>
-          <span id="update-banner-msg">Fetching latest commit &amp; compiling. Panel will restart
+          <span id="update-banner-msg">Downloading verified GitHub Release binary. Panel will restart
             automatically.</span>
         </div>
 
-        <!-- Live Build & Git Console Logs -->
+        <!-- Live Release Console Logs -->
         <div class="form-group" style="margin-bottom: 0;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span class="form-label" style="margin: 0; font-size: 11.5px; color: var(--text-dim);">Build Output</span>
+            <span class="form-label" style="margin: 0; font-size: 11.5px; color: var(--text-dim);">Update Output</span>
             <button type="button" class="btn btn-secondary btn-sm" onclick="copyUpdateLogs()"
               style="padding: 2px 8px; font-size: 11px;">Copy</button>
           </div>

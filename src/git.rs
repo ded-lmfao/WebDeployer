@@ -74,59 +74,56 @@ impl Git {
         default_pb
     }
 
-    pub fn get_sqlite_github_tokens() -> Vec<StoredGithubToken> {
+    pub fn read_github_tokens_from_conn(conn: &rusqlite::Connection) -> Vec<StoredGithubToken> {
         let mut list: Vec<StoredGithubToken> = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        let db_path = Self::resolve_sqlite_path();
-        if let Ok(conn) = rusqlite::Connection::open(db_path) {
-            // 1. Read structured multi-token JSON list (`github_tokens`)
-            if let Ok(raw_json) = conn.query_row(
-                "SELECT value FROM settings WHERE key = 'github_tokens'",
-                [],
-                |r| r.get::<_, String>(0),
-            ) {
-                if let Ok(parsed) = serde_json::from_str::<Vec<StoredGithubToken>>(&raw_json) {
-                    for item in parsed {
-                        let t = item.token.trim().to_string();
-                        if !t.is_empty() && seen.insert(t.clone()) {
-                            list.push(StoredGithubToken {
-                                label: if item.label.trim().is_empty() {
-                                    format!("Token #{}", list.len() + 1)
-                                } else {
-                                    item.label.trim().to_string()
-                                },
-                                token: t,
-                            });
-                        }
-                    }
-                } else if let Ok(parsed_strs) = serde_json::from_str::<Vec<String>>(&raw_json) {
-                    for raw_t in parsed_strs {
-                        let t = raw_t.trim().to_string();
-                        if !t.is_empty() && seen.insert(t.clone()) {
-                            list.push(StoredGithubToken {
-                                label: format!("Token #{}", list.len() + 1),
-                                token: t,
-                            });
-                        }
+        // 1. Read structured multi-token JSON list (`github_tokens`)
+        if let Ok(raw_json) = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'github_tokens'",
+            [],
+            |r| r.get::<_, String>(0),
+        ) {
+            if let Ok(parsed) = serde_json::from_str::<Vec<StoredGithubToken>>(&raw_json) {
+                for item in parsed {
+                    let t = item.token.trim().to_string();
+                    if !t.is_empty() && seen.insert(t.clone()) {
+                        list.push(StoredGithubToken {
+                            label: if item.label.trim().is_empty() {
+                                format!("Token #{}", list.len() + 1)
+                            } else {
+                                item.label.trim().to_string()
+                            },
+                            token: t,
+                        });
                     }
                 }
-            }
-
-            // 2. Also include any token(s) in `github_token` (supports single or comma/newline-separated tokens)
-            if let Ok(raw_single) = conn.query_row(
-                "SELECT value FROM settings WHERE key = 'github_token'",
-                [],
-                |r| r.get::<_, String>(0),
-            ) {
-                for part in raw_single.split(|c| c == ',' || c == '\n' || c == ';') {
-                    let t = part.trim().to_string();
+            } else if let Ok(parsed_strs) = serde_json::from_str::<Vec<String>>(&raw_json) {
+                for raw_t in parsed_strs {
+                    let t = raw_t.trim().to_string();
                     if !t.is_empty() && seen.insert(t.clone()) {
                         list.push(StoredGithubToken {
                             label: format!("Token #{}", list.len() + 1),
                             token: t,
                         });
                     }
+                }
+            }
+        }
+
+        // 2. Also include any token(s) in `github_token` (supports single or comma/newline-separated tokens)
+        if let Ok(raw_single) = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'github_token'",
+            [],
+            |r| r.get::<_, String>(0),
+        ) {
+            for part in raw_single.split(|c| c == ',' || c == '\n' || c == ';') {
+                let t = part.trim().to_string();
+                if !t.is_empty() && seen.insert(t.clone()) {
+                    list.push(StoredGithubToken {
+                        label: format!("Token #{}", list.len() + 1),
+                        token: t,
+                    });
                 }
             }
         }
@@ -144,6 +141,27 @@ impl Git {
             }
         }
 
+        list
+    }
+
+    pub fn get_sqlite_github_tokens() -> Vec<StoredGithubToken> {
+        let db_path = Self::resolve_sqlite_path();
+        if let Ok(conn) = rusqlite::Connection::open(db_path) {
+            return Self::read_github_tokens_from_conn(&conn);
+        }
+
+        let mut list = Vec::new();
+        if let Ok(env_tok) = std::env::var("GITHUB_TOKEN") {
+            for part in env_tok.split(|c| c == ',' || c == '\n' || c == ';') {
+                let t = part.trim().to_string();
+                if !t.is_empty() {
+                    list.push(StoredGithubToken {
+                        label: format!("Env Token #{}", list.len() + 1),
+                        token: t,
+                    });
+                }
+            }
+        }
         list
     }
 

@@ -214,6 +214,13 @@ fn cache_control_header(is_html: bool, is_vendor: bool, has_version_query: bool,
     }
 }
 
+fn allow_disk_public_override() -> bool {
+    cfg!(debug_assertions)
+        || std::env::var("WEBDEP_DEV_PUBLIC")
+            .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes"))
+            .unwrap_or(false)
+}
+
 pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&str>) -> Response {
     let clean_path = if path.is_empty() || path == "/" {
         "index.html"
@@ -225,9 +232,10 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     let is_vendor = clean_path.starts_with("vendor/");
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
 
-    // FAST-PATH: If the file exists directly on disk in ./public, serve with RAM-backed cache & 304 ETag verification!
-    // Coalesce path canonicalize, metadata, and /style.css sub-imports scan into a single blocking call.
-    if let Some((disk_path, mtime)) = resolve_disk_asset(clean_path).await {
+    // FAST-PATH (dev / explicit opt-in only): In release binaries updated via GitHub Releases,
+    // embedded `Assets` are authoritative so stale ./public files on disk cannot shadow new UI releases.
+    if allow_disk_public_override() {
+        if let Some((disk_path, mtime)) = resolve_disk_asset(clean_path).await {
         let cache_control = cache_control_header(is_html, is_vendor, has_version_query, false);
         let cache_lock = get_disk_cache();
 
@@ -295,9 +303,10 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
             .header("x-cache", HeaderValue::from_static(cache_status))
             .body(Body::from(data))
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
     }
 
-    // FALLBACK: When running as a standalone binary where ./public is not present on disk
+    // Production release builds serve embedded `Assets` directly from RAM without touching ./public.
     let cache_control = cache_control_header(is_html, is_vendor, has_version_query, true);
 
     let etag_map = get_etag_map();

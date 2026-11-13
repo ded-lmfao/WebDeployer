@@ -732,7 +732,7 @@ mod tests {
             deployer,
             cache: Arc::new(crate::cache::AppCache::new()),
             databases,
-            updater: Arc::new(crate::updater::Updater::new()),
+            updater: Arc::new(crate::updater::Updater::with_db(db.clone())),
         };
 
         let admin_id: i64 = {

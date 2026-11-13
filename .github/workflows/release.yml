@@ -1,0 +1,210 @@
+name: Build & Publish WebDep Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional explicit release tag (leave blank to auto-generate)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  meta_and_test:
+    name: Compute Release Tag & Run Tests
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      commit_msg: ${{ steps.meta.outputs.commit_msg }}
+      pkg_version: ${{ steps.meta.outputs.pkg_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute release tag and commit metadata
+        id: meta
+        shell: bash
+        run: |
+          PKG_VER=$(grep -m1 '^version =' Cargo.toml | sed -E 's/version = "(.*)"/\1/' | tr -d '[:space:]')
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          MSG=$(git log -1 --pretty=%s | tr '\r\n' ' ')
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TS=$(date -u +%Y%m%d%H%M%S)
+            TAG="v${PKG_VER}-${TS}-${SHORT_SHA}"
+          fi
+          {
+            echo "release_tag=${TAG}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "pkg_version=${PKG_VER}"
+            echo "commit_msg<<EOF"
+            echo "${MSG}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Rust test suite
+        run: cargo test --no-fail-fast
+
+      - name: Check frontend JavaScript syntax
+        shell: bash
+        run: |
+          node --check public/app.js
+          for f in public/js/*.js; do
+            node --check "$f"
+          done
+
+  build:
+    name: Build Static Binary (${{ matrix.asset_arch }})
+    needs: meta_and_test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - rust_target: x86_64-unknown-linux-musl
+            asset_arch: linux-x86_64
+            use_zig: "false"
+          - rust_target: aarch64-unknown-linux-musl
+            asset_arch: linux-aarch64
+            use_zig: "true"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (${{ matrix.rust_target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust_target }}
+
+      - name: Install musl-tools (x86_64 static build)
+        if: matrix.use_zig == 'false'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Setup Zig & cargo-zigbuild (aarch64 static cross-build)
+        if: matrix.use_zig == 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Install cargo-zigbuild
+        if: matrix.use_zig == 'true'
+        uses: taiki-e/install-action@cargo-zigbuild
+
+      - name: Build release binary (x86_64-unknown-linux-musl)
+        if: matrix.use_zig == 'false'
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          WEBDEP_RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
+          WEBDEP_COMMIT_SHA: ${{ needs.meta_and_test.outputs.short_sha }}
+          WEBDEP_COMMIT_MSG: ${{ needs.meta_and_test.outputs.commit_msg }}
+          WEBDEP_DEFAULT_REPO: ${{ github.repository }}
+        run: cargo build --release --target ${{ matrix.rust_target }}
+
+      - name: Build release binary (aarch64-unknown-linux-musl)
+        if: matrix.use_zig == 'true'
+        env:
+          WEBDEP_RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
+          WEBDEP_COMMIT_SHA: ${{ needs.meta_and_test.outputs.short_sha }}
+          WEBDEP_COMMIT_MSG: ${{ needs.meta_and_test.outputs.commit_msg }}
+          WEBDEP_DEFAULT_REPO: ${{ github.repository }}
+        run: cargo zigbuild --release --target ${{ matrix.rust_target }}
+
+      - name: Package tarball and verify binary
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.rust_target }}/release/webdep"
+          ls -lh "$BIN"
+          mkdir -p dist
+          cp "$BIN" dist/webdep
+          chmod +x dist/webdep
+          if [[ "${{ matrix.use_zig }}" == "false" ]]; then
+            dist/webdep --version
+          fi
+          ARCHIVE="webdep-${{ matrix.asset_arch }}.tar.gz"
+          tar -C dist -czf "dist/${ARCHIVE}" webdep
+          rm -f dist/webdep
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.asset_arch }}
+          path: dist/webdep-${{ matrix.asset_arch }}.tar.gz
+
+  release:
+    name: Create GitHub Release
+    needs: [meta_and_test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate checksums & release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
+          SHORT_SHA: ${{ needs.meta_and_test.outputs.short_sha }}
+          COMMIT_MSG: ${{ needs.meta_and_test.outputs.commit_msg }}
+        run: |
+          cd release-artifacts
+          sha256sum webdep-linux-*.tar.gz > checksums.txt
+          cat checksums.txt
+          {
+            echo "Automated WebDep release for commit \`${SHORT_SHA}\`."
+            echo ""
+            echo "**Commit:** ${COMMIT_MSG}"
+            echo "**Tag:** \`${RELEASE_TAG}\`"
+            echo ""
+            echo "### Included Assets"
+            echo "- \`webdep-linux-x86_64.tar.gz\` (Static Linux amd64 binary)"
+            echo "- \`webdep-linux-aarch64.tar.gz\` (Static Linux arm64 binary)"
+            echo "- \`checksums.txt\` (SHA-256 verification checksums)"
+          } > ../release_notes.md
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.meta_and_test.outputs.release_tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
+            gh release edit "$RELEASE_TAG" --notes-file release_notes.md --latest
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "${{ github.sha }}" \
+              --title "WebDep ${RELEASE_TAG}" \
+              --notes-file release_notes.md \
+              --latest \
+              release-artifacts/*
+          fi

@@ -3,7 +3,6 @@
  * Server monitoring, security overview, SQLite system settings, audit logs, and self-updater pipeline.
  */
 
-import { icon } from './icons.js';
 import {
   state,
   paginateAndRender,
@@ -414,16 +413,17 @@ document.getElementById('clear-cache-btn')?.addEventListener('click', async () =
 // ============================================================================
 let updatePollTimer = null;
 
-export async function loadSystemVersionInfo(quiet = false) {
+export async function loadSystemVersionInfo(quiet = false, forceRefresh = false) {
   try {
-    const v = await api('/api/system/version');
+    const endpoint = forceRefresh ? '/api/system/version?refresh=1' : '/api/system/version';
+    const v = await api(endpoint);
     const branchEl = document.getElementById('platform-branch-name');
     const hashEl = document.getElementById('platform-commit-hash');
     const msgEl = document.getElementById('platform-commit-msg');
     const badgeEl = document.getElementById('platform-version-badge');
     const repoInput = document.getElementById('platform-update-repo-input');
 
-    if (branchEl) branchEl.textContent = v.current_branch || 'main';
+    if (branchEl) branchEl.textContent = v.current_release_tag || v.current_branch || `v${v.current_version || '2.0.0'}`;
     if (hashEl) hashEl.textContent = v.current_commit || 'unknown';
     if (msgEl) msgEl.textContent = v.commit_message || 'Self-hosted WebDep deployment platform';
     if (repoInput && document.activeElement !== repoInput && v.remote_url) {
@@ -441,7 +441,11 @@ export async function loadSystemVersionInfo(quiet = false) {
         badgeEl.textContent = 'Restart required';
       } else if (v.has_update) {
         badgeEl.className = 'badge badge-success';
-        badgeEl.textContent = `Update available (${v.remote_commit})`;
+        const label = v.remote_commit || v.remote_tag || 'latest';
+        badgeEl.textContent = `Update available (${label})`;
+      } else if (v.check_error) {
+        badgeEl.className = 'badge badge-neutral';
+        badgeEl.textContent = 'No release checked';
       } else {
         badgeEl.className = 'badge badge-neutral';
         badgeEl.textContent = 'Up to date';
@@ -459,7 +463,7 @@ export async function savePlatformUpdateRepo() {
   const btn = document.getElementById('save-platform-repo-btn');
   const repo = (input?.value || '').trim();
   if (!repo) {
-    toast('Please enter a repository name (e.g. owner/repo) or Git URL.', 'warning');
+    toast('Please enter a repository name (e.g. owner/repo) or GitHub URL.', 'warning');
     return;
   }
 
@@ -471,7 +475,7 @@ export async function savePlatformUpdateRepo() {
     });
     if (input && res.remote_url) input.value = res.remote_url;
     toast(`Platform update repository set to ${res.remote_url}`, 'success');
-    await loadSystemVersionInfo(true);
+    await loadSystemVersionInfo(true, true);
   } catch (err) {
     toast(`Failed to update repository: ${err.message}`, 'error');
   } finally {
@@ -482,67 +486,39 @@ export async function savePlatformUpdateRepo() {
 export async function checkPlatformUpdates(manual = false) {
   const btn = document.getElementById('check-platform-update-btn');
   if (btn) btn.disabled = true;
-  if (manual) toast('Checking remote repository for latest commits', 'info', 2500);
+  if (manual) toast('Checking GitHub Releases for latest prebuilt binary', 'info', 2500);
 
-  const v = await loadSystemVersionInfo(!manual);
+  const v = await loadSystemVersionInfo(!manual, manual);
   if (btn) btn.disabled = false;
 
   if (manual && v) {
     if (v.ready_to_restart) {
-      toast('A new release is compiled and waiting. Click Restart Panel to activate it.', 'warning', 6000);
+      toast('A new release is ready. Click Restart Panel to activate it.', 'warning', 6000);
     } else if (v.has_update) {
-      toast(`New commit ${v.remote_commit} available on origin/${v.current_branch}. Click Update to apply.`, 'success', 5000);
+      const sizeMb = v.asset_size_bytes ? ` • ${(v.asset_size_bytes / (1024 * 1024)).toFixed(1)} MB` : '';
+      toast(`Release ${v.remote_tag || v.remote_commit} is available${sizeMb}. Click Update to install.`, 'success', 5500);
+    } else if (v.check_error) {
+      toast(v.check_error, 'warning', 6500);
     } else {
-      toast(`WebDep is already up to date with origin/${v.current_branch} (${v.current_commit}).`, 'success');
+      toast(`WebDep is already on the latest GitHub Release (${v.current_release_tag || v.current_commit}).`, 'success');
     }
-  }
-}
-
-function updatePipelineStepIndicators(progress, isError = false) {
-  const dot1 = document.getElementById('step-dot-1');
-  const dot2 = document.getElementById('step-dot-2');
-  const dot3 = document.getElementById('step-dot-3');
-  const dot4 = document.getElementById('step-dot-4');
-
-  const card1 = document.getElementById('step-card-1');
-  const card2 = document.getElementById('step-card-2');
-  const card3 = document.getElementById('step-card-3');
-  const card4 = document.getElementById('step-card-4');
-
-  if (progress >= 10 && dot1) {
-    dot1.innerHTML = icon('check', { size: 12 });
-    if (card1) card1.style.borderColor = 'var(--success-border)';
-  }
-  if (progress >= 35 && dot2) {
-    dot2.innerHTML = icon('check', { size: 12 });
-    if (card2) card2.style.borderColor = 'var(--success-border)';
-  }
-  if (progress >= 45 && dot3) {
-    if (progress >= 95) {
-      dot3.innerHTML = icon('check', { size: 12 });
-      if (card3) card3.style.borderColor = 'var(--success-border)';
-    } else {
-      dot3.innerHTML = icon('refresh', { size: 12, cls: 'icon-spin' });
-      if (card3) card3.style.borderColor = 'var(--accent-light)';
-    }
-  }
-  if (progress >= 100 && dot4) {
-    dot4.innerHTML = isError ? icon('x', { size: 12 }) : icon('check', { size: 12 });
-    if (card4) card4.style.borderColor = isError ? 'var(--danger)' : 'var(--success-border)';
   }
 }
 
 export async function startPlatformUpdate() {
-  const v = await loadSystemVersionInfo(true);
-  const branchName = v?.current_branch || 'main';
+  const v = await loadSystemVersionInfo(true, true);
+  const targetLabel = v?.remote_tag || v?.remote_commit || 'latest';
+  const assetMeta = v?.asset_name
+    ? `${escapeHtml(v.asset_name)}${v.asset_size_bytes ? ` (${(v.asset_size_bytes / (1024 * 1024)).toFixed(1)} MB)` : ''}`
+    : 'prebuilt Linux release binary';
 
   const ok = await showConfirmDialog({
-    title: 'Update WebDep to Latest Commit',
-    message: `Fetch latest commits from <strong>origin/${escapeHtml(branchName)}</strong> and recompile WebDep?<br><br>
-    &bull; <strong style="color:var(--success);">Preserves data:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> file stay untouched.<br>
-    &bull; <strong style="color:var(--accent-light);">Low-RAM build:</strong> Compiled with <code>CARGO_BUILD_JOBS=1</code> to prevent out-of-memory errors.<br>
-    &bull; <strong style="color:var(--text-main);">Controlled restart:</strong> WebDep pauses after compilation and waits for confirmation before restarting.`,
-    confirmText: 'Fetch & Compile WebDep',
+    title: 'Update WebDep from GitHub Release',
+    message: `Download and install release <strong>${escapeHtml(targetLabel)}</strong> (${assetMeta})?<br><br>
+    &bull; <strong style="color:var(--success);">Preserves data:</strong> Your <code>data/</code> folder (SQLite databases, hosted websites, services, logs) and <code>.env</code> secrets stay untouched.<br>
+    &bull; <strong style="color:var(--accent-light);">Instant binary update:</strong> Downloads prebuilt CI binary, verifies its SHA-256 checksum, and runs a smoke test before swapping (no on-server Rust compilation).<br>
+    &bull; <strong style="color:var(--text-main);">Automatic restart:</strong> Swaps atomically with rollback protection and restarts the panel cleanly.`,
+    confirmText: 'Download & Apply Release',
     danger: false,
   });
   if (!ok) return;
@@ -554,27 +530,18 @@ export async function startPlatformUpdate() {
   const bannerMsg = document.getElementById('update-banner-msg');
   const spinner = document.getElementById('update-active-spinner');
   const statusBanner = document.getElementById('update-status-banner');
-  const restartPrompt = document.getElementById('update-restart-prompt');
   const dismissBtn = document.getElementById('update-dismiss-btn');
   const closeBtn = document.getElementById('modal-platform-update-close');
 
-  ['1', '2', '3', '4'].forEach((num) => {
-    const dot = document.getElementById(`step-dot-${num}`);
-    const card = document.getElementById(`step-card-${num}`);
-    if (dot) dot.innerHTML = num === '1' ? icon('shield', { size: 12 }) : num === '2' ? icon('github', { size: 12 }) : num === '3' ? icon('settings', { size: 12 }) : icon('check-circle', { size: 12 });
-    if (card) card.style.borderColor = 'var(--border)';
-  });
-
-  if (stepText) stepText.textContent = 'Initializing update pipeline';
+  if (stepText) stepText.textContent = 'Initializing GitHub Release update';
   if (pctText) pctText.textContent = '5%';
   if (progressBar) {
     progressBar.style.width = '5%';
     progressBar.style.background = 'var(--accent)';
   }
-  if (consoleLogs) consoleLogs.textContent = 'Connecting to backend update service\n';
-  if (bannerMsg) bannerMsg.textContent = 'Preserving your databases and environment settings while building the latest release.';
+  if (consoleLogs) consoleLogs.textContent = 'Connecting to GitHub Releases updater\n';
+  if (bannerMsg) bannerMsg.textContent = 'Downloading prebuilt GitHub Release binary, verifying SHA-256, and swapping.';
   if (statusBanner) statusBanner.style.display = 'flex';
-  if (restartPrompt) restartPrompt.style.display = 'none';
   if (spinner) spinner.style.display = 'block';
   if (dismissBtn) dismissBtn.disabled = true;
   if (closeBtn) closeBtn.style.display = 'none';
@@ -582,7 +549,7 @@ export async function startPlatformUpdate() {
   openModal('modal-platform-update');
 
   try {
-    await api('/api/system/update', { method: 'POST', body: { branch: branchName } });
+    await api('/api/system/update', { method: 'POST', body: { tag: v?.remote_tag || null } });
   } catch (err) {
     if (stepText) stepText.textContent = 'Failed to start update';
     if (bannerMsg) bannerMsg.textContent = `Error: ${err.message}`;
@@ -593,19 +560,24 @@ export async function startPlatformUpdate() {
     return;
   }
 
+  let lastLogText = '';
   if (updatePollTimer) clearInterval(updatePollTimer);
   updatePollTimer = setInterval(async () => {
     try {
       const st = await api('/api/system/update/status');
-      if (stepText) stepText.textContent = st.step || 'Building';
-      if (pctText) pctText.textContent = `${st.progress || 0}%`;
-      if (progressBar) progressBar.style.width = `${st.progress || 0}%`;
-
-      updatePipelineStepIndicators(st.progress || 0, st.status === 'error');
+      const nextStep = st.step || 'Updating';
+      const nextPct = `${st.progress || 0}%`;
+      if (stepText && stepText.textContent !== nextStep) stepText.textContent = nextStep;
+      if (pctText && pctText.textContent !== nextPct) pctText.textContent = nextPct;
+      if (progressBar && progressBar.style.width !== nextPct) progressBar.style.width = nextPct;
 
       if (consoleLogs && Array.isArray(st.logs)) {
-        consoleLogs.textContent = st.logs.join('\n');
-        consoleLogs.scrollTop = consoleLogs.scrollHeight;
+        const joined = st.logs.join('\n');
+        if (joined !== lastLogText) {
+          lastLogText = joined;
+          consoleLogs.textContent = joined;
+          consoleLogs.scrollTop = consoleLogs.scrollHeight;
+        }
       }
 
       if (st.status === 'error') {
@@ -648,13 +620,11 @@ export async function executePostUpdateRestart() {
   const stepText = document.getElementById('update-step-text');
   const bannerMsg = document.getElementById('update-banner-msg');
   const statusBanner = document.getElementById('update-status-banner');
-  const restartPrompt = document.getElementById('update-restart-prompt');
   const spinner = document.getElementById('update-active-spinner');
   const dismissBtn = document.getElementById('update-dismiss-btn');
   const closeBtn = document.getElementById('modal-platform-update-close');
 
   openModal('modal-platform-update');
-  if (restartPrompt) restartPrompt.style.display = 'none';
   if (statusBanner) statusBanner.style.display = 'flex';
   if (spinner) spinner.style.display = 'block';
   if (stepText) stepText.textContent = 'Restarting WebDep service';

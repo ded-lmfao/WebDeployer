@@ -37,7 +37,21 @@ use crate::vault::Vault;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    #[cfg(target_os = "linux")]
+    if std::env::args()
+        .nth(1)
+        .map(|arg| arg == "--version" || arg == "-V")
+        .unwrap_or(false)
+    {
+        println!(
+            "webdep {} (tag={} commit={})",
+            env!("CARGO_PKG_VERSION"),
+            env!("WEBDEP_RELEASE_TAG"),
+            env!("WEBDEP_COMMIT_SHA")
+        );
+        return Ok(());
+    }
+
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
     unsafe {
         extern "C" {
             fn mallopt(param: libc::c_int, value: libc::c_int) -> libc::c_int;
@@ -83,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         (*logs).clone(),
         &config.data_dir,
     ));
-    let updater = Arc::new(Updater::new());
+    let updater = Arc::new(Updater::with_db(db.clone()));
 
     // Periodic memory maintenance: prunes expired cache, purges expired sessions, shrinks SQLite pager, and trims Linux heap
     {
