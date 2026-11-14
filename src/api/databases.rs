@@ -420,6 +420,61 @@ fn classify_pg_log_level(line: &str) -> &'static str {
     }
 }
 
+/// Parses PostgreSQL's leading UTC timestamp (`YYYY-MM-DD HH:MM:SS(.mmm)? UTC`) into Unix ms.
+fn parse_pg_log_timestamp_ms(line: &str) -> Option<i64> {
+    let mut parts = line.split_whitespace();
+    let date = parts.next()?;
+    let time = parts.next()?;
+    let tz = parts.next()?;
+    if !matches!(tz, "UTC" | "GMT" | "+00" | "+00:00") {
+        return None;
+    }
+
+    let mut d_parts = date.split('-');
+    let year: i64 = d_parts.next()?.parse().ok()?;
+    let month: i64 = d_parts.next()?.parse().ok()?;
+    let day: i64 = d_parts.next()?.parse().ok()?;
+    if d_parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let (hms, ms_str) = match time.split_once('.') {
+        Some((h, m)) => (h, Some(m)),
+        None => (time, None),
+    };
+    let mut t_parts = hms.split(':');
+    let hour: i64 = t_parts.next()?.parse().ok()?;
+    let min: i64 = t_parts.next()?.parse().ok()?;
+    let sec: i64 = t_parts.next()?.parse().ok()?;
+    if t_parts.next().is_some() || !(0..=23).contains(&hour) || !(0..=59).contains(&min) || !(0..=60).contains(&sec) {
+        return None;
+    }
+
+    let millis: i64 = match ms_str {
+        Some(m) => {
+            let digits: String = m.chars().take(3).collect();
+            let val: i64 = digits.parse().ok()?;
+            match digits.len() {
+                1 => val * 100,
+                2 => val * 10,
+                _ => val,
+            }
+        }
+        None => 0,
+    };
+
+    // Civil-from-epoch-days (Howard Hinnant algorithm)
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    let secs = days * 86_400 + hour * 3600 + min * 60 + sec;
+    Some(secs * 1000 + millis)
+}
+
 pub(crate) async fn get_database_logs_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -450,14 +505,18 @@ pub(crate) async fn get_database_logs_handler(
         .collect();
 
     let now_ts = crate::db::now();
+    let mut last_ts = now_ts;
     for (idx, line) in log_content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
+        if let Some(parsed) = parse_pg_log_timestamp_ms(trimmed) {
+            last_ts = parsed;
+        }
         entries.push(serde_json::json!({
             "id": 1_000_000_000i64 + idx as i64,
-            "ts": now_ts,
+            "ts": last_ts,
             "level": classify_pg_log_level(trimmed),
             "channel": "postgres",
             "message": trimmed,
@@ -566,8 +625,8 @@ pub(crate) async fn db_files_rename_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_pg_log_level, redact_db_if_unprivileged, redact_pg_url, to_database_response,
-        update_database_access_handler, verify_db_files_write,
+        classify_pg_log_level, parse_pg_log_timestamp_ms, redact_db_if_unprivileged, redact_pg_url,
+        to_database_response, update_database_access_handler, verify_db_files_write,
     };
     use crate::databases::{
         build_postgres_url, encode_uri_userinfo_component, ManagedDatabase,
@@ -772,5 +831,17 @@ mod tests {
         drop(auth);
         drop(db);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_parse_pg_log_timestamp_ms() {
+        // 2026-11-12 09:50:48.925 UTC -> 1794477048925 ms
+        let line = r#"2026-11-12 09:50:48.925 UTC [131579] ERROR:  database "mewzik" already exists"#;
+        assert_eq!(parse_pg_log_timestamp_ms(line), Some(1_794_477_048_925));
+
+        let no_ms = "1970-01-01 00:00:05 UTC [1] LOG:  ready";
+        assert_eq!(parse_pg_log_timestamp_ms(no_ms), Some(5_000));
+
+        assert_eq!(parse_pg_log_timestamp_ms("DETAIL: continuation"), None);
     }
 }

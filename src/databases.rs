@@ -604,7 +604,7 @@ impl Databases {
         );
 
         // 1. Initialize cluster if not already initialized
-        let is_new = !data_dir.join("PG_VERSION").exists();
+        let is_new = is_new_cluster(&data_dir);
         if is_new {
             // Ensure data directory is empty before running initdb
             if data_dir.exists() {
@@ -719,6 +719,7 @@ impl Databases {
         }
 
         ensure_pg_permissions(db_dir, Some(&data_dir));
+        rotate_pg_log(&log_file).await;
         let mut start_cmd = make_pg_server_command(
             &pg_bins.pg_ctl,
             &[
@@ -764,45 +765,22 @@ impl Databases {
         );
 
         // 4. Ensure custom database exists and is owned by db_user (only for newly initialized clusters)
-        if is_new && db_name != "postgres" {
-            let sql = format!(r#"CREATE DATABASE "{}" OWNER "{}";"#, db_name, db_user);
-            let mut psql_cmd = Command::new(&pg_bins.psql);
-            psql_cmd.args([
-                "-h",
-                "127.0.0.1",
-                "-p",
-                &port.to_string(),
-                "-U",
-                db_user,
-                "-d",
-                "postgres",
-                "-c",
-                &sql,
-            ]);
-            psql_cmd.stdin(std::process::Stdio::null());
-            psql_cmd.env("PGPASSWORD", db_pass);
-            let _ = tokio::time::timeout(tokio::time::Duration::from_secs(6), psql_cmd.output()).await;
+        if is_new && db_name != "postgres" && !pg_database_exists(&pg_bins.psql, port, db_user, db_pass, db_name).await {
+            let sql = format!(
+                r#"CREATE DATABASE "{}" OWNER "{}";"#,
+                escape_pg_ident(db_name),
+                escape_pg_ident(db_user)
+            );
+            let _ = run_psql_command(&pg_bins.psql, port, db_user, db_pass, &sql, 6).await;
         }
 
         // 5. Restrict superuser privileges if is_superuser is false and cluster is new
         if is_new && !is_superuser {
-            let sql = format!(r#"ALTER ROLE "{}" NOSUPERUSER NOCREATEDB NOCREATEROLE;"#, db_user);
-            let mut psql_cmd = Command::new(&pg_bins.psql);
-            psql_cmd.args([
-                "-h",
-                "127.0.0.1",
-                "-p",
-                &port.to_string(),
-                "-U",
-                db_user,
-                "-d",
-                "postgres",
-                "-c",
-                &sql,
-            ]);
-            psql_cmd.stdin(std::process::Stdio::null());
-            psql_cmd.env("PGPASSWORD", db_pass);
-            let _ = tokio::time::timeout(tokio::time::Duration::from_secs(4), psql_cmd.output()).await;
+            let sql = format!(
+                r#"ALTER ROLE "{}" NOSUPERUSER NOCREATEDB NOCREATEROLE;"#,
+                escape_pg_ident(db_user)
+            );
+            let _ = run_psql_command(&pg_bins.psql, port, db_user, db_pass, &sql, 4).await;
         }
 
         info!(
@@ -819,6 +797,98 @@ impl Databases {
 
     pub async fn remove_firewall_rules(port: u16, allowed_ips: &str) {
         security::remove_firewall_rules(port, allowed_ips).await;
+    }
+}
+
+fn escape_pg_ident(ident: &str) -> String {
+    ident.replace('"', "\"\"")
+}
+
+fn escape_pg_literal(lit: &str) -> String {
+    lit.replace('\'', "''")
+}
+
+/// Returns `true` only when `PG_VERSION` is genuinely absent (NotFound), so permission errors
+/// on an already-initialized cluster never trigger a destructive re-initialization.
+fn is_new_cluster(data_dir: &Path) -> bool {
+    matches!(
+        std::fs::metadata(data_dir.join("PG_VERSION")),
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotFound
+    )
+}
+
+async fn rotate_pg_log(log_file: &Path) {
+    if let Ok(meta) = tokio::fs::metadata(log_file).await {
+        if meta.len() > 0 {
+            let prev = log_file.with_extension("log.prev");
+            let _ = tokio::fs::remove_file(&prev).await;
+            let _ = tokio::fs::rename(log_file, &prev).await;
+        }
+    }
+}
+
+async fn run_psql_command(
+    psql: &Path,
+    port: u16,
+    db_user: &str,
+    db_pass: &str,
+    sql: &str,
+    timeout_secs: u64,
+) -> Option<std::process::Output> {
+    let mut psql_cmd = Command::new(psql);
+    psql_cmd.args([
+        "-h",
+        "127.0.0.1",
+        "-p",
+        &port.to_string(),
+        "-U",
+        db_user,
+        "-d",
+        "postgres",
+        "-tAc",
+        sql,
+    ]);
+    psql_cmd.stdin(std::process::Stdio::null());
+    psql_cmd.env("PGPASSWORD", db_pass);
+    tokio::time::timeout(tokio::time::Duration::from_secs(timeout_secs), psql_cmd.output())
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+}
+
+async fn pg_database_exists(
+    psql: &Path,
+    port: u16,
+    db_user: &str,
+    db_pass: &str,
+    db_name: &str,
+) -> bool {
+    let sql = format!(
+        "SELECT 1 FROM pg_database WHERE datname = '{}';",
+        escape_pg_literal(db_name)
+    );
+    match run_psql_command(psql, port, db_user, db_pass, &sql, 4).await {
+        Some(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim() == "1",
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pg_escaping_and_cluster_detection() {
+        assert_eq!(escape_pg_ident(r#"mew"zik"#), r#"mew""zik"#);
+        assert_eq!(escape_pg_literal("mew'zik"), "mew''zik");
+
+        let tmp = std::env::temp_dir().join(format!("webdep_pg_new_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        assert!(is_new_cluster(&tmp));
+        std::fs::write(tmp.join("PG_VERSION"), "18\n").unwrap();
+        assert!(!is_new_cluster(&tmp));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 

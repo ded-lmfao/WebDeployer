@@ -49,12 +49,15 @@ impl PgBinaries {
         #[cfg(unix)]
         {
             let unix_dirs = [
+                "/usr/lib/postgresql/18/bin",
                 "/usr/lib/postgresql/17/bin",
                 "/usr/lib/postgresql/16/bin",
                 "/usr/lib/postgresql/15/bin",
                 "/usr/lib/postgresql/14/bin",
                 "/usr/lib/postgresql/13/bin",
                 "/usr/lib/postgresql/12/bin",
+                "/usr/pgsql-18/bin",
+                "/usr/pgsql-17/bin",
                 "/usr/pgsql-16/bin",
                 "/usr/pgsql-15/bin",
                 "/usr/pgsql-14/bin",
