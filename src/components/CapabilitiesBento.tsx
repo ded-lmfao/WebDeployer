@@ -1,5 +1,4 @@
 import { motion } from "motion/react";
-import { Card, Chip } from "@heroui/react";
 import {
   Activity,
   Cpu,
@@ -8,17 +7,15 @@ import {
   Globe,
   ShieldCheck,
 } from "lucide-react";
-import AppleActivityCard, {
-  type ActivityData,
-} from "@/components/kokonutui/apple-activity-card";
 import UptimeCard, {
   type UptimeService,
 } from "@/components/kokonutui/uptime-card";
 import {
   CAPABILITIES,
-  TELEMETRY_STRIP,
+  RAM_FOOTPRINT_BENCHMARKS,
   type CapabilityItem,
 } from "@/data/webdepData";
+import { cn } from "@/lib/utils";
 
 const ICON_MAP: Record<CapabilityItem["iconName"], typeof Globe> = {
   globe: Globe,
@@ -28,36 +25,6 @@ const ICON_MAP: Record<CapabilityItem["iconName"], typeof Globe> = {
   folder: FolderGit2,
   activity: Activity,
 };
-
-const WEBDEP_ACTIVITIES: ActivityData[] = [
-  {
-    label: "CONTROL PLANE RAM",
-    color: "#2563eb",
-    colorEnd: "#4f8ef7",
-    size: 186,
-    current: 23.7,
-    target: 512,
-    unit: "MB",
-  },
-  {
-    label: "API COLD P50 SPEED",
-    color: "#10b981",
-    colorEnd: "#34d399",
-    size: 142,
-    current: 2.0,
-    target: 116.4,
-    unit: "ms",
-  },
-  {
-    label: "BINARY FOOTPRINT",
-    color: "#f59e0b",
-    colorEnd: "#fbbf24",
-    size: 98,
-    current: 10,
-    target: 100,
-    unit: "MB",
-  },
-];
 
 const SUPERVISED_SERVICES: UptimeService[] = [
   {
@@ -87,124 +54,155 @@ const SUPERVISED_SERVICES: UptimeService[] = [
   },
 ];
 
+const MAX_MB = 800;
+
 export default function CapabilitiesBento() {
   return (
     <section
       id="capabilities"
-      className="border-b border-border bg-background py-20 sm:py-24"
+      className="border-b border-border bg-background py-20 lg:py-24"
     >
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
+      <div className="mx-auto max-w-6xl px-6">
         <div className="max-w-2xl">
-          <Chip color="accent" variant="soft">
-            <Chip.Label className="font-mono text-xs">
-              Architecture & Capabilities
-            </Chip.Label>
-          </Chip>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Everything needed to run a VPS — engineered without runtime bloat.
+          <h2 className="text-3xl font-medium tracking-[-0.02em] text-foreground sm:text-4xl">
+            Everything needed to run a VPS without runtime bloat
           </h2>
-          <p className="mt-3 text-base text-muted-foreground">
-            One self-contained Axum + Tokio + SQLite WAL binary replaces fragile
-            shell scripts, PM2 wrappers, separate FTP daemons, and heavy PaaS
-            container stacks.
+          <p className="mt-3 text-base leading-relaxed text-muted-foreground">
+            One self-contained Axum, Tokio, and SQLite WAL binary replaces
+            shell scripts, PM2 wrappers, separate FTP daemons, and container
+            stacks.
           </p>
         </div>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {TELEMETRY_STRIP.map((metric, idx) => (
-            <motion.div
-              key={metric.id}
-              initial={{ opacity: 0, y: 12 }}
-              transition={{
-                duration: 0.35,
-                delay: idx * 0.05,
-                ease: [0.22, 1, 0.36, 1],
-              }}
-              viewport={{ once: true, margin: "-40px" }}
-              whileInView={{ opacity: 1, y: 0 }}
-            >
-              <Card className="h-full border border-border bg-card p-5">
-                <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                  {metric.label}
-                </p>
-                <p className="mt-2 font-mono text-2xl font-semibold text-foreground">
-                  {metric.value}
-                </p>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  {metric.detail}
-                </p>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+        {/* Data moments: proportional RAM chart + 30-day supervisor trace */}
+        <div className="mt-10 grid items-stretch gap-6 lg:grid-cols-12">
+          <div className="flex flex-col justify-between rounded-2xl border border-border bg-card p-6 lg:col-span-5">
+            <div>
+              <div className="flex items-baseline justify-between gap-4">
+                <h3 className="text-base font-medium text-foreground">
+                  Control-plane RAM footprint
+                </h3>
+                <span className="font-mono text-xs text-muted-subtle tabular-nums">
+                  Idle / typical MB
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Midpoint RSS comparison against Docker and PHP panels
+              </p>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-12">
-          <Card className="min-w-0 overflow-hidden border border-border bg-card p-2 lg:col-span-5">
-            <AppleActivityCard
-              activities={WEBDEP_ACTIVITIES}
-              className="p-4 sm:p-6"
-              title="Verified Resource Budget"
-              titleAs="h3"
-            />
-          </Card>
+              <div className="mt-6 space-y-4">
+                {RAM_FOOTPRINT_BENCHMARKS.map((item) => {
+                  const widthPct = Math.max(
+                    3,
+                    Math.min(100, (item.mb / MAX_MB) * 100)
+                  );
+                  return (
+                    <div key={item.id} className="space-y-1.5">
+                      <div className="flex items-baseline justify-between gap-2 text-xs">
+                        <span
+                          className={cn(
+                            "font-medium",
+                            item.highlight
+                              ? "text-foreground"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {item.label}
+                        </span>
+                        <span
+                          className={cn(
+                            "font-mono tabular-nums",
+                            item.highlight
+                              ? "text-brand-accent"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {item.displayValue}
+                        </span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-sm bg-secondary">
+                        <div
+                          className={cn(
+                            "h-full rounded-sm transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                            item.highlight
+                              ? "bg-brand-accent"
+                              : "bg-foreground/20"
+                          )}
+                          style={{ width: `${widthPct}%` }}
+                        />
+                      </div>
+                      <p className="font-mono text-xs text-muted-subtle">
+                        {item.stack}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-between border-t border-border pt-3 font-mono text-xs text-muted-subtle tabular-nums">
+              <span>0 MB</span>
+              <span>250 MB</span>
+              <span>500 MB</span>
+              <span>750 MB+</span>
+            </div>
+          </div>
 
           <div className="min-w-0 lg:col-span-7">
             <UptimeCard
-              className="h-full border border-border bg-card"
+              className="h-full"
               days={30}
               services={SUPERVISED_SERVICES}
-              title="Simulated Process Supervisor Health (Click any day bar)"
+              title="Process supervisor trace"
             />
           </div>
         </div>
 
-        <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {CAPABILITIES.map((cap, idx) => {
+        {/* Capabilities hairline matrix */}
+        <motion.div
+          className="mt-8 grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-2 lg:grid-cols-3"
+          initial={{ opacity: 0, y: 10 }}
+          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          viewport={{ once: true, margin: "-40px" }}
+          whileInView={{ opacity: 1, y: 0 }}
+        >
+          {CAPABILITIES.map((cap) => {
             const Icon = ICON_MAP[cap.iconName];
             return (
-              <motion.div
+              <div
                 key={cap.id}
-                initial={{ opacity: 0, y: 14 }}
-                transition={{
-                  duration: 0.38,
-                  delay: idx * 0.04,
-                  ease: [0.22, 1, 0.36, 1],
-                }}
-                viewport={{ once: true, margin: "-40px" }}
-                whileInView={{ opacity: 1, y: 0 }}
+                className="flex flex-col justify-between bg-card p-6"
               >
-                <Card className="flex h-full flex-col justify-between border border-border bg-card p-6 transition-colors hover:border-[#2563eb]/40 dark:hover:border-[#4f8ef7]/40">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <div className="inline-flex size-10 items-center justify-center rounded-lg border border-border bg-muted/60 text-[#2563eb] dark:text-[#4f8ef7]">
-                        <Icon className="size-5" strokeWidth={1.6} />
-                      </div>
-                      <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                        {cap.eyebrow}
-                      </span>
-                    </div>
-
-                    <h3 className="mt-5 text-lg font-semibold text-foreground">
-                      {cap.title}
-                    </h3>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                      {cap.summary}
-                    </p>
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <Icon
+                      className="size-4 text-muted-foreground"
+                      strokeWidth={1.5}
+                    />
+                    <span className="font-mono text-xs text-muted-subtle">
+                      {cap.eyebrow}
+                    </span>
                   </div>
 
-                  <ul className="mt-5 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
-                    {cap.specs.map((spec) => (
-                      <li key={spec} className="flex items-start gap-2">
-                        <span className="mt-1.5 size-1 shrink-0 rounded-full bg-[#2563eb] dark:bg-[#4f8ef7]" />
-                        <span>{spec}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              </motion.div>
+                  <h3 className="mt-4 text-base font-medium text-foreground">
+                    {cap.title}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    {cap.summary}
+                  </p>
+                </div>
+
+                <ul className="mt-5 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
+                  {cap.specs.map((spec) => (
+                    <li key={spec} className="leading-relaxed">
+                      {spec}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             );
           })}
-        </div>
+        </motion.div>
       </div>
     </section>
   );

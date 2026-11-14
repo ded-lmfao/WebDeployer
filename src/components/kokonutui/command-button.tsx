@@ -166,15 +166,11 @@ function Keycap({ label, pressed }: { label: string; pressed: boolean }) {
   return (
     <kbd
       className={cn(
-        "inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 font-medium font-sans text-[11px] leading-none",
-        "border border-zinc-200 bg-white text-zinc-600",
-        "dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-300",
-        // The cap stands 2px above its base. Pressing sinks it onto the base:
-        // a translate and a shorter shadow, never a scale.
-        "shadow-[0_2px_0_0_var(--color-zinc-200)] dark:shadow-[0_2px_0_0_var(--color-zinc-950)]",
-        "transition-[translate,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
-        "group-active/command:translate-y-0.5 group-active/command:shadow-none group-active/command:duration-75",
-        pressed && "translate-y-0.5 shadow-none duration-75"
+        "inline-flex h-5 min-w-5 items-center justify-center rounded px-1.5 font-mono text-xs font-medium leading-none",
+        "border border-border bg-secondary text-muted-foreground",
+        "transition-[translate,background-color] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "group-active/command:translate-y-px",
+        pressed && "translate-y-px text-foreground"
       )}
       data-pressed={pressed || undefined}
     >
@@ -273,13 +269,11 @@ export default function CommandButton({
     <button
       aria-keyshortcuts={keyshortcuts}
       className={cn(
-        "group/command inline-flex h-10 cursor-pointer items-center gap-3 rounded-xl py-1 pr-2 pl-3.5 font-medium text-sm",
-        "border border-zinc-200 bg-white text-zinc-700",
-        "dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200",
-        "transition-[background-color,border-color] duration-150 ease-out",
-        "hover:border-zinc-300 hover:bg-zinc-50 dark:hover:border-white/15 dark:hover:bg-zinc-800/70",
-        "active:bg-zinc-100 dark:active:bg-zinc-800",
-        "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-400/50 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950",
+        "group/command inline-flex h-8 cursor-pointer items-center gap-2.5 rounded-lg py-1 pr-1.5 pl-3 text-xs font-medium",
+        "border border-border bg-card text-foreground",
+        "transition-[background-color,border-color] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "hover:bg-secondary",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:pointer-events-none disabled:opacity-50",
         className
       )}

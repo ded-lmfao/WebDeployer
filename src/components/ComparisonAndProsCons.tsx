@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Card, Chip, Table } from "@heroui/react";
-import { AlertTriangle, Check, Minus } from "lucide-react";
+import { Table } from "@heroui/react";
+import { Check, Minus } from "lucide-react";
 import {
   COMPARISON_ROWS,
   CONS_ITEMS,
@@ -9,14 +9,15 @@ import {
   PROS_ITEMS,
   type ComparisonRow,
 } from "@/data/webdepData";
+import { cn } from "@/lib/utils";
 
 type FilterCategory = "all" | ComparisonRow["category"];
 
 const CATEGORY_FILTERS: { id: FilterCategory; label: string }[] = [
-  { id: "all", label: "All Criteria (9)" },
-  { id: "architecture", label: "Architecture & Host" },
-  { id: "operations", label: "DX & Operations" },
-  { id: "security", label: "Security & Databases" },
+  { id: "all", label: "All criteria (9)" },
+  { id: "architecture", label: "Architecture & host" },
+  { id: "operations", label: "DX & operations" },
+  { id: "security", label: "Security & databases" },
 ];
 
 export default function ComparisonAndProsCons() {
@@ -30,121 +31,109 @@ export default function ComparisonAndProsCons() {
   return (
     <section
       id="comparison"
-      className="border-b border-border bg-background py-20 sm:py-24"
+      className="border-b border-border bg-background py-20 lg:py-24"
     >
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
+      <div className="mx-auto max-w-6xl px-6">
         <div className="max-w-3xl">
-          <Chip color="accent" variant="soft">
-            <Chip.Label className="font-mono text-xs">
-              Honest Trade-Offs & Ecosystem Fit
-            </Chip.Label>
-          </Chip>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Pros, Cons, and how WebDep compares to Coolify, Dokku, and Pterodactyl.
+          <h2 className="text-3xl font-medium tracking-[-0.02em] text-foreground sm:text-4xl">
+            Strengths, trade-offs, and comparison against Coolify, Dokku, and
+            Pterodactyl
           </h2>
-          <p className="mt-3 text-base text-muted-foreground">
-            Every orchestrator optimizes for a different constraint. WebDep trades
-            multi-server container clustering and 100+ community app templates
-            for extreme native speed, Windows compatibility, and ~20 MB idle RAM.
+          <p className="mt-3 text-base leading-relaxed text-muted-foreground">
+            Every orchestrator optimizes for a different constraint. WebDep
+            trades multi-server container clustering and 100+ community app
+            templates for native speed, Windows support, and ~20 MB idle RAM.
           </p>
         </div>
 
         {/* Pros & Cons two-column grid */}
         <div className="mt-10 grid gap-6 lg:grid-cols-2">
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
+            className="rounded-2xl border border-border bg-card p-6"
+            initial={{ opacity: 0, y: 10 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             viewport={{ once: true, margin: "-40px" }}
             whileInView={{ opacity: 1, y: 0 }}
           >
-            <Card className="h-full border border-emerald-500/25 bg-card p-6">
-              <div className="flex items-center justify-between border-b border-border pb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    Strengths (Pros)
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    Where WebDep outperforms heavy container panels
-                  </p>
-                </div>
-                <span className="inline-flex size-8 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                  <Check className="size-4" strokeWidth={2} />
-                </span>
-              </div>
+            <div className="border-b border-border pb-4">
+              <h3 className="text-base font-medium text-foreground">
+                Strengths (Pros)
+              </h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Where WebDep outperforms container-based panels
+              </p>
+            </div>
 
-              <ul className="mt-5 space-y-4">
-                {PROS_ITEMS.map((item) => (
-                  <li key={item.title} className="flex items-start gap-3">
+            <ul className="mt-5 space-y-4">
+              {PROS_ITEMS.map((item) => (
+                <li key={item.title} className="flex items-start gap-3">
+                  <span className="flex h-5 w-4 shrink-0 items-center justify-center">
                     <Check
-                      className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-                      strokeWidth={2}
+                      className="size-4 text-positive"
+                      strokeWidth={1.5}
                     />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {item.title}
-                      </p>
-                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                        {item.detail}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      {item.detail}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            transition={{ duration: 0.35, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
+            className="rounded-2xl border border-border bg-card p-6"
+            initial={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.35, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
             viewport={{ once: true, margin: "-40px" }}
             whileInView={{ opacity: 1, y: 0 }}
           >
-            <Card className="h-full border border-amber-500/25 bg-card p-6">
-              <div className="flex items-center justify-between border-b border-border pb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    Trade-offs & Limits (Cons)
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    Known constraints to verify before choosing WebDep
-                  </p>
-                </div>
-                <span className="inline-flex size-8 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="size-4" strokeWidth={2} />
-                </span>
-              </div>
+            <div className="border-b border-border pb-4">
+              <h3 className="text-base font-medium text-foreground">
+                Trade-offs & limits (Cons)
+              </h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Known constraints to check before adopting WebDep
+              </p>
+            </div>
 
-              <ul className="mt-5 space-y-4">
-                {CONS_ITEMS.map((item) => (
-                  <li key={item.title} className="flex items-start gap-3">
+            <ul className="mt-5 space-y-4">
+              {CONS_ITEMS.map((item) => (
+                <li key={item.title} className="flex items-start gap-3">
+                  <span className="flex h-5 w-4 shrink-0 items-center justify-center">
                     <Minus
-                      className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
-                      strokeWidth={2}
+                      className="size-4 text-muted-foreground"
+                      strokeWidth={1.5}
                     />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {item.title}
-                      </p>
-                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                        {item.detail}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      {item.detail}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </motion.div>
         </div>
 
         {/* Comparison Table */}
-        <div className="mt-14">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-16">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h3 className="text-xl font-semibold text-foreground">
-                Side-by-Side Comparison Matrix
+              <h3 className="text-xl font-medium tracking-[-0.015em] text-foreground">
+                Side-by-side comparison matrix
               </h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Filter dimensions across architecture, operations, and security.
+                Filter dimensions across architecture, operations, and security
               </p>
             </div>
 
@@ -154,11 +143,12 @@ export default function ComparisonAndProsCons() {
                 return (
                   <button
                     key={cat.id}
-                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       active
-                        ? "border-[#2563eb] bg-[#2563eb] text-white dark:border-[#4f8ef7] dark:bg-[#4f8ef7] dark:text-[#07080d]"
+                        ? "border-primary bg-primary text-primary-foreground"
                         : "border-border bg-card text-muted-foreground hover:text-foreground"
-                    }`}
+                    )}
                     type="button"
                     onClick={() => setFilter(cat.id)}
                   >
@@ -169,43 +159,50 @@ export default function ComparisonAndProsCons() {
             </div>
           </div>
 
-          <Card className="mt-5 overflow-hidden border border-border bg-card">
+          <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-card">
             <Table variant="primary">
               <Table.ScrollContainer>
                 <Table.Content aria-label="WebDep comparison against Coolify, Dokku, and Pterodactyl">
-                  <Table.Header className="bg-muted/70">
-                    <Table.Column className="w-[22%] text-xs font-semibold text-foreground" isRowHeader>
+                  <Table.Header className="border-b border-border bg-surface-deep/60">
+                    <Table.Column
+                      className="w-[22%] text-xs font-medium text-muted-foreground"
+                      isRowHeader
+                    >
                       Dimension
                     </Table.Column>
-                    <Table.Column className="w-[21%] text-xs font-semibold text-[#2563eb] dark:text-[#4f8ef7]">
+                    <Table.Column className="w-[21%] text-xs font-medium text-foreground">
                       WebDep
                     </Table.Column>
-                    <Table.Column className="w-[19%] text-xs font-semibold text-foreground">
+                    <Table.Column className="w-[19%] text-xs font-medium text-muted-foreground">
                       Coolify
                     </Table.Column>
-                    <Table.Column className="w-[19%] text-xs font-semibold text-foreground">
+                    <Table.Column className="w-[19%] text-xs font-medium text-muted-foreground">
                       Dokku
                     </Table.Column>
-                    <Table.Column className="w-[19%] text-xs font-semibold text-foreground">
+                    <Table.Column className="w-[19%] text-xs font-medium text-muted-foreground">
                       Pterodactyl
                     </Table.Column>
                   </Table.Header>
                   <Table.Body>
                     {filteredRows.map((row) => (
-                      <Table.Row key={row.feature} id={row.feature}>
-                        <Table.Cell className="font-medium text-foreground">
+                      <Table.Row
+                        key={row.feature}
+                        className="border-b border-border/60 transition-colors last:border-b-0 hover:bg-secondary/40"
+                        id={row.feature}
+                      >
+                        <Table.Cell className="text-xs font-medium text-foreground sm:text-sm">
                           {row.feature}
                         </Table.Cell>
-                        <Table.Cell className="font-medium text-foreground">
+                        <Table.Cell className="text-xs font-medium text-foreground sm:text-sm">
                           {row.webdep}
                         </Table.Cell>
-                        <Table.Cell className="text-muted-foreground">
+                        <Table.Cell className="text-xs text-muted-foreground sm:text-sm">
                           {row.coolify}
                         </Table.Cell>
-                        <Table.Cell className="text-muted-foreground">
+                        <Table.Cell className="text-xs text-muted-foreground sm:text-sm">
                           {row.dokku}
                         </Table.Cell>
-                        <Table.Cell className="text-muted-foreground">
+                        <Table.Cell className="text-xs text-muted-foreground sm:text-sm">
                           {row.pterodactyl}
                         </Table.Cell>
                       </Table.Row>
@@ -214,30 +211,31 @@ export default function ComparisonAndProsCons() {
                 </Table.Content>
               </Table.ScrollContainer>
             </Table>
-          </Card>
+          </div>
         </div>
 
         {/* Decision Rules */}
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
           {DECISION_GUIDE.map((item, idx) => (
-            <Card
-              key={item.platform}
-              className={`border p-5 ${
-                idx === 0
-                  ? "border-[#2563eb]/45 bg-[#2563eb]/5 dark:border-[#4f8ef7]/45 dark:bg-[#4f8ef7]/5"
-                  : "border-border bg-card"
-              }`}
-            >
-              <span className="font-mono text-xs font-medium text-[#2563eb] dark:text-[#4f8ef7]">
-                {item.platform}
-              </span>
-              <h4 className="mt-1.5 text-sm font-semibold text-foreground">
+            <div key={item.platform} className="bg-card p-6">
+              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                {idx === 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="size-1.5 rounded-full bg-positive"
+                  />
+                )}
+                <span className={idx === 0 ? "text-foreground" : undefined}>
+                  {item.platform}
+                </span>
+              </div>
+              <h4 className="mt-2 text-sm font-medium text-foreground">
                 {item.fit}
               </h4>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 {item.reason}
               </p>
-            </Card>
+            </div>
           ))}
         </div>
       </div>

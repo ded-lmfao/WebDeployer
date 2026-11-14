@@ -66,8 +66,8 @@ const VELOCITY_WINDOW = 100;
 const NEIGHBOUR_OPACITY = 0.35;
 // Just under critical damping: a firm settle, a hint of overshoot only after
 // a fast flick.
-const SPRING = { type: "spring", stiffness: 420, damping: 38 } as const;
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
+const SPRING = { duration: 0.32, ease: [0.22, 1, 0.36, 1] } as const;
+const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 interface TabRect {
   left: number;
@@ -317,7 +317,7 @@ export default function SmoothTab({
       if (overlay && r) {
         const right = size.current.width - r.left - r.width;
         const bottom = size.current.height - r.top - r.height;
-        overlay.style.clipPath = `inset(${r.top}px ${right}px ${bottom}px ${r.left}px round ${r.height / 2}px)`;
+        overlay.style.clipPath = `inset(${r.top}px ${right}px ${bottom}px ${r.left}px round 8px)`;
       }
     },
     [count]
@@ -391,7 +391,7 @@ export default function SmoothTab({
       }
       anim.current = reducedMotion.current
         ? animate(progress, index, { duration: 0.15, ease: EASE_OUT })
-        : animate(progress, index, { ...SPRING, velocity: opts.velocity ?? 0 });
+        : animate(progress, index, SPRING);
     },
     [progress]
   );
@@ -525,11 +525,11 @@ export default function SmoothTab({
   const panelId = (i: number) => `${baseId}-panel-${i}`;
 
   return (
-    <div className={cn("flex w-full max-w-md flex-col gap-3", className)}>
-      <div className="flex w-full justify-start overflow-x-auto pb-1 sm:justify-center">
+    <div className={cn("flex w-full flex-col gap-4", className)}>
+      <div className="flex w-full justify-start overflow-x-auto pb-1">
         <div
           aria-label={label}
-          className="relative inline-flex rounded-full bg-zinc-100 p-1 dark:bg-zinc-900"
+          className="relative inline-flex rounded-xl border border-border bg-secondary p-1"
           ref={tablistRef}
           role="tablist"
         >
@@ -541,9 +541,9 @@ export default function SmoothTab({
                 aria-controls={panelId(i)}
                 aria-selected={isSelected}
                 className={cn(
-                  "relative flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 font-medium text-sm",
-                  "text-zinc-500 transition-colors duration-150 ease-out hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
-                  "outline-none focus-visible:outline-2 focus-visible:outline-zinc-400 focus-visible:outline-offset-2"
+                  "relative flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium",
+                  "text-muted-foreground transition-colors duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] hover:text-foreground",
+                  "outline-none focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
                 )}
                 id={tabId(i)}
                 key={item.id}
@@ -556,7 +556,7 @@ export default function SmoothTab({
                 tabIndex={isSelected ? 0 : -1}
                 type="button"
               >
-                {Icon && <Icon aria-hidden="true" className="size-4" />}
+                {Icon && <Icon aria-hidden="true" className="size-4" strokeWidth={1.5} />}
                 <span className="whitespace-nowrap">{item.title}</span>
               </button>
             );
@@ -578,12 +578,12 @@ export default function SmoothTab({
               return (
                 <span
                   className={cn(
-                    "flex shrink-0 items-center gap-1.5 px-3.5 py-1.5 font-medium text-sm",
+                    "flex shrink-0 items-center gap-2 px-3.5 py-1.5 text-sm font-medium",
                     activeTextColor
                   )}
                   key={item.id}
                 >
-                  {Icon && <Icon className="size-4" />}
+                  {Icon && <Icon className="size-4" strokeWidth={1.5} />}
                   <span className="whitespace-nowrap">{item.title}</span>
                 </span>
               );
@@ -593,7 +593,7 @@ export default function SmoothTab({
       </div>
 
       <div
-        className="relative touch-pan-y select-none overflow-hidden rounded-2xl border border-zinc-200 bg-white data-dragging:cursor-grabbing dark:border-zinc-800 dark:bg-zinc-950"
+        className="relative touch-pan-y select-none overflow-hidden rounded-2xl border border-border bg-card data-dragging:cursor-grabbing"
         onClickCapture={(e) => {
           if (suppressClick.current) {
             suppressClick.current = false;
@@ -618,7 +618,7 @@ export default function SmoothTab({
           {items.map((item, i) => (
             <div
               aria-labelledby={tabId(i)}
-              className="min-h-[220px] p-5 outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-inset"
+              className="min-h-[220px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               id={panelId(i)}
               inert={i !== selected}
               key={item.id}

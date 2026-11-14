@@ -407,7 +407,7 @@ function Highlighted({ text, matches }: { text: string; matches: number[] }) {
       {parts.map((p) =>
         p.on ? (
           <b
-            className="font-semibold text-zinc-950 dark:text-white"
+            className="font-medium text-foreground"
             key={p.start}
           >
             {p.text}
@@ -422,7 +422,7 @@ function Highlighted({ text, matches }: { text: string; matches: number[] }) {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-zinc-200 bg-zinc-50 px-1 font-sans text-[11px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-secondary px-1 font-mono text-xs text-muted-foreground">
       {children}
     </kbd>
   );
@@ -1027,7 +1027,7 @@ function ActionSearchBar({
                     >
                       {section.label && (
                         <div
-                          className="px-2 pt-2 pb-1 font-medium text-[11px] text-zinc-500 dark:text-zinc-400"
+                          className="px-2 pt-2 pb-1 text-xs font-medium text-muted-subtle"
                           id={`${uid}-${section.key}`}
                           role="presentation"
                         >
@@ -1100,7 +1100,7 @@ function ActionSearchBar({
                 )}
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3 border-zinc-100 border-t px-3 py-2 text-[11px] text-zinc-500 dark:border-zinc-800/80 dark:text-zinc-400">
+            <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <span className="@xs/palette:flex hidden items-center gap-1.5">
                   <Kbd>↑</Kbd>

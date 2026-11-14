@@ -253,10 +253,10 @@ function describeDay(list: { service: string; incident: Incident }[]) {
 }
 
 const BAR_COLOR: Record<DayStatus, string> = {
-  up: "bg-emerald-500 dark:bg-emerald-400",
-  degraded: "bg-amber-400 dark:bg-amber-300",
-  down: "bg-rose-500 dark:bg-rose-400",
-  none: "bg-zinc-200 dark:bg-zinc-800",
+  up: "bg-[#16a34a] dark:bg-[#4cc38a]",
+  degraded: "bg-amber-500 dark:bg-amber-400",
+  down: "bg-[#dc2626] dark:bg-[#e5484d]",
+  none: "bg-secondary",
 };
 
 const STATUS_TEXT: Record<DayStatus, string> = {
@@ -464,102 +464,101 @@ export default function UptimeCard({
   return (
     <div
       className={cn(
-        "w-full max-w-xl select-none rounded-3xl border border-zinc-200 bg-white p-5 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100",
+        "flex w-full flex-col justify-between select-none rounded-2xl border border-border bg-card p-6 text-foreground",
         className
       )}
     >
-      <div className="flex items-center justify-between gap-4">
-        <p className="font-medium text-sm">{title}</p>
-        {openIssues.length ? (
-          <p className="flex items-center gap-1.5 text-amber-600 text-sm dark:text-amber-400">
-            <TriangleAlert aria-hidden className="size-4" />
-            {openIssues.length} service{openIssues.length > 1 ? "s" : ""}{" "}
-            affected
-          </p>
-        ) : (
-          <p className="flex items-center gap-1.5 text-emerald-600 text-sm dark:text-emerald-400">
-            <CircleCheck aria-hidden className="size-4" />
-            All systems operational
-          </p>
-        )}
-      </div>
-      <p
-        aria-live="polite"
-        className="mt-1 truncate text-sm text-zinc-500 tabular-nums dark:text-zinc-400"
-      >
-        {summary}
-      </p>
+      <div>
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-base font-medium text-foreground">{title}</p>
+          {openIssues.length ? (
+            <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <TriangleAlert aria-hidden className="size-4" strokeWidth={1.5} />
+              {openIssues.length} service{openIssues.length > 1 ? "s" : ""}{" "}
+              affected
+            </p>
+          ) : (
+            <p className="flex items-center gap-1.5 text-xs text-[#16a34a] dark:text-[#4cc38a]">
+              <CircleCheck aria-hidden className="size-4" strokeWidth={1.5} />
+              All systems operational
+            </p>
+          )}
+        </div>
+        <p
+          aria-live="polite"
+          className="mt-1 truncate text-xs text-muted-foreground tabular-nums"
+        >
+          {summary}
+        </p>
 
-      <div
-        aria-label={`Daily status for the last ${days} days. Use the arrow keys to move between days and Enter to open one.`}
-        aria-valuemax={days}
-        aria-valuemin={1}
-        aria-valuenow={(shownDay ?? days - 1) + 1}
-        aria-valuetext={summary}
-        className="mt-4 cursor-pointer touch-pan-y rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-4 dark:focus-visible:ring-offset-zinc-950"
-        onBlur={() => {
-          if (active !== null) {
-            leave();
-          }
-        }}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        onLostPointerCapture={(event) => {
-          // A touch's implicit capture on the bar it started on moves to this
-          // element on pointerdown; that bubbling event is not the end.
-          if (event.target === event.currentTarget) {
-            leave();
-          }
-        }}
-        onPointerDown={handlePointerDown}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "mouse") {
-            leave();
-          }
-        }}
-        onPointerMove={handlePointerMove}
-        ref={barsRef}
-        role="slider"
-        tabIndex={0}
-      >
-        {services.map((service, row) => (
-          <div className={cn(row > 0 && "mt-3")} key={service.name}>
-            <div className="mb-1.5 flex justify-between text-xs">
-              <span className="font-medium">{service.name}</span>
-              <span className="text-zinc-500 tabular-nums dark:text-zinc-400">
-                {uptimes[row].toFixed(2)}%
-              </span>
+        <div
+          aria-label={`Daily status for the last ${days} days. Use the arrow keys to move between days and Enter to open one.`}
+          aria-valuemax={days}
+          aria-valuemin={1}
+          aria-valuenow={(shownDay ?? days - 1) + 1}
+          aria-valuetext={summary}
+          className="mt-5 cursor-pointer touch-pan-y rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-card"
+          onBlur={() => {
+            if (active !== null) {
+              leave();
+            }
+          }}
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
+          onLostPointerCapture={(event) => {
+            if (event.target === event.currentTarget) {
+              leave();
+            }
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerLeave={(event) => {
+            if (event.pointerType === "mouse") {
+              leave();
+            }
+          }}
+          onPointerMove={handlePointerMove}
+          ref={barsRef}
+          role="slider"
+          tabIndex={0}
+        >
+          {services.map((service, row) => (
+            <div className={cn(row > 0 && "mt-4")} key={service.name}>
+              <div className="mb-1.5 flex justify-between text-xs">
+                <span className="font-mono text-foreground">{service.name}</span>
+                <span className="font-mono text-muted-foreground tabular-nums">
+                  {uptimes[row].toFixed(2)}%
+                </span>
+              </div>
+              <div className="flex h-7 gap-px sm:gap-[2px]" data-row>
+                {Array.from({ length: days }, (_, day) => {
+                  const status = statusOf(service, day);
+                  const lit = day === shownDay;
+                  return (
+                    <div
+                      className={cn(
+                        "min-w-0 basis-0 rounded-[2px] transition-opacity duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                        BAR_COLOR[status],
+                        shownDay !== null && !lit && "opacity-50"
+                      )}
+                      key={day}
+                      style={{ flexGrow: 1 }}
+                    />
+                  );
+                })}
+              </div>
             </div>
-            <div className="flex h-7 gap-px sm:gap-[2px]" data-row>
-              {Array.from({ length: days }, (_, day) => {
-                const status = statusOf(service, day);
-                const lit = day === shownDay;
-                return (
-                  <div
-                    className={cn(
-                      "min-w-0 basis-0 rounded-[2px] transition-opacity duration-150 ease-out",
-                      BAR_COLOR[status],
-                      shownDay !== null && !lit && "opacity-60"
-                    )}
-                    // biome-ignore lint/suspicious/noArrayIndexKey: one bar per day, never reordered
-                    key={day}
-                    style={{ flexGrow: 1 }}
-                  />
-                );
-              })}
-            </div>
+          ))}
+          <div className="mt-2.5 flex justify-between font-mono text-xs text-muted-subtle">
+            <span>{days} days ago</span>
+            <span>Today</span>
           </div>
-        ))}
-        <div className="mt-2 flex justify-between text-xs text-zinc-400 dark:text-zinc-500">
-          <span>{days} days ago</span>
-          <span>Today</span>
         </div>
       </div>
 
       {/* A pinned day opens its incident log. */}
       <div
         className={cn(
-          "grid transition-[grid-template-rows,opacity] duration-[260ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
+          "grid transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
           pinned === null
             ? "grid-rows-[0fr] opacity-0"
             : "grid-rows-[1fr] opacity-100"
@@ -568,59 +567,59 @@ export default function UptimeCard({
       >
         <div className="overflow-hidden">
           {logDay !== null && (
-            <div className="mt-4 rounded-2xl bg-zinc-50 p-4 dark:bg-zinc-900">
+            <div className="mt-4 rounded-xl border border-border bg-secondary/60 p-4">
               <div className="flex items-center justify-between">
-                <p className="font-medium text-sm">
+                <p className="text-sm font-medium text-foreground">
                   {formatDay(dateOf(logDay))}
                 </p>
                 <button
                   aria-label="Close day"
-                  className="rounded-full p-1 text-zinc-500 outline-none transition-colors duration-150 ease-out hover:bg-zinc-200 hover:text-zinc-900 focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  className="rounded-md p-1 text-muted-foreground outline-none transition-colors duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => {
                     setPinned(null);
                     focusOn(null);
                   }}
                   type="button"
                 >
-                  <X aria-hidden className="size-3.5" />
+                  <X aria-hidden className="size-4" strokeWidth={1.5} />
                 </button>
               </div>
               {pinnedIncidents.length === 0 && (
-                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                <p className="mt-1 text-xs text-muted-foreground">
                   No incidents recorded. Every service was operational.
                 </p>
               )}
               {pinnedIncidents.map(({ service, incident }) => (
                 <div className="mt-3" key={service}>
-                  <p className="flex flex-wrap items-center gap-2 text-sm">
+                  <p className="flex flex-wrap items-center gap-2 text-xs">
                     <span
                       className={cn(
-                        "rounded-full px-2 py-0.5 font-medium text-[11px]",
+                        "rounded px-1.5 py-0.5 font-mono text-xs",
                         incident.status === "down"
-                          ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
-                          : "bg-amber-100 text-amber-800 dark:bg-amber-400/15 dark:text-amber-200"
+                          ? "bg-[#dc2626]/10 text-[#dc2626] dark:bg-[#e5484d]/15 dark:text-[#e5484d]"
+                          : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
                       )}
                     >
                       {STATUS_TEXT[incident.status]}
                     </span>
-                    <span className="font-medium">{service}</span>
-                    <span className="text-zinc-500 dark:text-zinc-400">
+                    <span className="font-mono font-medium text-foreground">{service}</span>
+                    <span className="text-muted-foreground">
                       {incident.title} · {incident.minutes} min
                     </span>
                   </p>
-                  <ol className="mt-2.5 ml-1 border-zinc-200 border-l dark:border-zinc-800">
+                  <ol className="mt-2.5 ml-1 border-l border-border">
                     {incident.updates.map((update) => (
                       <li
-                        className="relative pb-2.5 pl-4 text-sm last:pb-0"
+                        className="relative pb-2.5 pl-4 text-xs last:pb-0"
                         key={`${update.time}-${update.label}`}
                       >
-                        <span className="absolute top-[7px] -left-[3.5px] size-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
-                        <span className="text-zinc-400 tabular-nums dark:text-zinc-500">
+                        <span className="absolute top-[6px] -left-[3.5px] size-1.5 rounded-full bg-muted-subtle" />
+                        <span className="font-mono text-muted-subtle tabular-nums">
                           {update.time}
                         </span>{" "}
-                        <span className="font-medium">{update.label}</span>
+                        <span className="font-medium text-foreground">{update.label}</span>
                         {update.note && (
-                          <span className="text-zinc-500 dark:text-zinc-400">
+                          <span className="text-muted-foreground">
                             {" "}
                             {update.note}
                           </span>

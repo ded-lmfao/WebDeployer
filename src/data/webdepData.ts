@@ -91,30 +91,79 @@ export const GITHUB_RELEASES_URL =
 export const SONAR_URL =
   "https://sonarcloud.io/summary/new_code?id=ded-lmfao_WebDeployer";
 
+export interface FootprintBar {
+  id: string;
+  label: string;
+  stack: string;
+  mb: number;
+  displayValue: string;
+  highlight?: boolean;
+}
+
+export const RAM_FOOTPRINT_BENCHMARKS: FootprintBar[] = [
+  {
+    id: "webdep-idle",
+    label: "WebDep (idle)",
+    stack: "Single Rust binary + SQLite WAL",
+    mb: 18.4,
+    displayValue: "18.4 MB",
+    highlight: true,
+  },
+  {
+    id: "webdep-load",
+    label: "WebDep (25 apps)",
+    stack: "10 active PIDs + SSE stream",
+    mb: 23.7,
+    displayValue: "23.7 MB",
+    highlight: true,
+  },
+  {
+    id: "dokku",
+    label: "Dokku",
+    stack: "Bash/Go plugins + Docker daemon",
+    mb: 300,
+    displayValue: "200–400 MB",
+  },
+  {
+    id: "pterodactyl",
+    label: "Pterodactyl",
+    stack: "Laravel panel + MariaDB + Redis + Wings",
+    mb: 600,
+    displayValue: "400–800 MB",
+  },
+  {
+    id: "coolify",
+    label: "Coolify",
+    stack: "Docker containers + Laravel runtime",
+    mb: 750,
+    displayValue: "500–1,000 MB",
+  },
+];
+
 export const TELEMETRY_STRIP: TelemetryMetric[] = [
   {
     id: "idle-rss",
-    label: "Idle Control-Plane RSS",
+    label: "Idle control-plane RSS",
     value: "~18.4 MB",
-    detail: "Single Rust binary + Axum + SQLite WAL + embedded frontend",
+    detail: "Single Rust binary, Axum, SQLite WAL, embedded UI",
   },
   {
     id: "peak-rss",
     label: "Peak RSS (25 apps / 10 PIDs)",
     value: "~23.7 MB",
-    detail: "Sysinfo telemetry collector + concurrent SSE streaming",
+    detail: "Sysinfo telemetry collector + concurrent SSE streams",
   },
   {
     id: "overview-p50",
-    label: "/api/overview Cold P50",
+    label: "/api/overview cold P50",
     value: "~2.0 ms",
-    detail: "Measured locally across 25 projects (down from 116.4 ms baseline)",
+    detail: "Measured across 25 projects (down from 116.4 ms)",
   },
   {
     id: "binary-footprint",
-    label: "Release Binary Size",
-    value: "~10 MB",
-    detail: "Zero Node, Python, or Docker runtime required to run WebDep",
+    label: "Release binary size",
+    value: "~10.0 MB",
+    detail: "No Node, Python, or Docker required for the panel",
   },
 ];
 
@@ -209,9 +258,9 @@ export const CAPABILITIES: CapabilityItem[] = [
   {
     id: "websites",
     title: "Websites & Auto Caddy TLS",
-    eyebrow: "Reverse Proxy + Zero-Config HTTPS",
+    eyebrow: "Reverse proxy",
     summary:
-      "Deploy static bundles, Node/Next.js/Astro SSR servers, Python ASGI/WSGI apps, Go binaries, or custom shells with managed Caddy routes.",
+      "Deploy static bundles, Next.js or Astro SSR servers, Python ASGI/WSGI apps, Go binaries, or custom shells with managed Caddy routes",
     specs: [
       "7-stage pipeline streamed live over Server-Sent Events (SSE)",
       "Per-domain HTTPS TLS and loopback upstream routing via Caddy",
@@ -222,25 +271,25 @@ export const CAPABILITIES: CapabilityItem[] = [
   {
     id: "services",
     title: "24/7 Background Workers",
-    eyebrow: "OS Process Supervision",
+    eyebrow: "Process supervisor",
     summary:
-      "Run Discord/Telegram bots, queue consumers, AI agents, cron loops, and long-lived daemons natively without systemd boilerplate.",
+      "Run Discord or Telegram bots, queue consumers, AI agents, cron loops, and long-lived daemons natively without systemd boilerplate",
     specs: [
       "Capped restart backoff and persistent stdout/stderr log buffers",
       "Real-time per-PID CPU% and RSS memory sampled by sysinfo",
-      "Start, stop, restart, and clear logs directly from WebSocket/UI",
+      "Start, stop, restart, and clear logs directly from the panel",
     ],
     iconName: "cpu",
   },
   {
     id: "databases",
     title: "Isolated PostgreSQL Clusters",
-    eyebrow: "Real pg_ctl Clusters + Firewall",
+    eyebrow: "pg_ctl + firewall",
     summary:
-      "Provision standalone data-directory PostgreSQL clusters on arbitrary ports with WebDep managing roles, backups, and host firewall rules.",
+      "Provision standalone data-directory PostgreSQL clusters on arbitrary ports while WebDep manages roles, backups, and host firewall rules",
     specs: [
       "3 access modes: Local Only (127.0.0.1), IP/CIDR Allowlist, Public",
-      "pg_hba.conf + UFW / iptables / netsh firewall sync automatically",
+      "pg_hba.conf + UFW / iptables / netsh firewall sync",
       "Live pg_dump & psql SQL console with one-click .sql snapshots",
     ],
     iconName: "database",
@@ -248,39 +297,39 @@ export const CAPABILITIES: CapabilityItem[] = [
   {
     id: "security",
     title: "Hardened Auth & Encrypted Secrets",
-    eyebrow: "Passkeys + TOTP + AES-256-GCM",
+    eyebrow: "Passkeys + TOTP",
     summary:
-      "Protect control-plane operations with modern cryptographic auth, role-based access, and zero plaintext secret storage.",
+      "Protect control-plane operations with hardware passkeys, role-based access, and AES-256-GCM encrypted secret storage",
     specs: [
       "WebAuthn hardware/platform Passkeys + TOTP 2FA authenticator",
       "Argon2id password hashing and AES-256-GCM encrypted secrets",
-      "Viewer & Admin RBAC plus IP/session/audit trails",
+      "Viewer & Admin RBAC plus IP, session, and audit trails",
     ],
     iconName: "shield",
   },
   {
     id: "workspace",
     title: "Workspace Shell, SFTP & IDE",
-    eyebrow: "Full Browser Access",
+    eyebrow: "Browser workspace",
     summary:
-      "Drop into an interactive PTY terminal, manage SFTP/file trees with drag-and-drop uploads, or open a live Monaco code workspace.",
+      "Open an interactive PTY terminal, manage file trees with drag-and-drop uploads, or edit source files in an embedded Monaco workspace",
     specs: [
       "Embedded Monaco editor across project source trees",
       "Direct archive extraction, permissions, and file previewing",
-      "Live PTY host terminal scoped cleanly behind admin auth",
+      "Live PTY host terminal scoped behind admin auth",
     ],
     iconName: "folder",
   },
   {
     id: "telemetry",
     title: "Sub-2 ms Telemetry & Auto-Updates",
-    eyebrow: "Low-Overhead Operations",
+    eyebrow: "Low-overhead ops",
     summary:
-      "Inspect CPU cores, RAM, disk saturation, and live alerts with zero polling bloat — plus in-panel GitHub Releases upgrades.",
+      "Inspect CPU cores, RAM, disk saturation, and live alerts with minimal polling overhead, plus in-panel GitHub Releases upgrades",
     specs: [
-      "~18.4 MB idle RSS single binary keeps VPS RAM for workloads",
+      "~18.4 MB idle RSS leaves VPS memory free for workloads",
       "One-click GitHub Release pull, verify, restart & auto reload",
-      "Notification center for Discord, Slack, Telegram & custom webhooks",
+      "Alert channels for Discord, Slack, Telegram & custom webhooks",
     ],
     iconName: "activity",
   },
@@ -387,67 +436,67 @@ export const PANEL_SCREENS: PanelScreen[] = [
 
 export const PROS_ITEMS = [
   {
-    title: "Tiny Control-Plane Footprint (~20 MB RAM)",
+    title: "Small control-plane footprint (~20 MB RAM)",
     detail:
-      "Written in Rust (~18.4 MB idle, ~23.7 MB under 25-project load), saving hundreds of megabytes on 1 GB-2 GB VPS instances.",
+      "Written in Rust (~18.4 MB idle, ~23.7 MB under 25-project load), preserving RAM on 1 GB–2 GB VPS instances",
   },
   {
-    title: "Native Speed Without Docker Overhead",
+    title: "Native processes without Docker overhead",
     detail:
-      "Runs native binaries and runtimes directly on Linux or Windows with zero container layer tax or image bloat.",
+      "Runs native binaries and runtimes directly on Linux or Windows with no container layer tax or image bloat",
   },
   {
-    title: "Zero-Setup Single Binary + Embedded UI",
+    title: "Single binary with embedded UI",
     detail:
-      "SQLite (WAL mode) and all static dashboard assets compile inside the ~10 MB executable — one file to fetch and run.",
+      "SQLite (WAL mode) and all dashboard assets compile inside the ~10.0 MB executable — one file to fetch and run",
   },
   {
-    title: "Real Database Firewall Automation",
+    title: "Database firewall automation",
     detail:
-      "Manages isolated pg_ctl PostgreSQL clusters while keeping pg_hba.conf and OS firewall rules (UFW/iptables/netsh) aligned.",
+      "Manages isolated pg_ctl PostgreSQL clusters while keeping pg_hba.conf and OS firewall rules (UFW/iptables/netsh) aligned",
   },
   {
-    title: "Built-In Workspace Suite (Shell + Monaco + Files)",
+    title: "Built-in workspace (Shell + Monaco + Files)",
     detail:
-      "Interactive PTY shell, file manager, and Monaco editor ship out of the box without installing separate web IDE addons.",
+      "Interactive PTY shell, file manager, and Monaco editor ship out of the box without separate web IDE addons",
   },
   {
-    title: "Cross-Platform Linux & Windows Support",
+    title: "Linux and Windows host support",
     detail:
-      "Operates seamlessly on headless Ubuntu/Debian servers and local or dedicated Windows hosts.",
+      "Runs natively on headless Ubuntu/Debian servers and local or dedicated Windows hosts",
   },
 ];
 
 export const CONS_ITEMS = [
   {
-    title: "No Multi-Server Swarm or Kubernetes",
+    title: "Single-node only (no Swarm or Kubernetes)",
     detail:
-      "Purpose-built as a crisp single-node VPS orchestrator; it does not federate across multi-host worker nodes.",
+      "Built as a single-node VPS orchestrator; it does not federate across multi-host worker nodes",
   },
   {
-    title: "Smaller Prebuilt App Marketplace",
+    title: "No prebuilt Docker app marketplace",
     detail:
-      "Does not bundle 100+ one-click Docker community templates (WordPress, Ghost, Plausible) like container PaaS panels.",
+      "Does not bundle 100+ one-click community templates (WordPress, Ghost, Plausible) like container PaaS panels",
   },
   {
-    title: "No Container Rootfs Sandboxing",
+    title: "No container rootfs sandboxing",
     detail:
-      "Processes share the host filesystem and installed runtimes rather than running inside isolated Docker namespaces or cgroup quotas.",
+      "Processes share the host filesystem and installed runtimes rather than running inside Docker namespaces or cgroup quotas",
   },
   {
-    title: "Requires Host Language Runtimes",
+    title: "Requires host language runtimes",
     detail:
-      "Node.js, Python, Go, or Rust toolchains must exist on the host machine when building apps directly on the VPS.",
+      "Node.js, Python, Go, or Rust toolchains must exist on the host machine when building apps directly on the VPS",
   },
   {
-    title: "PostgreSQL-First Database Tooling",
+    title: "PostgreSQL-first database tooling",
     detail:
-      "First-class UI automation targets isolated PostgreSQL clusters; MySQL/Redis/Mongo require running your own host services.",
+      "First-class UI automation targets isolated PostgreSQL clusters; MySQL, Redis, or MongoDB run as separate host services",
   },
   {
-    title: "Younger Ecosystem vs Multi-Year Panels",
+    title: "Smaller third-party ecosystem",
     detail:
-      "Fewer third-party tutorials and plugins than mature Ruby/PHP ecosystems — built as a tight single-binary product.",
+      "Fewer third-party plugins and guides than multi-year Ruby or PHP panels",
   },
 ];
 

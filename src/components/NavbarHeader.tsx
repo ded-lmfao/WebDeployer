@@ -1,11 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  Button,
-  Chip,
-  Link,
-  Modal,
-  Surface,
-} from "@heroui/react";
+import { Button, Link, Modal } from "@heroui/react";
 import {
   ArrowUpRight,
   Cpu,
@@ -32,9 +26,9 @@ interface NavbarHeaderProps {
 
 const NAV_LINKS = [
   { label: "Features", target: "capabilities" },
-  { label: "Panel Tour", target: "panel-tour" },
+  { label: "Panel tour", target: "panel-tour" },
   { label: "Comparison", target: "comparison" },
-  { label: "Docs & Install", target: "install" },
+  { label: "Install", target: "install" },
 ];
 
 export default function NavbarHeader({
@@ -49,40 +43,40 @@ export default function NavbarHeader({
     () => [
       {
         id: "cmd-pipeline",
-        label: "Simulate 7-Stage Deploy Pipeline",
-        icon: <GitBranch className="size-4 text-[#4f8ef7]" />,
+        label: "Simulate 7-stage deploy pipeline",
+        icon: <GitBranch className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Interactive",
         keywords: ["deploy", "pipeline", "simulate", "sse"],
         shortcut: ["1"],
       },
       {
         id: "cmd-capabilities",
-        label: "Explore Architecture & Telemetry",
-        icon: <Cpu className="size-4 text-emerald-500" />,
+        label: "Architecture and resource footprint",
+        icon: <Cpu className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Sections",
         keywords: ["ram", "rust", "benchmark", "metrics"],
         shortcut: ["2"],
       },
       {
         id: "cmd-tour",
-        label: "Inspect All 8 Dashboard Screens",
-        icon: <Layers className="size-4 text-sky-500" />,
+        label: "Inspect all 8 dashboard screens",
+        icon: <Layers className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Sections",
         keywords: ["screenshots", "ui", "overview", "websites", "postgres"],
         shortcut: ["3"],
       },
       {
         id: "cmd-comparison",
-        label: "Compare vs Coolify, Dokku & Pterodactyl",
-        icon: <Scale className="size-4 text-amber-500" />,
+        label: "Compare against Coolify, Dokku, and Pterodactyl",
+        icon: <Scale className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Evaluation",
         keywords: ["pros", "cons", "coolify", "dokku", "pterodactyl"],
         shortcut: ["4"],
       },
       {
         id: "cmd-install",
-        label: "Install Commands & .env Reference",
-        icon: <Terminal className="size-4 text-zinc-400" />,
+        label: "Install commands and .env reference",
+        icon: <Terminal className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Documentation",
         keywords: ["start.sh", "cargo", "windows", "env", "postgres"],
         shortcut: ["5"],
@@ -90,7 +84,7 @@ export default function NavbarHeader({
       {
         id: "cmd-github",
         label: "Open ded-lmfao/WebDep on GitHub",
-        icon: <Database className="size-4 text-zinc-400" />,
+        icon: <Database className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "External",
         keywords: ["repo", "source", "releases"],
         href: GITHUB_REPO_URL,
@@ -120,41 +114,35 @@ export default function NavbarHeader({
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <a
-              className="flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              href="#top"
-            >
-              <img
-                alt="WebDep Logo"
-                className="size-8 rounded-lg border border-border bg-card object-cover"
-                src="./images/logo.png"
-              />
-              <span className="font-semibold text-base tracking-tight text-foreground">
-                WebDep
-              </span>
-            </a>
-            <Chip className="hidden sm:inline-flex" color="accent" variant="soft">
-              <Chip.Label className="font-mono text-[11px]">v2.0.4 · Rust</Chip.Label>
-            </Chip>
-          </div>
+      <header className="sticky top-0 z-40 w-full border-b border-border bg-background/90 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6">
+          <a
+            className="flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="#top"
+          >
+            <img
+              alt="WebDep"
+              className="size-7 rounded-md border border-border bg-card object-cover"
+              src="./images/logo.png"
+            />
+            <span className="text-base font-medium tracking-tight text-foreground">
+              WebDep
+            </span>
+          </a>
 
           <nav
             aria-label="Primary navigation"
             className="hidden items-center gap-1 md:flex"
           >
             {NAV_LINKS.map((item) => (
-              <Button
+              <button
                 key={item.target}
-                className="text-sm font-medium text-muted-foreground hover:text-foreground"
-                size="sm"
-                variant="ghost"
-                onPress={() => onJumpToSection(item.target)}
+                className="rounded-lg px-3 py-1.5 text-sm font-normal text-muted-foreground transition-colors duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                type="button"
+                onClick={() => onJumpToSection(item.target)}
               >
                 {item.label}
-              </Button>
+              </button>
             ))}
           </nav>
 
@@ -165,7 +153,7 @@ export default function NavbarHeader({
               shortcut="mod+k"
               onClick={() => setCommandOpen(true)}
             >
-              Quick Jump
+              Quick jump
             </CommandButton>
 
             <SwitchButton
@@ -177,13 +165,13 @@ export default function NavbarHeader({
             />
 
             <Link
-              className="hidden h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted lg:inline-flex"
+              className="hidden h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-normal text-muted-foreground transition-colors duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] hover:text-foreground lg:inline-flex"
               href={GITHUB_REPO_URL}
               rel="noopener noreferrer"
               target="_blank"
             >
               GitHub
-              <ArrowUpRight className="size-3.5 text-muted-foreground" strokeWidth={1.75} />
+              <ArrowUpRight className="size-4" strokeWidth={1.5} />
             </Link>
 
             <Button
@@ -195,65 +183,60 @@ export default function NavbarHeader({
               onPress={() => setMobileMenuOpen((prev) => !prev)}
             >
               {mobileMenuOpen ? (
-                <X className="size-4" strokeWidth={1.75} />
+                <X className="size-4" strokeWidth={1.5} />
               ) : (
-                <Menu className="size-4" strokeWidth={1.75} />
+                <Menu className="size-4" strokeWidth={1.5} />
               )}
             </Button>
           </div>
         </div>
 
         {mobileMenuOpen && (
-          <Surface
-            className="border-t border-border px-4 py-3 md:hidden"
-            variant="secondary"
-          >
+          <div className="border-t border-border bg-card px-6 py-4 md:hidden">
             <div className="flex flex-col gap-1">
               {NAV_LINKS.map((item) => (
-                <Button
+                <button
                   key={item.target}
-                  className="justify-start text-sm"
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => {
+                  className="flex h-9 items-center rounded-lg px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  type="button"
+                  onClick={() => {
                     setMobileMenuOpen(false);
                     onJumpToSection(item.target);
                   }}
                 >
                   {item.label}
-                </Button>
+                </button>
               ))}
-              <div className="mt-2 flex items-center gap-2 pt-2 border-t border-border">
-                <Button
-                  className="flex-1"
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => {
+              <div className="mt-2 flex items-center gap-2 border-t border-border pt-3">
+                <button
+                  className="flex h-9 flex-1 items-center justify-center rounded-lg border border-border bg-secondary px-3 text-sm font-medium text-foreground"
+                  type="button"
+                  onClick={() => {
                     setMobileMenuOpen(false);
                     setCommandOpen(true);
                   }}
                 >
-                  Quick Jump (Ctrl+K)
-                </Button>
+                  Quick jump
+                </button>
                 <Link
-                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground"
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-border bg-card px-3 text-sm text-foreground"
                   href={GITHUB_REPO_URL}
                   rel="noopener noreferrer"
                   target="_blank"
                 >
                   GitHub
-                  <ArrowUpRight className="size-3.5" strokeWidth={1.75} />
+                  <ArrowUpRight className="size-4" strokeWidth={1.5} />
                 </Link>
               </div>
             </div>
-          </Surface>
+          </div>
         )}
       </header>
 
       <Modal isOpen={commandOpen} onOpenChange={setCommandOpen}>
         <Modal.Backdrop isDismissable>
           <Modal.Container placement="top" size="lg">
-            <Modal.Dialog className="mt-12 border border-border bg-card text-foreground shadow-2xl">
+            <Modal.Dialog className="mt-12 rounded-2xl border border-border bg-card text-foreground">
               <Modal.Header className="flex items-center justify-between border-b border-border px-4 py-3">
                 <Modal.Heading className="text-sm font-medium text-foreground">
                   Jump to section or reference
@@ -265,7 +248,7 @@ export default function NavbarHeader({
                   defaultOpen
                   items={commandItems}
                   label="Search sections, guides, and benchmarks"
-                  placeholder="Jump to pipeline, Coolify comparison, .env..."
+                  placeholder="Search sections or references"
                   shortcut={false}
                   onSelect={(item) => handleSelectCommand(item)}
                 />
