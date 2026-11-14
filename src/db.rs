@@ -197,7 +197,6 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
-        CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at) WHERE last_active_at > 0;
 
         CREATE TABLE IF NOT EXISTS backups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,10 +298,10 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         })
         .unwrap_or(false);
     if !has_session_last_active {
-        let _ = conn.execute(
+        conn.execute(
             "ALTER TABLE sessions ADD COLUMN last_active_at INTEGER NOT NULL DEFAULT 0",
             [],
-        );
+        )?;
     }
     let now_s = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -312,6 +311,10 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         "UPDATE sessions SET last_active_at = ? WHERE last_active_at = 0",
         [now_s],
     );
+    // Create the partial index only after legacy databases have added `sessions.last_active_at`.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at) WHERE last_active_at > 0;",
+    )?;
 
     // Auto-seed github_token into SQLite settings if not yet configured
     let existing_token: String = conn
@@ -652,6 +655,63 @@ mod tests {
             "expected idx_sessions_last_active in {}",
             idle_purge_plan
         );
+
+        drop(conn);
+        drop(pool);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_open_db_migrates_legacy_sessions_table_before_indexing() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-db-legacy-migrate-{}", now()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("webdep.sqlite");
+
+        // Simulate a pre-v2.0.10 VPS database before `sessions.last_active_at` existed.
+        {
+            let legacy = Connection::open(&db_path).unwrap();
+            legacy
+                .execute_batch(
+                    "
+                    CREATE TABLE users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT NOT NULL UNIQUE,
+                        password_hash TEXT NOT NULL,
+                        created_at INTEGER NOT NULL
+                    );
+                    CREATE TABLE sessions (
+                        id TEXT PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        expires_at INTEGER NOT NULL,
+                        csrf_token TEXT NOT NULL
+                    );
+                    INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'admin', 'hash', 1);
+                    INSERT INTO sessions (id, user_id, expires_at, csrf_token) VALUES ('legacy-sid', 1, 9999999999, 'legacy-csrf');
+                    ",
+                )
+                .unwrap();
+        }
+
+        let pool = open_db(&temp_dir).expect("open_db should migrate legacy v2.0.9 databases cleanly");
+        let conn = pool.lock().unwrap();
+
+        let last_active: i64 = conn
+            .query_row(
+                "SELECT last_active_at FROM sessions WHERE id = 'legacy-sid'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(last_active > 0, "legacy session should have backfilled last_active_at");
+
+        let has_index: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sessions_last_active'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_index, 1, "idx_sessions_last_active should exist after migration");
 
         drop(conn);
         drop(pool);
