@@ -18,6 +18,7 @@ import {
 } from './state.js';
 import { api, toast } from './api.js';
 import { hasPower } from './auth.js';
+import { renderThemePicker, applyTheme, THEME_STORAGE_KEY } from './themes.js';
 
 // Re-export submodules so consumers importing from './settings.js' have full API parity
 export * from './settings_users.js';
@@ -138,6 +139,7 @@ export function renderSecurityStatusSummary() {
 
 export async function loadSettingsView() {
   renderSecurityStatusSummary();
+  renderThemePicker();
   if (window.loadPasskeysList) window.loadPasskeysList().catch(() => {});
 
   const isMain = Boolean(state.user && state.user.isMainAdmin);
@@ -164,6 +166,16 @@ export async function loadSettingsView() {
   try {
     if (canSettings) {
       const s = await api('/api/settings');
+      if (s.panel_theme) {
+        state.platformTheme = s.panel_theme;
+        let hasLocalTheme = false;
+        try { hasLocalTheme = Boolean(localStorage.getItem(THEME_STORAGE_KEY)); } catch (_) {}
+        if (!hasLocalTheme) {
+          applyTheme(s.panel_theme, true);
+        } else {
+          renderThemePicker();
+        }
+      }
       const freeMb = document.getElementById('setting-min-free-mb');
       if (freeMb) freeMb.value = s.min_free_mb || 500;
       const defRet = document.getElementById('setting-default-retention');

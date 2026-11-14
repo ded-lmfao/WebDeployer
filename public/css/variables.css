@@ -28,6 +28,20 @@
   --accent-light: #82b8ff;
   --accent-hover: #3b7be8;
   --accent-glow: rgba(79, 142, 247, 0.16);
+  --accent-border: rgba(79, 142, 247, 0.30);
+  --accent-selection: rgba(79, 142, 247, 0.32);
+
+  --ink-1: rgba(238, 241, 247, 0.02);
+  --ink-2: rgba(238, 241, 247, 0.04);
+  --ink-3: rgba(238, 241, 247, 0.06);
+  --ink-4: rgba(238, 241, 247, 0.08);
+  --ink-hover: rgba(238, 241, 247, 0.22);
+  --ink-scroll: rgba(238, 241, 247, 0.14);
+  --btn-primary-hover: #ffffff;
+  --btn-secondary-hover-text: #ffffff;
+  --scrim-backdrop: rgba(4, 7, 14, 0.74);
+  --scrim-surface: rgba(7, 11, 20, 0.92);
+  --autofill-bg: #0c1426;
 
   --success: #4cc38a;
   --success-light: #4cc38a;
@@ -84,7 +98,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-::selection { background: rgba(79, 142, 247, 0.32); color: #eef1f7; }
+::selection { background: var(--accent-selection); color: var(--text-main); }
 
 html,
 input,
@@ -93,11 +107,11 @@ select {
   color-scheme: dark;
 }
 
-* { scrollbar-width: thin; scrollbar-color: rgba(238, 241, 247, 0.14) transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--ink-scroll) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: rgba(238, 241, 247, 0.12); border-radius: 4px; }
-*::-webkit-scrollbar-thumb:hover { background: rgba(238, 241, 247, 0.22); }
+*::-webkit-scrollbar-thumb { background: var(--ink-scroll); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--ink-hover); }
 
 code { font-family: var(--font-mono); font-size: 12px; color: var(--text-normal); }
 
@@ -111,7 +125,6 @@ a { color: var(--accent-light); }
 .content-area { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 24px 32px 40px; position: relative; }
 
 .view-section { display: none; }
-.view-section.active { display: block; animation: fadeIn 0.16s var(--ease-out); }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.view-section.active { display: block; }
 
 

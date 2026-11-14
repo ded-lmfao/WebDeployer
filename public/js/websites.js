@@ -23,6 +23,7 @@ import { api, toast } from './api.js';
 import { cleanDomainList } from './settings.js';
 import { toggleDatabaseAccessIpFields } from './databases_modal.js';
 import { renderWebsiteWorkspaceHeader, navigateTo, openWebsiteWorkspace } from './workspace.js';
+import { consumePendingViewStagger, staggerElements } from './motion_ui.js';
 import { startProject, stopProject } from './workspace_actions.js';
 
 // ============================================================================
@@ -243,6 +244,10 @@ function renderProjectsList() {
       </div>
     `;
   }).join(''));
+
+  if (consumePendingViewStagger('projects')) {
+    staggerElements(container.querySelectorAll('.project-card'), { y: 12 });
+  }
 }
 
 // Search filter binding

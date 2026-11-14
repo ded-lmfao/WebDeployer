@@ -3,6 +3,7 @@
  */
 
 @import './css/variables.css';
+@import './css/themes.css';
 @import './css/layout.css';
 @import './css/components.css';
 @import './css/pipelines.css';

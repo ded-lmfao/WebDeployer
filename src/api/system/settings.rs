@@ -212,12 +212,58 @@ pub(crate) async fn get_settings_handler(
     Ok(Json(map))
 }
 
+const DEFAULT_THEME_ID: &str = "midnight-ink";
+const ALLOWED_THEME_IDS: &[&str] = &[
+    "midnight-ink",
+    "obsidian-carbon",
+    "nordic-frost",
+    "emerald-terminal",
+    "catppuccin-mocha",
+    "tokyo-dusk",
+    "gruvbox-warm",
+    "crimson-ember",
+    "daylight-crisp",
+    "paper-espresso",
+];
+
+pub(crate) fn normalize_theme_id(raw: &str) -> &'static str {
+    let trimmed = raw.trim();
+    ALLOWED_THEME_IDS
+        .iter()
+        .copied()
+        .find(|&id| id.eq_ignore_ascii_case(trimmed))
+        .unwrap_or(DEFAULT_THEME_ID)
+}
+
+pub(crate) async fn get_public_theme_handler(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let theme = state
+        .db
+        .lock()
+        .ok()
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = 'panel_theme'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+        })
+        .map(|s| normalize_theme_id(&s))
+        .unwrap_or(DEFAULT_THEME_ID);
+    Json(serde_json::json!({ "theme": theme }))
+}
+
 pub(crate) async fn update_settings_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<HashMap<String, serde_json::Value>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let actor = verify_power(&state, &headers, "settings_manage", None)?;
+    let only_theme = payload.len() == 1 && payload.contains_key("panel_theme");
+    let mut saved_theme: Option<&'static str> = None;
+
     let conn = state.db.lock().unwrap();
     for (k, v) in payload {
         if k == "github_tokens" {
@@ -259,13 +305,64 @@ pub(crate) async fn update_settings_handler(
         if k == "github_token" && val_str.is_empty() {
             continue;
         }
+        let final_val = if k == "panel_theme" {
+            let normalized = normalize_theme_id(&val_str);
+            saved_theme = Some(normalized);
+            normalized.to_string()
+        } else {
+            val_str
+        };
         conn.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            rusqlite::params![k, val_str],
+            rusqlite::params![k, final_val],
         ).ok();
     }
     drop(conn);
-    log_audit(&state, &actor.username, "settings.update", Some("platform"), Some("Updated global deployment & GitHub settings"));
+    if only_theme {
+        let theme_id = saved_theme.unwrap_or(DEFAULT_THEME_ID);
+        log_audit(
+            &state,
+            &actor.username,
+            "settings.update",
+            Some("platform"),
+            Some(&format!("Changed platform theme preset to '{}'", theme_id)),
+        );
+    } else {
+        log_audit(&state, &actor.username, "settings.update", Some("platform"), Some("Updated global deployment & GitHub settings"));
+    }
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_theme_id_and_asset_parity() {
+        assert_eq!(ALLOWED_THEME_IDS.len(), 10);
+        assert_eq!(normalize_theme_id("nordic-frost"), "nordic-frost");
+        assert_eq!(normalize_theme_id(" DAYLIGHT-CRISP "), "daylight-crisp");
+        assert_eq!(normalize_theme_id("unknown-theme"), "midnight-ink");
+        assert_eq!(normalize_theme_id(""), "midnight-ink");
+
+        let css = std::fs::read_to_string("public/css/themes.css").expect("public/css/themes.css");
+        let js = std::fs::read_to_string("public/js/themes.js").expect("public/js/themes.js");
+        let html = std::fs::read_to_string("public/index.html").expect("public/index.html");
+        assert!(html.contains("id=\"settings-theme-card\""));
+        assert!(html.contains("id=\"settings-theme-grid\""));
+
+        for id in ALLOWED_THEME_IDS {
+            assert!(
+                css.contains(&format!("data-theme=\"{}\"", id)),
+                "Missing CSS selector for theme '{}'",
+                id
+            );
+            assert!(
+                js.contains(&format!("id: '{}'", id)),
+                "Missing JS preset definition for theme '{}'",
+                id
+            );
+        }
+    }
 }
 

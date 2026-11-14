@@ -4,6 +4,7 @@
  */
 
 import { state, clientCache, inflightGets, persistCacheToSession, getCacheTtlMs, getCacheEpoch, invalidateClientCache } from './state.js';
+import { animateToastEnter, animateToastExit } from './motion_ui.js';
 
 
 async function networkFetch(path, options = {}) {
@@ -41,11 +42,15 @@ async function networkFetch(path, options = {}) {
   if (
     res.status === 401
     && !path.startsWith('/api/auth/login')
+    && !path.startsWith('/api/auth/logout')
     && !path.startsWith('/api/auth/2fa/verify-login')
     && !path.startsWith('/api/auth/passkeys/login/')
   ) {
     invalidateClientCache();
-    showLogin();
+    const loginView = document.getElementById('login-view');
+    if (!loginView || loginView.style.display !== 'flex') {
+      showLogin();
+    }
     throw new Error('Session expired. Please log in again.');
   }
 
@@ -179,11 +184,9 @@ export function toast(message, type = 'info', duration = 4000) {
   el.className = `toast toast-${type}`;
   el.textContent = message;
   container.appendChild(el);
+  animateToastEnter(el);
   setTimeout(() => {
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(8px)';
-    el.style.transition = 'all 0.2s ease';
-    setTimeout(() => el.remove(), 250);
+    animateToastExit(el);
   }, duration);
 }
 

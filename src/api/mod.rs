@@ -127,6 +127,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/system/update/status", get(system_update_status_handler))
         .route("/api/system/update/repo", post(system_update_repo_handler))
         .route("/api/system/update", post(system_update_handler))
+        .route("/api/theme", get(get_public_theme_handler))
         .route("/api/settings", get(get_settings_handler).put(update_settings_handler).patch(update_settings_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
         .route("/api/users/:id", put(update_user_handler).patch(update_user_handler).delete(delete_user_handler))

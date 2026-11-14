@@ -1,0 +1,592 @@
+/**
+ * WebDep Predefined Platform Themes (10 Curated Presets)
+ * Applied via html[data-theme="<id>"] for instant, zero-flicker styling across the app shell & login screen.
+ */
+
+/* 1. Midnight Ink (Default) — handled by :root in variables.css; explicit selector mirrors defaults cleanly */
+html[data-theme="midnight-ink"] {
+  color-scheme: dark;
+  --bg-canvas: #0b101d;
+  --bg-sidebar: #070b14;
+  --bg-header: #0b101d;
+  --bg-card: #111829;
+  --bg-card-hover: #182136;
+  --bg-card-elevated: #182136;
+  --bg-alt: #0b101d;
+  --bg-input: #070b14;
+  --bg-terminal: #070b14;
+  --accent: #4f8ef7;
+  --accent-light: #82b8ff;
+  --accent-hover: #3b7be8;
+  --accent-glow: rgba(79, 142, 247, 0.16);
+  --accent-border: rgba(79, 142, 247, 0.32);
+  --accent-selection: rgba(79, 142, 247, 0.32);
+  --border-focus: #4f8ef7;
+  --info: #4f8ef7;
+  --info-bg: rgba(79, 142, 247, 0.10);
+  --autofill-bg: #0c1426;
+}
+
+/* 2. Obsidian Carbon — Low-glare OLED Graphite & Ice Cyan */
+html[data-theme="obsidian-carbon"] {
+  color-scheme: dark;
+  --bg-canvas: #090a0d;
+  --bg-sidebar: #050608;
+  --bg-header: #090a0d;
+  --bg-card: #111318;
+  --bg-card-hover: #191c24;
+  --bg-card-elevated: #191c24;
+  --bg-alt: #0c0e12;
+  --bg-input: #060709;
+  --bg-terminal: #050608;
+
+  --border-subtle: rgba(240, 244, 248, 0.08);
+  --border-color: rgba(240, 244, 248, 0.08);
+  --border-medium: rgba(240, 244, 248, 0.15);
+  --border-focus: #38bdf8;
+
+  --accent: #38bdf8;
+  --accent-light: #7dd3fc;
+  --accent-hover: #0ea5e9;
+  --accent-glow: rgba(56, 189, 248, 0.15);
+  --accent-border: rgba(56, 189, 248, 0.32);
+  --accent-selection: rgba(56, 189, 248, 0.30);
+
+  --info: #38bdf8;
+  --info-bg: rgba(56, 189, 248, 0.10);
+
+  --text-main: #f1f5f9;
+  --text-normal: #a6b0bf;
+  --text-muted: #9aa5b5;
+  --text-dim: #737e8f;
+  --text-inverse: #050608;
+  --autofill-bg: #0b0d12;
+}
+
+/* 3. Nordic Frost — Cool Arctic Slate & Glacial Teal */
+html[data-theme="nordic-frost"] {
+  color-scheme: dark;
+  --bg-canvas: #1a1f29;
+  --bg-sidebar: #131720;
+  --bg-header: #1a1f29;
+  --bg-card: #222836;
+  --bg-card-hover: #2b3243;
+  --bg-card-elevated: #2b3243;
+  --bg-alt: #181d27;
+  --bg-input: #141822;
+  --bg-terminal: #12161f;
+
+  --border-subtle: rgba(216, 222, 233, 0.10);
+  --border-color: rgba(216, 222, 233, 0.10);
+  --border-medium: rgba(216, 222, 233, 0.17);
+  --border-focus: #88c0d0;
+
+  --accent: #88c0d0;
+  --accent-light: #a3d4e0;
+  --accent-hover: #6eb2c6;
+  --accent-glow: rgba(136, 192, 208, 0.17);
+  --accent-border: rgba(136, 192, 208, 0.34);
+  --accent-selection: rgba(136, 192, 208, 0.30);
+
+  --success: #a3be8c;
+  --success-light: #a3be8c;
+  --success-bg: rgba(163, 190, 140, 0.12);
+  --success-border: rgba(163, 190, 140, 0.28);
+
+  --warning: #ebcb8b;
+  --warning-light: #ebcb8b;
+  --warning-bg: rgba(235, 203, 139, 0.12);
+  --warning-border: rgba(235, 203, 139, 0.28);
+
+  --danger: #bf616a;
+  --danger-fill: #b4535c;
+  --danger-light: #e07a84;
+  --danger-bg: rgba(191, 97, 106, 0.14);
+  --danger-border: rgba(191, 97, 106, 0.32);
+
+  --info: #81a1c1;
+  --info-bg: rgba(129, 161, 193, 0.12);
+
+  --text-main: #eceff4;
+  --text-normal: #c4ccda;
+  --text-muted: #b0bac9;
+  --text-dim: #8892a4;
+  --text-inverse: #131720;
+  --autofill-bg: #171c26;
+}
+
+/* 4. Emerald Terminal — Deep Pine Ink & Mint Phosphor */
+html[data-theme="emerald-terminal"] {
+  color-scheme: dark;
+  --bg-canvas: #08110e;
+  --bg-sidebar: #050b09;
+  --bg-header: #08110e;
+  --bg-card: #0e1c17;
+  --bg-card-hover: #142720;
+  --bg-card-elevated: #142720;
+  --bg-alt: #091410;
+  --bg-input: #060e0b;
+  --bg-terminal: #040a08;
+
+  --border-subtle: rgba(214, 245, 232, 0.09);
+  --border-color: rgba(214, 245, 232, 0.09);
+  --border-medium: rgba(214, 245, 232, 0.16);
+  --border-focus: #34d399;
+
+  --accent: #34d399;
+  --accent-light: #6ee7b7;
+  --accent-hover: #10b981;
+  --accent-glow: rgba(52, 211, 153, 0.16);
+  --accent-border: rgba(52, 211, 153, 0.34);
+  --accent-selection: rgba(52, 211, 153, 0.30);
+
+  --info: #34d399;
+  --info-bg: rgba(52, 211, 153, 0.11);
+
+  --text-main: #ecfdf5;
+  --text-normal: #a5c4b6;
+  --text-muted: #98b8aa;
+  --text-dim: #6f8f81;
+  --text-inverse: #040a08;
+  --autofill-bg: #08130f;
+}
+
+/* 5. Catppuccin Mocha — Soft Lavender Charcoal & Periwinkle */
+html[data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+  --bg-canvas: #181825;
+  --bg-sidebar: #11111b;
+  --bg-header: #181825;
+  --bg-card: #1e1e2e;
+  --bg-card-hover: #28283d;
+  --bg-card-elevated: #28283d;
+  --bg-alt: #161622;
+  --bg-input: #12121c;
+  --bg-terminal: #11111b;
+
+  --border-subtle: rgba(205, 214, 244, 0.09);
+  --border-color: rgba(205, 214, 244, 0.09);
+  --border-medium: rgba(205, 214, 244, 0.16);
+  --border-focus: #89b4fa;
+
+  --accent: #89b4fa;
+  --accent-light: #b4befe;
+  --accent-hover: #74a3f7;
+  --accent-glow: rgba(137, 180, 250, 0.16);
+  --accent-border: rgba(137, 180, 250, 0.34);
+  --accent-selection: rgba(137, 180, 250, 0.30);
+
+  --success: #a6e3a1;
+  --success-light: #a6e3a1;
+  --success-bg: rgba(166, 227, 161, 0.11);
+  --success-border: rgba(166, 227, 161, 0.28);
+
+  --warning: #f9e2af;
+  --warning-light: #f9e2af;
+  --warning-bg: rgba(249, 226, 175, 0.11);
+  --warning-border: rgba(249, 226, 175, 0.28);
+
+  --danger: #f38ba8;
+  --danger-fill: #d95d82;
+  --danger-light: #f38ba8;
+  --danger-bg: rgba(243, 139, 168, 0.12);
+  --danger-border: rgba(243, 139, 168, 0.30);
+
+  --info: #89b4fa;
+  --info-bg: rgba(137, 180, 250, 0.11);
+
+  --text-main: #cdd6f4;
+  --text-normal: #a6adc8;
+  --text-muted: #a6adc8;
+  --text-dim: #7f849c;
+  --text-inverse: #11111b;
+  --autofill-bg: #151521;
+}
+
+/* 6. Tokyo Dusk — Deep Indigo Night & Electric Blue */
+html[data-theme="tokyo-dusk"] {
+  color-scheme: dark;
+  --bg-canvas: #131521;
+  --bg-sidebar: #0d0f18;
+  --bg-header: #131521;
+  --bg-card: #1a1d2d;
+  --bg-card-hover: #23273d;
+  --bg-card-elevated: #23273d;
+  --bg-alt: #11131e;
+  --bg-input: #0e101a;
+  --bg-terminal: #0c0e17;
+
+  --border-subtle: rgba(192, 202, 245, 0.09);
+  --border-color: rgba(192, 202, 245, 0.09);
+  --border-medium: rgba(192, 202, 245, 0.16);
+  --border-focus: #7aa2f7;
+
+  --accent: #7aa2f7;
+  --accent-light: #7dcfff;
+  --accent-hover: #5e8cf2;
+  --accent-glow: rgba(122, 162, 247, 0.17);
+  --accent-border: rgba(122, 162, 247, 0.34);
+  --accent-selection: rgba(122, 162, 247, 0.30);
+
+  --success: #9ece6a;
+  --success-light: #9ece6a;
+  --success-bg: rgba(158, 206, 106, 0.11);
+  --success-border: rgba(158, 206, 106, 0.28);
+
+  --warning: #e0af68;
+  --warning-light: #e0af68;
+  --warning-bg: rgba(224, 175, 104, 0.11);
+  --warning-border: rgba(224, 175, 104, 0.28);
+
+  --danger: #f7768e;
+  --danger-fill: #db4b68;
+  --danger-light: #f7768e;
+  --danger-bg: rgba(247, 118, 142, 0.12);
+  --danger-border: rgba(247, 118, 142, 0.30);
+
+  --info: #7aa2f7;
+  --info-bg: rgba(122, 162, 247, 0.11);
+
+  --text-main: #c0caf5;
+  --text-normal: #a9b1d6;
+  --text-muted: #9aa5ce;
+  --text-dim: #737aa2;
+  --text-inverse: #0d0f18;
+  --autofill-bg: #111320;
+}
+
+/* 7. Gruvbox Warm — Warm Espresso Charcoal & Burnished Amber */
+html[data-theme="gruvbox-warm"] {
+  color-scheme: dark;
+  --bg-canvas: #1b1917;
+  --bg-sidebar: #141210;
+  --bg-header: #1b1917;
+  --bg-card: #24211e;
+  --bg-card-hover: #2f2b27;
+  --bg-card-elevated: #2f2b27;
+  --bg-alt: #181614;
+  --bg-input: #141210;
+  --bg-terminal: #12100e;
+
+  --border-subtle: rgba(235, 219, 178, 0.09);
+  --border-color: rgba(235, 219, 178, 0.09);
+  --border-medium: rgba(235, 219, 178, 0.16);
+  --border-focus: #e09f3e;
+
+  --accent: #e09f3e;
+  --accent-light: #f2be6b;
+  --accent-hover: #c9892a;
+  --accent-glow: rgba(224, 159, 62, 0.16);
+  --accent-border: rgba(224, 159, 62, 0.34);
+  --accent-selection: rgba(224, 159, 62, 0.30);
+
+  --success: #a9b665;
+  --success-light: #b8c772;
+  --success-bg: rgba(169, 182, 101, 0.12);
+  --success-border: rgba(169, 182, 101, 0.28);
+
+  --warning: #e78a4e;
+  --warning-light: #f09d65;
+  --warning-bg: rgba(231, 138, 78, 0.12);
+  --warning-border: rgba(231, 138, 78, 0.28);
+
+  --danger: #ea6962;
+  --danger-fill: #c94c45;
+  --danger-light: #ea6962;
+  --danger-bg: rgba(234, 105, 98, 0.12);
+  --danger-border: rgba(234, 105, 98, 0.30);
+
+  --info: #7daea3;
+  --info-bg: rgba(125, 174, 163, 0.12);
+
+  --text-main: #ebdbb2;
+  --text-normal: #c7b899;
+  --text-muted: #b8aa8c;
+  --text-dim: #928374;
+  --text-inverse: #141210;
+  --autofill-bg: #171513;
+}
+
+/* 8. Crimson Ember — Deep Volcanic Slate & Rose Coral */
+html[data-theme="crimson-ember"] {
+  color-scheme: dark;
+  --bg-canvas: #120c0e;
+  --bg-sidebar: #0b0708;
+  --bg-header: #120c0e;
+  --bg-card: #1b1215;
+  --bg-card-hover: #261a1e;
+  --bg-card-elevated: #261a1e;
+  --bg-alt: #100a0c;
+  --bg-input: #0c0809;
+  --bg-terminal: #090607;
+
+  --border-subtle: rgba(248, 229, 233, 0.09);
+  --border-color: rgba(248, 229, 233, 0.09);
+  --border-medium: rgba(248, 229, 233, 0.16);
+  --border-focus: #fb7185;
+
+  --accent: #fb7185;
+  --accent-light: #fda4af;
+  --accent-hover: #f43f5e;
+  --accent-glow: rgba(251, 113, 133, 0.16);
+  --accent-border: rgba(251, 113, 133, 0.34);
+  --accent-selection: rgba(251, 113, 133, 0.30);
+
+  --info: #fb7185;
+  --info-bg: rgba(251, 113, 133, 0.11);
+
+  --text-main: #f8eff1;
+  --text-normal: #c4afb4;
+  --text-muted: #b8a0a6;
+  --text-dim: #8a7379;
+  --text-inverse: #0b0708;
+  --autofill-bg: #140d10;
+}
+
+/* 9. Daylight Crisp — Clean Light Porcelain & Royal Cobalt */
+html[data-theme="daylight-crisp"] {
+  color-scheme: light;
+  --bg-canvas: #f3f6fb;
+  --bg-sidebar: #e9eef6;
+  --bg-header: #f3f6fb;
+  --bg-card: #ffffff;
+  --bg-card-hover: #eef3fa;
+  --bg-card-elevated: #ffffff;
+  --bg-alt: #f8fafd;
+  --bg-input: #f8fafc;
+  --bg-terminal: #f1f5f9;
+
+  --border-subtle: rgba(15, 23, 42, 0.09);
+  --border-color: rgba(15, 23, 42, 0.09);
+  --border-medium: rgba(15, 23, 42, 0.16);
+  --border-focus: #2563eb;
+
+  --accent: #2563eb;
+  --accent-light: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-glow: rgba(37, 99, 235, 0.11);
+  --accent-border: rgba(37, 99, 235, 0.28);
+  --accent-selection: rgba(37, 99, 235, 0.18);
+
+  --success: #16a34a;
+  --success-light: #15803d;
+  --success-bg: rgba(22, 163, 74, 0.10);
+  --success-border: rgba(22, 163, 74, 0.25);
+
+  --warning: #d97706;
+  --warning-light: #b45309;
+  --warning-bg: rgba(217, 119, 6, 0.10);
+  --warning-border: rgba(217, 119, 6, 0.26);
+
+  --danger: #dc2626;
+  --danger-fill: #dc2626;
+  --danger-light: #b91c1c;
+  --danger-bg: rgba(220, 38, 38, 0.09);
+  --danger-border: rgba(220, 38, 38, 0.25);
+
+  --info: #2563eb;
+  --info-bg: rgba(37, 99, 235, 0.10);
+
+  --text-main: #0f172a;
+  --text-normal: #334155;
+  --text-muted: #475569;
+  --text-dim: #64748b;
+  --text-inverse: #ffffff;
+
+  --ink-1: rgba(15, 23, 42, 0.025);
+  --ink-2: rgba(15, 23, 42, 0.045);
+  --ink-3: rgba(15, 23, 42, 0.065);
+  --ink-4: rgba(15, 23, 42, 0.09);
+  --ink-hover: rgba(15, 23, 42, 0.26);
+  --ink-scroll: rgba(15, 23, 42, 0.18);
+  --btn-primary-hover: #1e293b;
+  --btn-secondary-hover-text: #0f172a;
+  --scrim-backdrop: rgba(15, 23, 42, 0.45);
+  --scrim-surface: rgba(248, 250, 252, 0.94);
+  --autofill-bg: #f1f5f9;
+}
+
+/* 10. Paper Pine — Warm Stone Light & Deep Forest Pine */
+html[data-theme="paper-espresso"] {
+  color-scheme: light;
+  --bg-canvas: #f4f1ea;
+  --bg-sidebar: #eae5da;
+  --bg-header: #f4f1ea;
+  --bg-card: #fcfbf7;
+  --bg-card-hover: #efeae0;
+  --bg-card-elevated: #fcfbf7;
+  --bg-alt: #f7f4ed;
+  --bg-input: #f9f7f2;
+  --bg-terminal: #efebe1;
+
+  --border-subtle: rgba(28, 25, 23, 0.10);
+  --border-color: rgba(28, 25, 23, 0.10);
+  --border-medium: rgba(28, 25, 23, 0.17);
+  --border-focus: #15803d;
+
+  --accent: #15803d;
+  --accent-light: #166534;
+  --accent-hover: #14532d;
+  --accent-glow: rgba(21, 128, 61, 0.12);
+  --accent-border: rgba(21, 128, 61, 0.28);
+  --accent-selection: rgba(21, 128, 61, 0.18);
+
+  --success: #15803d;
+  --success-light: #166534;
+  --success-bg: rgba(21, 128, 61, 0.10);
+  --success-border: rgba(21, 128, 61, 0.25);
+
+  --warning: #b45309;
+  --warning-light: #92400e;
+  --warning-bg: rgba(180, 83, 9, 0.10);
+  --warning-border: rgba(180, 83, 9, 0.26);
+
+  --danger: #b91c1c;
+  --danger-fill: #b91c1c;
+  --danger-light: #991b1b;
+  --danger-bg: rgba(185, 28, 28, 0.09);
+  --danger-border: rgba(185, 28, 28, 0.25);
+
+  --info: #0f766e;
+  --info-bg: rgba(15, 118, 110, 0.10);
+
+  --text-main: #1c1917;
+  --text-normal: #44403c;
+  --text-muted: #57534e;
+  --text-dim: #78716c;
+  --text-inverse: #fcfbf7;
+
+  --ink-1: rgba(28, 25, 23, 0.03);
+  --ink-2: rgba(28, 25, 23, 0.05);
+  --ink-3: rgba(28, 25, 23, 0.075);
+  --ink-4: rgba(28, 25, 23, 0.10);
+  --ink-hover: rgba(28, 25, 23, 0.26);
+  --ink-scroll: rgba(28, 25, 23, 0.18);
+  --btn-primary-hover: #292524;
+  --btn-secondary-hover-text: #1c1917;
+  --scrim-backdrop: rgba(28, 25, 23, 0.45);
+  --scrim-surface: rgba(252, 251, 247, 0.94);
+  --autofill-bg: #efeae0;
+}
+
+/* Ensure light themes apply clean color-scheme across native inputs/scrollbars */
+html[data-theme="daylight-crisp"],
+html[data-theme="daylight-crisp"] input,
+html[data-theme="daylight-crisp"] textarea,
+html[data-theme="daylight-crisp"] select,
+html[data-theme="paper-espresso"],
+html[data-theme="paper-espresso"] input,
+html[data-theme="paper-espresso"] textarea,
+html[data-theme="paper-espresso"] select {
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   Settings Theme Picker Grid
+   ========================================================================== */
+.theme-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 1120px) {
+  .theme-picker-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .theme-picker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.theme-swatch-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-alt);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text-main);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.theme-swatch-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-medium);
+}
+
+.theme-swatch-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.theme-swatch-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(128, 128, 128, 0.34);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.theme-swatch-dot-accent {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.theme-swatch-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.theme-swatch-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.theme-swatch-tag {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.theme-swatch-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.theme-swatch-card.active .theme-swatch-check {
+  opacity: 1;
+  transform: scale(1);
+}

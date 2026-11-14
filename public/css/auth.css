@@ -5,7 +5,7 @@
 #login-view {
   position: fixed;
   inset: 0;
-  background: var(--bg-sidebar);
+  background: var(--bg-canvas);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -14,13 +14,197 @@
   overflow: hidden;
 }
 
-.login-backdrop-minimal,
-.login-glow-top,
-.login-dot-grid {
-  display: none;
+.login-backdrop-minimal {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
 }
 
-/* Centered Minimalist Sign-In Card */
+.login-glow-top {
+  position: absolute;
+  top: -180px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: 760px;
+  height: 420px;
+  background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 70%);
+  opacity: 0.9;
+}
+
+.login-dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--border-medium) 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.28;
+  -webkit-mask-image: radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.9) 0%, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.9) 0%, transparent 72%);
+}
+
+/* Pre-Login Framer Motion Splash: Pure Logo + Hello -> Welcome -> Login */
+.login-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 28px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  will-change: opacity, transform, filter;
+}
+
+.login-intro-halo {
+  position: absolute;
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 66%);
+  filter: blur(36px);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.login-intro-emblem {
+  position: relative;
+  width: clamp(136px, 18vw, 176px);
+  height: clamp(136px, 18vw, 176px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  will-change: transform, opacity, filter;
+}
+
+.login-intro-logo {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  will-change: transform, opacity;
+}
+
+.login-intro-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 18px 34px rgba(14, 165, 233, 0.24));
+}
+
+.login-intro-stage {
+  position: relative;
+  width: min(640px, 92vw);
+  height: 148px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-greeting-beat {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity, filter;
+}
+
+.login-greeting-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-light);
+  margin-bottom: 10px;
+}
+
+.login-greeting-display {
+  margin: 0;
+  font-size: clamp(44px, 6.6vw, 66px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.04;
+  color: var(--text-main);
+}
+
+.login-greeting-accent {
+  color: var(--accent-light);
+}
+
+.login-greeting-sub {
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
+.login-intro-progress {
+  width: min(240px, 58vw);
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border-subtle);
+  overflow: hidden;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.login-intro-progress-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-light) 100%);
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.login-intro-skip {
+  position: fixed;
+  bottom: 28px;
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  opacity: 0;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+  will-change: transform, opacity;
+}
+
+.login-intro-skip:hover {
+  color: var(--text-main);
+  border-color: var(--border-medium);
+  background: var(--bg-card-hover);
+}
+
+/* Centered Minimalist Sign-In Card (animated in by Framer Motion) */
 .login-card-container {
   position: relative;
   z-index: 2;
@@ -28,45 +212,49 @@
   align-items: center;
   justify-content: center;
   width: 100%;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity, filter;
 }
 
 .login-card {
   position: relative;
   width: 100%;
-  max-width: 380px;
+  max-width: 424px;
   background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-xl);
-  padding: 32px;
+  padding: 36px;
+  box-shadow: 0 28px 68px -18px var(--scrim-backdrop);
 }
 
 .login-card-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 26px;
+  padding-bottom: 18px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .login-card-header .brand-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-md);
+  width: 46px;
+  height: 46px;
+  border-radius: 0;
   background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .login-card-header-text h2 {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-main);
   margin: 0 0 2px 0;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
 }
 
 .login-card-header-text p {
@@ -111,14 +299,14 @@
 .input-with-icon .form-control:-webkit-autofill:hover,
 .input-with-icon .form-control:-webkit-autofill:focus,
 .input-with-icon .form-control:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 1000px #0c1426 inset !important;
-  box-shadow: 0 0 0 1000px #0c1426 inset !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--autofill-bg) inset !important;
+  box-shadow: 0 0 0 1000px var(--autofill-bg) inset !important;
   -webkit-text-fill-color: var(--text-main) !important;
-  background-color: #0c1426 !important;
+  background-color: var(--autofill-bg) !important;
   background-image: none !important;
   color: var(--text-main) !important;
   caret-color: var(--accent-light) !important;
-  border-color: rgba(79, 142, 247, 0.34);
+  border-color: var(--accent-border);
   transition: background-color 99999s ease-in-out 0s, color 99999s ease-in-out 0s !important;
 }
 
@@ -131,14 +319,14 @@
 .input-with-icon .form-control:autofill:hover,
 .input-with-icon .form-control:autofill:focus,
 .input-with-icon .form-control:autofill:active {
-  -webkit-box-shadow: 0 0 0 1000px #0c1426 inset !important;
-  box-shadow: 0 0 0 1000px #0c1426 inset !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--autofill-bg) inset !important;
+  box-shadow: 0 0 0 1000px var(--autofill-bg) inset !important;
   -webkit-text-fill-color: var(--text-main) !important;
-  background-color: #0c1426 !important;
+  background-color: var(--autofill-bg) !important;
   background-image: none !important;
   color: var(--text-main) !important;
   caret-color: var(--accent-light) !important;
-  border-color: rgba(79, 142, 247, 0.34);
+  border-color: var(--accent-border);
   transition: background-color 99999s ease-in-out 0s, color 99999s ease-in-out 0s !important;
 }
 
@@ -171,7 +359,7 @@
 }
 
 .btn-text-action:hover {
-  color: #ffffff;
+  color: var(--text-main);
   text-decoration: underline;
 }
 
@@ -193,8 +381,8 @@
 }
 
 .btn-login-submit:hover {
-  background: #ffffff;
-  border-color: #ffffff;
+  background: var(--btn-primary-hover);
+  border-color: var(--btn-primary-hover);
   color: var(--text-inverse);
 }
 
@@ -241,7 +429,7 @@
 
 .btn-passkey-sleek:hover {
   background: var(--bg-card-hover);
-  border-color: rgba(238, 241, 247, 0.22);
+  border-color: var(--ink-hover);
 }
 
 /* 2FA Challenge */

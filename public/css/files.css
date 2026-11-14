@@ -19,7 +19,7 @@
 .file-drop-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(7, 11, 20, 0.92);
+  background: var(--scrim-surface);
   z-index: 40;
   display: flex;
   align-items: center;

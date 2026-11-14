@@ -10,9 +10,14 @@
   "scripts": {
     "start": "cargo run --release",
     "build": "cargo build --release",
-    "test": "cargo test"
+    "test": "cargo test",
+    "vendor:motion": "esbuild node_modules/framer-motion/dist/es/dom.mjs --bundle --format=esm --minify --outfile=public/vendor/framer-motion/dom.js"
   },
   "dependencies": {
-    "@speed-highlight/core": "^2.1.0"
+    "@speed-highlight/core": "^2.1.0",
+    "framer-motion": "^14.14.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

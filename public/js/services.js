@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { state, escapeHtml, formatRelativeTime } from './state.js';
 import { loadProjects } from './websites.js';
 import { openWebsiteWorkspace } from './workspace.js';
+import { consumePendingViewStagger, staggerElements } from './motion_ui.js';
 
 // Re-export modal submodule so consumers have full backward compatibility
 export * from './services_modal.js';
@@ -256,6 +257,9 @@ export function renderServicesList() {
   }).join('');
 
   filtered.forEach(syncServiceCardPipeline);
+  if (consumePendingViewStagger('services')) {
+    staggerElements(container.querySelectorAll('.project-card'), { y: 12 });
+  }
 }
 
 // Bind search and status filters

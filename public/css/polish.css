@@ -39,9 +39,11 @@
   opacity: 1;
 }
 
-/* Reduced motion preference */
+/* Reduced motion preference (preserve explicit pre-login splash choreography) */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *:not(.login-intro):not(.login-intro *):not(.login-card-container),
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

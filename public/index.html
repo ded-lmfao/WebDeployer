@@ -21,11 +21,21 @@
       pointer-events: none !important;
     }
   </style>
-  <meta name="color-scheme" content="dark">
-  <link rel="stylesheet" href="/style.css?v=3.17.0">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    try {
+      var savedTheme = localStorage.getItem('webdep.theme');
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    } catch (_) {}
+  </script>
+  <link rel="stylesheet" href="/style.css?v=3.27.0">
+  <link rel="modulepreload" href="/vendor/framer-motion/dom.js">
+  <link rel="modulepreload" href="/js/login_motion.js">
+  <link rel="modulepreload" href="/js/motion_ui.js">
   <link rel="modulepreload" href="/js/icons.js">
   <link rel="modulepreload" href="/js/state.js">
   <link rel="modulepreload" href="/js/api.js">
+  <link rel="modulepreload" href="/js/themes.js">
   <link rel="modulepreload" href="/js/auth.js">
   <link rel="modulepreload" href="/js/workspace.js">
 </head>
@@ -35,19 +45,52 @@
   <!-- ======================== LOGIN VIEW ======================== -->
   <div id="login-view" style="display: none;">
     <!-- Minimalist Ambient Background -->
-    <div class="login-backdrop-minimal">
+    <div class="login-backdrop-minimal" aria-hidden="true">
       <div class="login-glow-top"></div>
       <div class="login-dot-grid"></div>
     </div>
 
+    <!-- Pre-Login Framer Motion Splash: Pure Logo + Hello -> Welcome -> Login -->
+    <div class="login-intro" id="login-intro" aria-hidden="true">
+      <div class="login-intro-halo" id="login-intro-halo"></div>
+
+      <div class="login-intro-emblem" id="login-intro-emblem">
+        <div class="login-intro-logo" id="login-intro-logo">
+          <img src="/logo-mark.svg" alt="WebDep">
+        </div>
+      </div>
+
+      <div class="login-intro-stage" id="login-intro-stage">
+        <div class="login-greeting-beat login-greeting-hello" id="login-greeting-hello">
+          <h1 class="login-greeting-display">
+            <span>Hello</span><span class="login-greeting-accent">.</span>
+          </h1>
+        </div>
+
+        <div class="login-greeting-beat login-greeting-welcome" id="login-greeting-welcome">
+          <span class="login-greeting-eyebrow">Welcome to</span>
+          <h1 class="login-greeting-display">WebDep</h1>
+          <div class="login-greeting-sub">VPS Manager</div>
+        </div>
+      </div>
+
+      <div class="login-intro-progress" id="login-intro-progress" aria-hidden="true">
+        <div class="login-intro-progress-fill" id="login-intro-progress-fill"></div>
+      </div>
+
+      <button type="button" class="login-intro-skip" id="login-intro-skip" tabindex="-1">
+        Continue to Sign In &rarr;
+      </button>
+    </div>
+
     <!-- Centered Minimalist Sign-In Card -->
-    <div class="login-card-container">
+    <div class="login-card-container" id="login-card-container">
       <div class="login-card">
         <div class="login-card-header">
-          <div class="brand-icon"><img src="/logo.png" alt="WebDep"></div>
+          <div class="brand-icon"><img src="/logo-mark.svg" alt="WebDep"></div>
           <div class="login-card-header-text">
             <h2>WebDep</h2>
-            <p>Sign in to your server</p>
+            <p>Sign in to your VPS workspace</p>
           </div>
         </div>
 
@@ -1777,7 +1820,43 @@
               </div>
             </div>
 
-            <!-- 5. User Permissions Card (Full Width Table Card) -->
+            <!-- 5. Platform Appearance & Predefined Themes Card -->
+            <div class="project-card settings-card settings-card-wide" id="settings-theme-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                      <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                      <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                      <path
+                        d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z">
+                      </path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>Platform Theme</span>
+                      <span class="badge badge-info" id="settings-active-theme-badge"
+                        style="font-size: 10.5px;">Midnight Ink</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                      Color palette and surface contrast across the workspace
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="reset-theme-btn"
+                  onclick="resetPlatformTheme()">Reset</button>
+              </div>
+
+              <div class="theme-picker-grid" id="settings-theme-grid" role="group"
+                aria-label="Predefined platform themes"></div>
+            </div>
+
+            <!-- 6. User Permissions Card (Full Width Table Card) -->
             <div class="project-card settings-card settings-card-wide" id="settings-users-card">
               <div class="project-card-header"
                 style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">

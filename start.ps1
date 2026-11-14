@@ -15,9 +15,12 @@ $binaryPath = Join-Path $PSScriptRoot "target\release\webdep.exe"
 $needsBuild = $Rebuild -or (-not (Test-Path $binaryPath))
 if (-not $needsBuild -and (Test-Path $binaryPath)) {
     $binTime = (Get-Item $binaryPath).LastWriteTime
-    $newerSrc = Get-ChildItem -Path (Join-Path $PSScriptRoot "src") -Recurse -File | Where-Object { $_.LastWriteTime -gt $binTime } | Select-Object -First 1
+    $newerSrc = @('src', 'public') | ForEach-Object {
+        $dir = Join-Path $PSScriptRoot $_
+        if (Test-Path $dir) { Get-ChildItem -Path $dir -Recurse -File }
+    } | Where-Object { $_.LastWriteTime -gt $binTime } | Select-Object -First 1
     if ($newerSrc) {
-        Write-Host "[*] Source changes detected in src/$($newerSrc.Name), auto-recompiling..." -ForegroundColor Cyan
+        Write-Host "[*] Source or UI changes detected ($($newerSrc.Name)), auto-recompiling..." -ForegroundColor Cyan
         $needsBuild = $true
     }
 }

@@ -221,11 +221,38 @@ fn allow_disk_public_override() -> bool {
             .unwrap_or(false)
 }
 
+fn is_spa_route_path(raw: &str) -> bool {
+    let trimmed = raw.trim_matches('/');
+    if trimmed.is_empty() || trimmed.contains("..") || trimmed.contains('.') {
+        return false;
+    }
+    let first = trimmed.split('/').next().unwrap_or("");
+    matches!(
+        first,
+        "overview"
+            | "projects"
+            | "services"
+            | "databases"
+            | "deployments"
+            | "github"
+            | "logs"
+            | "env"
+            | "files"
+            | "releases"
+            | "backups"
+            | "rollbacks"
+            | "monitor"
+            | "settings"
+            | "audit"
+    )
+}
+
 pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&str>) -> Response {
-    let clean_path = if path.is_empty() || path == "/" {
+    let trimmed = path.trim_start_matches('/');
+    let clean_path = if trimmed.is_empty() || is_spa_route_path(trimmed) {
         "index.html"
     } else {
-        path.trim_start_matches('/')
+        trimmed
     };
 
     let is_html = clean_path.ends_with(".html");
@@ -401,5 +428,20 @@ mod tests {
         let resp_304 = static_handler("/style.css", &req_headers, None).await;
         assert_eq!(resp_304.status(), StatusCode::NOT_MODIFIED);
         let _ = expected_etag;
+    }
+
+    #[tokio::test]
+    async fn test_static_handler_spa_fallback_and_404() {
+        let ok_projects = static_handler("/projects", &HeaderMap::new(), None).await;
+        assert_eq!(ok_projects.status(), StatusCode::OK);
+
+        let ok_nested = static_handler("/deployments/db-12", &HeaderMap::new(), None).await;
+        assert_eq!(ok_nested.status(), StatusCode::OK);
+
+        let missing_asset = static_handler("/projects/missing.js", &HeaderMap::new(), None).await;
+        assert_eq!(missing_asset.status(), StatusCode::NOT_FOUND);
+
+        let unknown_route = static_handler("/not-a-real-view", &HeaderMap::new(), None).await;
+        assert_eq!(unknown_route.status(), StatusCode::NOT_FOUND);
     }
 }

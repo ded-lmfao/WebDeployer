@@ -21,7 +21,7 @@
 .ws-meta-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 500; color: var(--accent-light); text-decoration: none; }
 .ws-meta-link:hover { text-decoration: underline; }
 .ws-meta-link.offline { color: var(--text-dim); cursor: not-allowed; text-decoration: none !important; }
-.ws-meta-sha { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-normal); background: rgba(238, 241, 247, 0.05); padding: 0 6px; border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
+.ws-meta-sha { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-normal); background: var(--ink-3); padding: 0 6px; border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
 
 .ws-actions-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .ws-actions-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -62,7 +62,7 @@
   user-select: none;
 }
 .ws-tab-item svg { opacity: 0.65; flex-shrink: 0; }
-.ws-tab-item:hover { color: var(--text-main); background: rgba(238, 241, 247, 0.04); }
+.ws-tab-item:hover { color: var(--text-main); background: var(--ink-2); }
 .ws-tab-item.active {
   color: var(--text-main);
   background: var(--bg-card-hover);

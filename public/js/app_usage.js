@@ -813,7 +813,7 @@ function applyUsagePayload(entity, data) {
 
 async function fetchProjectUsage(entityInput) {
   const entity = normalizeUsageEntity(entityInput);
-  if (!entity || _netState.fetchInFlight) return;
+  if (!entity || _netState.fetchInFlight || !state.user || !state.csrf) return;
   _netState.fetchInFlight = true;
   _netState.lastFetchAt = Date.now();
   try {
@@ -832,9 +832,18 @@ async function fetchProjectUsage(entityInput) {
 }
 
 function ensureAppUsagePoller() {
+  if (!state.user || !state.csrf) {
+    stopAppUsagePoller();
+    return;
+  }
   if (_netState.pollTimer !== null) return;
   _netState.pollTimer = setInterval(() => {
-    if (state.currentView !== 'deployments' || document.hidden) {
+    if (!state.user || !state.csrf || state.currentView !== 'deployments') {
+      stopNetChartRaf();
+      stopAppUsagePoller();
+      return;
+    }
+    if (document.hidden) {
       stopNetChartRaf();
       return;
     }
@@ -918,4 +927,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-export { loadAppUsageCards, resetAppUsageCards, formatBytesShort, formatRate, setText, setElText, computeMonotoneTangents, buildCubicPaths, evalMonotoneYAtX, syncPerfOffset, renderSmoothNetFrame };
+window.stopAppUsagePoller = stopAppUsagePoller;
+
+export { loadAppUsageCards, resetAppUsageCards, stopAppUsagePoller, formatBytesShort, formatRate, setText, setElText, computeMonotoneTangents, buildCubicPaths, evalMonotoneYAtX, syncPerfOffset, renderSmoothNetFrame };

@@ -6,6 +6,12 @@
 // Core Services & Shared Reactive State
 import './js/icons.js';
 import { state, WEBSITE_WORKSPACE_TABS } from './js/state.js';
+import {
+  animateModalClose,
+  animateMobileDrawer,
+  initGlobalMotionInteractions,
+} from './js/motion_ui.js';
+import { syncThemeFromServer } from './js/themes.js';
 import { initAuth } from './js/auth.js';
 
 // Domain Views & Subsystems
@@ -116,12 +122,11 @@ const sidebarEl = document.querySelector('.sidebar');
 const backdropEl = document.getElementById('sidebar-backdrop');
 if (mobileToggle && sidebarEl && backdropEl) {
   mobileToggle.addEventListener('click', () => {
-    sidebarEl.classList.toggle('mobile-open');
-    backdropEl.classList.toggle('active');
+    const nextOpen = !sidebarEl.classList.contains('mobile-open');
+    animateMobileDrawer(sidebarEl, backdropEl, nextOpen);
   });
   backdropEl.addEventListener('click', () => {
-    sidebarEl.classList.remove('mobile-open');
-    backdropEl.classList.remove('active');
+    animateMobileDrawer(sidebarEl, backdropEl, false);
   });
 }
 
@@ -129,16 +134,18 @@ if (mobileToggle && sidebarEl && backdropEl) {
 document.querySelectorAll('[data-close-modal]').forEach((btn) => {
   btn.addEventListener('click', (e) => {
     const modal = e.target.closest('.modal-overlay');
-    if (modal) modal.classList.remove('active');
+    if (modal) animateModalClose(modal);
   });
 });
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-overlay.active').forEach((m) => m.classList.remove('active'));
+    document.querySelectorAll('.modal-overlay.active').forEach((m) => animateModalClose(m));
   }
 });
 
 
 // Start application
+initGlobalMotionInteractions();
+void syncThemeFromServer();
 void initAuth();

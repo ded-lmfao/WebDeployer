@@ -3,6 +3,8 @@
  * Shared reactive state, constants, formatters, pagination, client-side cache and dialogs
  */
 
+import { animateModalOpen, animateModalClose } from './motion_ui.js';
+
 // ============================================================================
 // State Management
 // ============================================================================
@@ -431,12 +433,12 @@ const AUDIT_ACTION_META = {
 };
 
 function openModal(modalId) {
-  document.getElementById(modalId)?.classList.add('active');
+  animateModalOpen(modalId);
 }
 window.openModal = openModal;
 
 function closeModal(modalId) {
-  document.getElementById(modalId)?.classList.remove('active');
+  animateModalClose(modalId);
 }
 window.closeModal = closeModal;
 
@@ -470,7 +472,7 @@ function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText
     inputWrap.style.display = 'none';
 
     const cleanup = (result) => {
-      modal.classList.remove('active');
+      animateModalClose(modal);
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
       closeBtn.onclick = null;
@@ -480,7 +482,7 @@ function showConfirmDialog({ title = 'Confirm Action', message = '', confirmText
     confirmBtn.onclick = () => cleanup(true);
     cancelBtn.onclick = () => cleanup(false);
     closeBtn.onclick = () => cleanup(false);
-    modal.classList.add('active');
+    animateModalOpen(modal);
   });
 }
 
@@ -493,7 +495,7 @@ function showPromptDialog({ title = 'Input Required', message = '', placeholder 
     inputEl.placeholder = placeholder;
 
     const cleanup = (result) => {
-      modal.classList.remove('active');
+      animateModalClose(modal);
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
       closeBtn.onclick = null;
@@ -510,7 +512,7 @@ function showPromptDialog({ title = 'Input Required', message = '', placeholder 
         cleanup(inputEl.value);
       }
     };
-    modal.classList.add('active');
+    animateModalOpen(modal);
     setTimeout(() => inputEl.focus(), 50);
   });
 }
@@ -530,7 +532,7 @@ function showCopyDialog({ title = 'Copy Value', message = '', value = '' } = {})
     confirmBtn.className = 'btn btn-primary';
 
     const cleanup = () => {
-      modal.classList.remove('active');
+      animateModalClose(modal);
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
       closeBtn.onclick = null;
@@ -543,7 +545,7 @@ function showCopyDialog({ title = 'Copy Value', message = '', value = '' } = {})
     };
     cancelBtn.onclick = () => cleanup();
     closeBtn.onclick = () => cleanup();
-    modal.classList.add('active');
+    animateModalOpen(modal);
   });
 }
 

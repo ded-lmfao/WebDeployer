@@ -59,6 +59,7 @@ pub(crate) async fn security_middleware(
                 || path == "/api/auth/2fa/verify-login"
                 || path == "/api/auth/passkeys/login/start"
                 || path == "/api/auth/passkeys/login/finish"
+                || (path == "/api/theme" && *req.method() == Method::GET)
                 || path.starts_with("/api/webhooks/github/");
 
             if !is_public_auth {

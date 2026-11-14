@@ -12,6 +12,17 @@ import {
   invalidateClientCache,
 } from './state.js';
 import { api, toast } from './api.js';
+import {
+  playLoginWelcomeSequence,
+  stopLoginMotion,
+  animateLoginStepSwap,
+  animateLoginToDashboard,
+} from './login_motion.js';
+import {
+  animateAppReveal,
+  resetAppRevealFlag,
+  animateTabPane,
+} from './motion_ui.js';
 import { loadProjects } from './websites.js';
 import { loadDatabases } from './databases.js';
 import { navigateTo, handleHashRoute } from './workspace.js';
@@ -32,8 +43,8 @@ import { renderTotpQrSvg } from './qrcode.js';
 // ============================================================================
 export function resetCleanUrl() {
   try {
-    if (window.location.hash || window.location.search) {
-      window.history.replaceState(null, '', window.location.pathname || '/');
+    if (window.location.pathname !== '/' || window.location.hash || window.location.search) {
+      window.history.replaceState(null, '', '/');
     }
   } catch (_) {}
 }
@@ -138,6 +149,15 @@ export function stopPolling() {
     try { state.logEventSource.close(); } catch (_) {}
     state.logEventSource = null;
   }
+  if (typeof window.stopOverviewNetPoller === 'function') {
+    window.stopOverviewNetPoller();
+  }
+  if (typeof window.stopAppUsagePoller === 'function') {
+    window.stopAppUsagePoller();
+  }
+  if (typeof window.stopDbLogPoller === 'function') {
+    window.stopDbLogPoller();
+  }
 }
 
 export async function initAuth() {
@@ -159,11 +179,14 @@ export async function initAuth() {
     state.passkeyCount = me.passkeyCount || 0;
     await onAuthenticated(false);
   } catch {
-    showLogin();
+    const loginView = document.getElementById('login-view');
+    if (!loginView || loginView.style.display !== 'flex') {
+      showLogin();
+    }
   }
 }
 
-export function showLogin() {
+export function showLogin(skipIntro = false) {
   stopPolling();
   document.body.classList.remove('auth-verified');
 
@@ -179,6 +202,7 @@ export function showLogin() {
   try { sessionStorage.clear(); } catch (_) {}
 
   resetCleanUrl();
+  resetAppRevealFlag();
   document.querySelectorAll('.modal-overlay.active').forEach((m) => m.classList.remove('active'));
 
   const appEl = document.getElementById('app');
@@ -188,9 +212,15 @@ export function showLogin() {
   }
 
   const loginView = document.getElementById('login-view');
+  const wasLoginVisible = Boolean(loginView && loginView.style.display === 'flex');
   if (loginView) {
+    loginView.style.opacity = '';
+    loginView.style.transform = '';
+    loginView.style.pointerEvents = '';
     loginView.style.display = 'flex';
-    startLoginCanvasAnimation();
+    if (!wasLoginVisible || skipIntro) {
+      startLoginCanvasAnimation(skipIntro);
+    }
   }
 
   const lf = document.getElementById('login-form');
@@ -209,22 +239,14 @@ export function showLogin() {
   if (codeInput) codeInput.value = '';
 }
 
-let loginCanvasAnimId = null;
-let loginCanvasCleanup = null;
-
-export function startLoginCanvasAnimation() {
-  stopLoginCanvasAnimation();
+export function startLoginCanvasAnimation(immediate = false) {
+  const loginView = document.getElementById('login-view');
+  if (!loginView) return;
+  playLoginWelcomeSequence(loginView, { immediate: Boolean(immediate) });
 }
 
 export function stopLoginCanvasAnimation() {
-  if (loginCanvasAnimId) {
-    cancelAnimationFrame(loginCanvasAnimId);
-    loginCanvasAnimId = null;
-  }
-  if (loginCanvasCleanup) {
-    loginCanvasCleanup();
-    loginCanvasCleanup = null;
-  }
+  stopLoginMotion();
 }
 
 export function togglePasswordField(inputId, btn) {
@@ -292,21 +314,31 @@ export async function onAuthenticated(isFreshLogin = false) {
   });
 
   const loginView = document.getElementById('login-view');
-  if (loginView) loginView.style.display = 'none';
-  stopLoginCanvasAnimation();
   const appEl = document.getElementById('app');
+  const hasVisibleLogin = Boolean(loginView && loginView.style.display !== 'none');
+
   if (appEl) {
     appEl.style.display = 'flex';
     appEl.setAttribute('aria-hidden', 'false');
   }
   document.body.classList.add('auth-verified');
 
-  if (isFreshLogin) {
+  if (isFreshLogin && hasVisibleLogin) {
+    animateAppReveal({ crossfade: true });
     if (typeof navigateTo === 'function') navigateTo('overview');
     else if (window.navigateTo) window.navigateTo('overview');
+    await animateLoginToDashboard(loginView);
   } else {
-    if (typeof handleHashRoute === 'function') handleHashRoute();
-    else if (window.handleHashRoute) window.handleHashRoute();
+    if (loginView) loginView.style.display = 'none';
+    stopLoginCanvasAnimation();
+    animateAppReveal();
+    if (isFreshLogin) {
+      if (typeof navigateTo === 'function') navigateTo('overview');
+      else if (window.navigateTo) window.navigateTo('overview');
+    } else {
+      if (typeof handleHashRoute === 'function') handleHashRoute();
+      else if (window.handleHashRoute) window.handleHashRoute();
+    }
   }
   startPresenceHeartbeat();
   if (typeof window.startPolling === 'function') window.startPolling();
@@ -344,7 +376,10 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
       const lf = document.getElementById('login-form');
       if (lf) lf.style.display = 'none';
       const mf = document.getElementById('login-2fa-form');
-      if (mf) mf.style.display = 'block';
+      if (mf) {
+        mf.style.display = 'block';
+        animateLoginStepSwap(mf);
+      }
       const unameLabel = document.getElementById('login-2fa-username');
       if (unameLabel) unameLabel.textContent = res.username || username;
       const codeInput = document.getElementById('login-2fa-code');
@@ -399,11 +434,13 @@ document.getElementById('login-2fa-form')?.addEventListener('submit', async (e) 
 });
 
 document.getElementById('login-2fa-back-btn')?.addEventListener('click', () => {
-  showLogin();
+  showLogin(true);
 });
 
 // Logout
 document.getElementById('logout-btn')?.addEventListener('click', async () => {
+  stopPolling();
+  state.user = null;
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch { /* ignore */ }
@@ -449,12 +486,17 @@ export function openSecurityModal(tab = 'password') {
 }
 
 export function switchSecurityTab(tab) {
+  let activePane = null;
   ['passkeys', 'password', '2fa', 'sessions'].forEach((t) => {
     const btn = document.getElementById(`sec-tab-btn-${t}`);
     const pane = document.getElementById(`sec-pane-${t}`);
     if (btn) btn.classList.toggle('active', t === tab);
-    if (pane) pane.style.display = t === tab ? 'block' : 'none';
+    if (pane) {
+      pane.style.display = t === tab ? 'block' : 'none';
+      if (t === tab) activePane = pane;
+    }
   });
+  if (activePane) animateTabPane(activePane);
   if (tab === 'passkeys') {
     const nameInput = document.getElementById('passkey-device-name');
     if (nameInput && !nameInput.value.trim()) {

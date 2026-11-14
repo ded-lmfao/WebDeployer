@@ -6,6 +6,14 @@
 import { icon } from './icons.js';
 import { state, setHtmlIfChanged, escapeHtml } from './state.js';
 import { api } from './api.js';
+import {
+  consumePendingViewStagger,
+  animateOverviewReveal,
+  animateNumberValue,
+  animateProgressBar,
+  animateTableRowsStagger,
+  animateSectionShow,
+} from './motion_ui.js';
 import { renderPipelineStages, waterPipelines } from './deployments.js';
 import {
   formatBytesShort,
@@ -284,7 +292,7 @@ function updateOverviewNetwork(net, opts = {}) {
 }
 
 async function fetchOverviewNetwork() {
-  if (_ovNetState.pollInFlight || state.currentView !== 'overview') return;
+  if (_ovNetState.pollInFlight || !state.user || !state.csrf || state.currentView !== 'overview') return;
   if (typeof document !== 'undefined' && document.hidden) return;
   _ovNetState.pollInFlight = true;
   _ovNetState.lastFetchAt = Date.now();
@@ -301,7 +309,7 @@ async function fetchOverviewNetwork() {
 }
 
 function ensureOverviewNetPoller() {
-  if (state.currentView !== 'overview') {
+  if (!state.user || !state.csrf || state.currentView !== 'overview') {
     stopOverviewNetPoller();
     return;
   }
@@ -311,7 +319,7 @@ function ensureOverviewNetPoller() {
   }
   if (_ovNetState.pollTimer !== null) return;
   _ovNetState.pollTimer = setInterval(() => {
-    if (state.currentView !== 'overview') {
+    if (!state.user || !state.csrf || state.currentView !== 'overview') {
       stopOverviewNetPoller();
       return;
     }
@@ -580,12 +588,12 @@ function renderResourceBreakdown(resources) {
 }
 
 function filterResourceBreakdown(filter) {
-
   state.resourceFilter = filter;
   document.querySelectorAll('#resource-filter-pills .pill').forEach((btn) => {
     btn.classList.toggle('active', btn.getAttribute('data-res-filter') === filter);
   });
   renderResourceBreakdown();
+  animateTableRowsStagger(document.getElementById('resource-breakdown-table'));
 };
 
 async function loadOverview() {
@@ -623,11 +631,11 @@ async function loadOverview() {
 
     const cpuPct = m.cpu?.pct || 0;
     const cpuCores = m.cpu?.cores || 1;
-    document.getElementById('stat-cpu-pct').textContent = `${cpuPct}%`;
+    animateNumberValue('stat-cpu-pct', cpuPct, (v) => `${Math.round(v)}%`);
     const cpuBar = document.getElementById('stat-cpu-bar');
     if (cpuBar) {
-      cpuBar.style.width = `${Math.min(100, cpuPct)}%`;
       cpuBar.className = `progress-fill ${cpuPct > 80 ? 'rose' : cpuPct > 50 ? 'amber' : 'green'}`;
+      animateProgressBar(cpuBar, cpuPct);
     }
     const cpuMeta = document.getElementById('stat-cpu-meta');
     if (cpuMeta) cpuMeta.textContent = `${cpuCores} Core${cpuCores === 1 ? '' : 's'} (${cpuPct}% total)`;
@@ -635,24 +643,24 @@ async function loadOverview() {
     const memPct = m.memory?.pct || 0;
     const usedMb = ((m.memory?.used || 0) / 1048576).toFixed(0);
     const totalMb = ((m.memory?.total || 0) / 1048576).toFixed(0);
-    document.getElementById('stat-mem-pct').textContent = `${memPct}%`;
+    animateNumberValue('stat-mem-pct', memPct, (v) => `${Math.round(v)}%`);
     const memBar = document.getElementById('stat-mem-bar');
     if (memBar) {
-      memBar.style.width = `${Math.min(100, memPct)}%`;
       memBar.className = `progress-fill ${memPct > 85 ? 'rose' : memPct > 65 ? 'amber' : 'green'}`;
+      animateProgressBar(memBar, memPct);
     }
     const memMeta = document.getElementById('stat-mem-meta');
     if (memMeta) memMeta.textContent = `${usedMb} MB / ${totalMb} MB`;
 
     if (m.disk) {
       const diskPct = Math.min(100, Math.max(0, Number(m.disk.pct) || 0));
-      const freeGb = (m.disk.free / 1073741824).toFixed(1);
+      const freeGb = Number((m.disk.free / 1073741824).toFixed(1));
       const totalGb = (m.disk.total / 1073741824).toFixed(1);
-      setText('stat-disk-free', `${freeGb} GB`);
+      animateNumberValue('stat-disk-free', freeGb, (v) => `${v.toFixed(1)} GB`);
       const diskBar = document.getElementById('stat-disk-bar');
       if (diskBar) {
-        diskBar.style.width = `${diskPct}%`;
         diskBar.className = `progress-fill ${diskPct > 85 ? 'rose' : diskPct > 70 ? 'amber' : 'green'}`;
+        animateProgressBar(diskBar, diskPct);
       }
       setText('stat-disk-meta', `${totalGb} GB total (${diskPct}% used)`);
     }
@@ -696,19 +704,26 @@ async function loadOverview() {
     // Active deployment box
     const active = data.projects.find((x) => x.active);
     const actBox = document.getElementById('overview-active-deployment-box');
+    const wasActBoxHidden = actBox && getComputedStyle(actBox).display === 'none';
     const pOverview = waterPipelines['overview-pipeline-track'];
     if (active && active.active) {
       actBox.style.display = 'block';
+      if (wasActBoxHidden) animateSectionShow(actBox);
       document.getElementById('active-dep-project-name').textContent = active.project.name;
       const kindRaw = active.active.kind || 'deploy';
       document.getElementById('active-dep-kind').textContent = kindRaw.charAt(0).toUpperCase() + kindRaw.slice(1).toLowerCase();
       renderPipelineStages('overview-pipeline-track', active.active.stage, active.active.status, active.active.id);
     } else if (pOverview && pOverview.isLooping && pOverview.currentProgress < 6.95) {
       actBox.style.display = 'block';
+      if (wasActBoxHidden) animateSectionShow(actBox);
       document.getElementById('active-dep-kind').textContent = 'Deployed';
       renderPipelineStages('overview-pipeline-track', 'health_checking', 'success', pOverview.lastDeploymentId);
     } else {
       actBox.style.display = 'none';
+    }
+
+    if (consumePendingViewStagger('overview')) {
+      animateOverviewReveal();
     }
 
   } catch (err) {

@@ -16,6 +16,15 @@ import {
   isDatabaseRunning,
 } from './state.js';
 import { prefetchWebsiteWorkspace, prefetchDatabaseWorkspace } from './api.js';
+import {
+  animateViewEnter,
+  animateWorkspaceBanner,
+  markViewStaggerPending,
+  consumePendingViewStagger,
+  staggerElements,
+} from './motion_ui.js';
+
+let lastBannerEntityKey = null;
 
 // Re-export process controls and lifecycle actions submodule
 export * from './workspace_actions.js';
@@ -61,8 +70,6 @@ function switchWebsiteTab(tab) {
 }
 window.switchWebsiteTab = switchWebsiteTab;
 
-let isInternalNavigation = false;
-
 function navigateTo(viewName, entityParam = null) {
   if (!state.user || !state.csrf || state.pendingMfaToken) {
     showLogin();
@@ -85,43 +92,61 @@ function navigateTo(viewName, entityParam = null) {
     state.selectedEntityKind = 'project';
   }
 
-  let hashParam = entityParam;
-  if (!hashParam && WEBSITE_WORKSPACE_TABS.has(viewName) && state.selectedEntityKind === 'database' && state.selectedDatabaseId) {
-    hashParam = `db-${state.selectedDatabaseId}`;
+  let routeParam = entityParam;
+  if (!routeParam && WEBSITE_WORKSPACE_TABS.has(viewName) && state.selectedEntityKind === 'database' && state.selectedDatabaseId) {
+    routeParam = `db-${state.selectedDatabaseId}`;
   }
-  const targetHash = hashParam ? `#/${viewName}/${hashParam}` : `#/${viewName}`;
-  if (window.location.hash !== targetHash) {
-    isInternalNavigation = true;
-    window.location.hash = targetHash;
+  const targetPath = routeParam ? `/${viewName}/${routeParam}` : `/${viewName}`;
+  const curPath = window.location.pathname || '/';
+  if (curPath !== targetPath || window.location.hash) {
+    try {
+      window.history.pushState({ view: viewName, param: routeParam ?? null }, '', targetPath);
+    } catch (_) {}
   }
   renderCurrentView();
 }
 window.navigateTo = navigateTo;
 
 function handleHashRoute() {
-  if (isInternalNavigation) {
-    isInternalNavigation = false;
-    return;
-  }
   if (!state.user || !state.csrf || state.pendingMfaToken) {
     resetCleanUrl();
     showLogin();
     return;
   }
-  const hash = window.location.hash.replace(/^#\/?/, '') || 'overview';
-  const parts = hash.split('/');
+
+  let rawPath = '';
+  if (window.location.hash && window.location.hash.startsWith('#/')) {
+    rawPath = window.location.hash.slice(2);
+  } else {
+    rawPath = (window.location.pathname || '/').replace(/^\/+|\/+$/g, '');
+  }
+
+  const parts = (rawPath || 'overview').split('/').filter(Boolean);
   let view = parts[0] || 'overview';
   if (view === 'backups') view = 'releases';
 
-  if (parts[1] && parts[1].startsWith('db-')) {
-    const dbId = Number(parts[1].slice(3));
+  let routeParam = parts[1] || null;
+  if (routeParam && routeParam.startsWith('db-')) {
+    const dbId = Number(routeParam.slice(3));
     state.selectedEntityKind = 'database';
     if (dbId) state.selectedDatabaseId = dbId;
     if (!DATABASE_WORKSPACE_TABS.has(view)) view = 'deployments';
   } else {
     state.selectedEntityKind = 'project';
-    const pid = parts[1] ? Number(parts[1]) : null;
+    const pid = routeParam ? Number(routeParam) : null;
     if (pid) state.selectedProjectId = pid;
+  }
+
+  if (!document.getElementById(`view-${view}`)) {
+    view = 'overview';
+    routeParam = null;
+  }
+
+  const canonicalPath = routeParam ? `/${view}/${routeParam}` : `/${view}`;
+  if ((window.location.pathname || '/') !== canonicalPath || window.location.hash) {
+    try {
+      window.history.replaceState({ view, param: routeParam }, '', canonicalPath);
+    } catch (_) {}
   }
 
   state.currentView = view;
@@ -129,6 +154,7 @@ function handleHashRoute() {
 }
 window.handleHashRoute = handleHashRoute;
 
+window.addEventListener('popstate', handleHashRoute);
 window.addEventListener('hashchange', handleHashRoute);
 window.addEventListener('pageshow', (e) => {
   if (e.persisted || !state.user || !state.csrf) {
@@ -368,22 +394,34 @@ function renderWebsiteWorkspaceHeader() {
 
   const isInsideCard = WEBSITE_WORKSPACE_TABS.has(state.currentView);
   if (!isInsideCard) {
+    lastBannerEntityKey = null;
     banner.style.display = 'none';
     return;
   }
 
+  const triggerBannerMotion = (key) => {
+    if (!key || banner.style.display === 'none') return;
+    if (key !== lastBannerEntityKey) {
+      lastBannerEntityKey = key;
+      animateWorkspaceBanner(banner);
+    }
+  };
+
   if (state.selectedEntityKind === 'database') {
     renderDatabaseWorkspaceHeader(banner);
+    triggerBannerMotion(state.selectedDatabaseId ? `db:${state.selectedDatabaseId}` : null);
     return;
   }
 
   const p = getSelectedProject();
   if (!p) {
+    lastBannerEntityKey = null;
     banner.style.display = 'none';
     return;
   }
 
   banner.style.display = 'block';
+  triggerBannerMotion(`project:${p.id}`);
   const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
   const isOnline = isProjectOnline(p, resItem);
   const isMaintenance = isProjectMaintenance(p, resItem);
@@ -737,12 +775,20 @@ function renderCurrentView() {
   });
 
   // Switch view section visibility
+  const activeSection = document.getElementById(`view-${state.currentView}`);
+  const isViewChange = Boolean(activeSection && !activeSection.classList.contains('active'));
+
   document.querySelectorAll('.view-section').forEach((sec) => {
     sec.classList.remove('active');
   });
 
-  const activeSection = document.getElementById(`view-${state.currentView}`);
-  if (activeSection) activeSection.classList.add('active');
+  if (activeSection) {
+    activeSection.classList.add('active');
+    if (isViewChange) {
+      animateViewEnter(activeSection);
+      markViewStaggerPending(state.currentView);
+    }
+  }
 
   // Load relevant view data
   switch (state.currentView) {
@@ -758,7 +804,17 @@ function renderCurrentView() {
     case 'env': void loadEnvView(); break;
     case 'files': void loadFilesView(); break;
     case 'monitor': void loadMonitorView(); break;
-    case 'settings': void loadSettingsView(); break;
+    case 'settings':
+      void loadSettingsView();
+      if (consumePendingViewStagger('settings')) {
+        requestAnimationFrame(() => {
+          staggerElements(
+            document.querySelectorAll('#view-settings .settings-card, #view-settings .overview-section, #settings-theme-grid .theme-swatch-card'),
+            { y: 10 },
+          );
+        });
+      }
+      break;
     case 'audit': void loadAuditView(); break;
   }
 }

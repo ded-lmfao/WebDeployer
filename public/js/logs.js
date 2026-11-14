@@ -14,6 +14,7 @@ function stopDbLogPoller() {
     dbLogPollTimer = null;
   }
 }
+window.stopDbLogPoller = stopDbLogPoller;
 
 async function fetchDatabaseLogLines(db) {
   const res = await api(`/api/databases/${db.id}/logs`, { noCache: true });
@@ -91,7 +92,7 @@ async function loadLogsView() {
     renderTerminalLogs();
 
     dbLogPollTimer = setInterval(async () => {
-      if (state.currentView !== 'logs' || state.selectedEntityKind !== 'database') {
+      if (!state.user || !state.csrf || state.currentView !== 'logs' || state.selectedEntityKind !== 'database') {
         stopDbLogPoller();
         return;
       }

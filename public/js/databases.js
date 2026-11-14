@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { state, escapeHtml, DB_PIPELINE_STAGES, syncOverviewResourceStatus, formatRelativeTime } from './state.js';
 import { api, toast } from './api.js';
 import { renderPipelineStages } from './deployments.js';
+import { consumePendingViewStagger, staggerElements } from './motion_ui.js';
 
 // Re-export database modals submodule for 100% backward compatibility
 export * from './databases_modal.js';
@@ -270,6 +271,10 @@ export function renderDatabasesList() {
       </div>
     `;
   }).join('');
+
+  if (consumePendingViewStagger('databases')) {
+    staggerElements(container.querySelectorAll('.project-card'), { y: 12 });
+  }
 }
 
 export function syncDatabaseCardState(id, status) {
