@@ -100,9 +100,15 @@ function renderProjectsList() {
     btn.classList.toggle('active', btn.getAttribute('data-filter') === state.projectStatusFilter);
   });
 
+  const resByProjId = new Map();
+  for (const r of (state.overview?.resources || [])) {
+    const pid = r.projectId ?? r.project_id;
+    if (pid != null) resByProjId.set(pid, r);
+  }
+
   const search = (document.getElementById('projects-search-input')?.value || '').toLowerCase();
   const filtered = websites.filter((p) => {
-    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const resItem = resByProjId.get(p.id);
     const isOnline = isProjectOnline(p, resItem);
     if (state.projectStatusFilter === 'running' && !isOnline) return false;
     if (state.projectStatusFilter === 'stopped' && isOnline) return false;
@@ -123,7 +129,7 @@ function renderProjectsList() {
   }
 
   setHtmlIfChanged(container, filtered.map((p) => {
-    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const resItem = resByProjId.get(p.id);
     const isOnline = isProjectOnline(p, resItem);
     const isMaintenance = isProjectMaintenance(p, resItem);
 

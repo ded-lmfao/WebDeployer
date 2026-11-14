@@ -12,13 +12,21 @@ use std::sync::OnceLock;
 #[folder = "public/"]
 pub struct Assets;
 
-static ETAG_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
+struct EmbeddedAssetEntry {
+    data: Bytes,
+    mime: &'static str,
+    etag: String,
+    etag_hdr: HeaderValue,
+}
+
+static EMBEDDED_ASSETS: OnceLock<HashMap<String, EmbeddedAssetEntry>> = OnceLock::new();
 static BUNDLED_EMBEDDED_CSS: OnceLock<(Bytes, String)> = OnceLock::new();
 static DISK_PUBLIC_ROOTS: OnceLock<Vec<PathBuf>> = OnceLock::new();
 
 struct DiskCacheEntry {
     mtime: std::time::SystemTime,
     etag: String,
+    etag_hdr: HeaderValue,
     data: Bytes,
 }
 
@@ -71,20 +79,46 @@ fn get_bundled_embedded_css() -> Option<&'static (Bytes, String)> {
     BUNDLED_EMBEDDED_CSS.get()
 }
 
-fn get_etag_map() -> &'static HashMap<String, String> {
-    ETAG_CACHE.get_or_init(|| {
+fn get_embedded_assets() -> &'static HashMap<String, EmbeddedAssetEntry> {
+    EMBEDDED_ASSETS.get_or_init(|| {
         let mut map = HashMap::new();
         for file in Assets::iter() {
             let key = file.as_ref().to_string();
+            let mime = get_mime(&key);
             if key == "style.css" {
-                if let Some((_, bundled_etag)) = get_bundled_embedded_css() {
-                    map.insert(key, bundled_etag.clone());
+                if let Some((bundled, bundled_etag)) = get_bundled_embedded_css() {
+                    let etag_hdr = HeaderValue::from_str(bundled_etag)
+                        .unwrap_or_else(|_| HeaderValue::from_static(""));
+                    map.insert(
+                        key,
+                        EmbeddedAssetEntry {
+                            data: bundled.clone(),
+                            mime,
+                            etag: bundled_etag.clone(),
+                            etag_hdr,
+                        },
+                    );
                     continue;
                 }
             }
             if let Some(content) = Assets::get(&key) {
                 let hash = hex::encode(content.metadata.sha256_hash());
-                map.insert(key, format!("W/\"{}\"", &hash[..16]));
+                let etag = format!("W/\"{}\"", &hash[..16]);
+                let etag_hdr =
+                    HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static(""));
+                let data = match content.data {
+                    std::borrow::Cow::Borrowed(slice) => Bytes::from_static(slice),
+                    std::borrow::Cow::Owned(vec) => Bytes::from(vec),
+                };
+                map.insert(
+                    key,
+                    EmbeddedAssetEntry {
+                        data,
+                        mime,
+                        etag,
+                        etag_hdr,
+                    },
+                );
             }
         }
         map
@@ -198,13 +232,9 @@ fn bundle_css_imports_from_disk(style_path: &Path, raw: &[u8]) -> Vec<u8> {
     bundle_css_imports(raw, |rel| std::fs::read_to_string(parent.join(rel)).ok())
 }
 
-fn cache_control_header(is_html: bool, is_vendor: bool, has_version_query: bool, embedded: bool) -> &'static str {
+fn cache_control_header(is_html: bool, is_vendor: bool, has_version_query: bool) -> &'static str {
     if is_html {
-        if embedded {
-            "no-store, no-cache, must-revalidate, private"
-        } else {
-            "no-cache, must-revalidate, private"
-        }
+        "no-cache, must-revalidate, private"
     } else if is_vendor && has_version_query {
         "public, max-age=31536000, immutable"
     } else if is_vendor {
@@ -259,11 +289,12 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
     let is_vendor = clean_path.starts_with("vendor/");
     let has_version_query = query.map(|q| q.contains("v=")).unwrap_or(false);
 
+    let cache_control = cache_control_header(is_html, is_vendor, has_version_query);
+
     // FAST-PATH (dev / explicit opt-in only): In release binaries updated via GitHub Releases,
     // embedded `Assets` are authoritative so stale ./public files on disk cannot shadow new UI releases.
     if allow_disk_public_override() {
         if let Some((disk_path, mtime)) = resolve_disk_asset(clean_path).await {
-        let cache_control = cache_control_header(is_html, is_vendor, has_version_query, false);
         let cache_lock = get_disk_cache();
 
         let cached = {
@@ -271,15 +302,15 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
             r.and_then(|map| {
                 if let Some(entry) = map.get(clean_path) {
                     if entry.mtime == mtime {
-                        return Some((entry.etag.clone(), entry.data.clone()));
+                        return Some((entry.etag.clone(), entry.etag_hdr.clone(), entry.data.clone()));
                     }
                 }
                 None
             })
         };
 
-        let (etag, data, is_ram_hit) = if let Some((etag, data)) = cached {
-            (etag, data, true)
+        let (etag, etag_hdr, data, is_ram_hit) = if let Some((etag, etag_hdr, data)) = cached {
+            (etag, etag_hdr, data, true)
         } else if let Ok(raw_data) = tokio::fs::read(&disk_path).await {
             let final_vec = if clean_path == "style.css" {
                 bundle_css_imports_from_disk(&disk_path, &raw_data)
@@ -292,17 +323,19 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
                 .map(|d| d.as_millis())
                 .unwrap_or(0);
             let etag = format!("W/\"{:x}-{:x}\"", mtime_secs, data.len());
+            let etag_hdr = HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static(""));
             if let Ok(mut w) = cache_lock.write() {
                 w.insert(
                     clean_path.to_string(),
                     DiskCacheEntry {
                         mtime,
                         etag: etag.clone(),
+                        etag_hdr: etag_hdr.clone(),
                         data: data.clone(),
                     },
                 );
             }
-            (etag, data, false)
+            (etag, etag_hdr, data, false)
         } else {
             return (StatusCode::NOT_FOUND, "Not Found").into_response();
         };
@@ -312,7 +345,7 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
             if if_none_match.trim() == etag || if_none_match.contains(&etag) {
                 return Response::builder()
                     .status(StatusCode::NOT_MODIFIED)
-                    .header(header::ETAG, HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static("")))
+                    .header(header::ETAG, etag_hdr)
                     .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
                     .header("x-cache", HeaderValue::from_static("DISK-304"))
                     .body(Body::empty())
@@ -325,7 +358,7 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
         return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
-            .header(header::ETAG, HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static("")))
+            .header(header::ETAG, etag_hdr)
             .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
             .header("x-cache", HeaderValue::from_static(cache_status))
             .body(Body::from(data))
@@ -333,61 +366,32 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
         }
     }
 
-    // Production release builds serve embedded `Assets` directly from RAM without touching ./public.
-    let cache_control = cache_control_header(is_html, is_vendor, has_version_query, true);
+    // Production release builds serve embedded `Assets` directly from RAM with precomputed headers.
+    let assets = get_embedded_assets();
+    let Some(entry) = assets.get(clean_path) else {
+        return (StatusCode::NOT_FOUND, "404 Not Found").into_response();
+    };
 
-    let etag_map = get_etag_map();
-    if !is_html {
-        if let Some(etag) = etag_map.get(clean_path) {
-            if let Some(if_none_match) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
-                if if_none_match.trim() == etag || if_none_match.contains(etag) {
-                    return Response::builder()
-                        .status(StatusCode::NOT_MODIFIED)
-                        .header(header::ETAG, HeaderValue::from_str(etag).unwrap_or_else(|_| HeaderValue::from_static("")))
-                        .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
-                        .header("x-cache", HeaderValue::from_static("HIT-304"))
-                        .body(Body::empty())
-                        .unwrap_or_else(|_| StatusCode::NOT_MODIFIED.into_response());
-                }
-            }
-        }
-    }
-
-    if clean_path == "style.css" {
-        if let Some((bundled, etag)) = get_bundled_embedded_css() {
+    if let Some(if_none_match) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
+        if if_none_match.trim() == entry.etag || if_none_match.contains(&entry.etag) {
             return Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, HeaderValue::from_static("text/css; charset=utf-8"))
-                .header(header::ETAG, HeaderValue::from_str(etag).unwrap_or_else(|_| HeaderValue::from_static("")))
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, entry.etag_hdr.clone())
                 .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
-                .header("x-cache", HeaderValue::from_static("MEMORY-EMBED"))
-                .body(Body::from(bundled.clone()))
-                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                .header("x-cache", HeaderValue::from_static("HIT-304"))
+                .body(Body::empty())
+                .unwrap_or_else(|_| StatusCode::NOT_MODIFIED.into_response());
         }
     }
 
-    match Assets::get(clean_path) {
-        Some(content) => {
-            let mime = get_mime(clean_path);
-            let etag = etag_map
-                .get(clean_path)
-                .cloned()
-                .unwrap_or_else(|| {
-                    let hash = hex::encode(content.metadata.sha256_hash());
-                    format!("W/\"{}\"", &hash[..16])
-                });
-
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
-                .header(header::ETAG, HeaderValue::from_str(&etag).unwrap_or_else(|_| HeaderValue::from_static("")))
-                .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
-                .header("x-cache", HeaderValue::from_static("MEMORY-EMBED"))
-                .body(Body::from(content.data))
-                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-        }
-        None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),
-    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, HeaderValue::from_static(entry.mime))
+        .header(header::ETAG, entry.etag_hdr.clone())
+        .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
+        .header("x-cache", HeaderValue::from_static("MEMORY-EMBED"))
+        .body(Body::from(entry.data.clone()))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 #[cfg(test)]
@@ -403,30 +407,32 @@ mod tests {
             !css_str.lines().any(|l| l.trim_start().starts_with("@import './css/")),
             "Bundled style.css should inline all @import './css/...' directives"
         );
-        let etag_map = get_etag_map();
-        assert_eq!(etag_map.get("style.css"), Some(etag));
+        let assets = get_embedded_assets();
+        assert_eq!(assets.get("style.css").map(|e| &e.etag), Some(etag));
     }
 
     #[tokio::test]
     async fn test_static_handler_304_on_matching_etag() {
         let (_, expected_etag) = get_bundled_embedded_css().expect("embedded style.css missing");
-        let resp_200 = static_handler("/style.css", &HeaderMap::new(), None).await;
-        assert_eq!(resp_200.status(), StatusCode::OK);
-        let actual_etag = resp_200
-            .headers()
-            .get(header::ETAG)
-            .and_then(|v| v.to_str().ok())
-            .expect("ETag header missing")
-            .to_string();
-        assert!(!actual_etag.is_empty());
+        for target in ["/style.css", "/"] {
+            let resp_200 = static_handler(target, &HeaderMap::new(), None).await;
+            assert_eq!(resp_200.status(), StatusCode::OK);
+            let actual_etag = resp_200
+                .headers()
+                .get(header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .expect("ETag header missing")
+                .to_string();
+            assert!(!actual_etag.is_empty());
 
-        let mut req_headers = HeaderMap::new();
-        req_headers.insert(
-            header::IF_NONE_MATCH,
-            HeaderValue::from_str(&actual_etag).unwrap(),
-        );
-        let resp_304 = static_handler("/style.css", &req_headers, None).await;
-        assert_eq!(resp_304.status(), StatusCode::NOT_MODIFIED);
+            let mut req_headers = HeaderMap::new();
+            req_headers.insert(
+                header::IF_NONE_MATCH,
+                HeaderValue::from_str(&actual_etag).unwrap(),
+            );
+            let resp_304 = static_handler(target, &req_headers, None).await;
+            assert_eq!(resp_304.status(), StatusCode::NOT_MODIFIED);
+        }
         let _ = expected_etag;
     }
 

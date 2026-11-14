@@ -264,6 +264,8 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_projects_created ON projects(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_backups_proj ON backups(project_id, id DESC);
         CREATE INDEX IF NOT EXISTS idx_databases_port ON databases(port);
         CREATE INDEX IF NOT EXISTS idx_databases_linked_project ON databases(linked_project_id);
 

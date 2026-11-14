@@ -339,6 +339,59 @@ pub(crate) fn cached_json_response<T: Serialize>(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+pub(crate) fn json_bytes_response(
+    bytes: axum::body::Bytes,
+    cache_tag: &'static str,
+) -> Result<Response, StatusCode> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-cache", HeaderValue::from_static(cache_tag))
+        .body(axum::body::Body::from(bytes))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Coalesces concurrent cold misses on `cache_key` (singleflight) while running blocking
+/// serialization/computation via `compute`.
+pub(crate) async fn singleflight_json_bytes<F, Fut>(
+    cache: &crate::cache::AppCache,
+    cache_key: String,
+    ttl: std::time::Duration,
+    mut compute: F,
+) -> Result<Response, StatusCode>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<axum::body::Bytes, StatusCode>>,
+{
+    for _attempt in 0..3 {
+        if let Some(res) = check_api_cache(cache, &cache_key) {
+            return Ok(res);
+        }
+        match cache.acquire_inflight(&cache_key) {
+            crate::cache::InflightRole::Leader(_guard) => {
+                // Re-check inside leader in case a previous leader stored just before we acquired
+                if let Some(res) = check_api_cache(cache, &cache_key) {
+                    return Ok(res);
+                }
+                let start_gen = cache.generation();
+                let bytes = compute().await?;
+                cache.set_bytes_if_gen(cache_key, bytes.clone(), ttl, start_gen);
+                return json_bytes_response(bytes, "MISS");
+            }
+            crate::cache::InflightRole::Follower(mut rx) => {
+                if !*rx.borrow() {
+                    let _ = rx.changed().await;
+                }
+                if let Some(res) = check_api_cache(cache, &cache_key) {
+                    return Ok(res);
+                }
+            }
+        }
+    }
+    let bytes = compute().await?;
+    json_bytes_response(bytes, "MISS")
+}
+
 pub(crate) fn fetch_project(
     projects: &crate::projects::Projects,
     id: i64,

@@ -4,7 +4,7 @@
  */
 
 import { icon } from './icons.js';
-import { state, escapeHtml, formatRelativeTime } from './state.js';
+import { state, escapeHtml, formatRelativeTime, setHtmlIfChanged } from './state.js';
 import { loadProjects } from './websites.js';
 import { openWebsiteWorkspace } from './workspace.js';
 import { consumePendingViewStagger, staggerElements } from './motion_ui.js';
@@ -129,7 +129,7 @@ export function renderServicesList() {
   });
 
   if (!filtered.length) {
-    container.innerHTML = `
+    setHtmlIfChanged(container, `
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
         <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No backend services found</p>
         <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">
@@ -137,11 +137,17 @@ export function renderServicesList() {
         </p>
         ${hasPower('services_manage') ? '<button class="btn btn-primary" onclick="openAddServiceModal()">Add New Service</button>' : ''}
       </div>
-    `;
+    `);
     return;
   }
 
-  container.innerHTML = filtered.map((p) => {
+  const resByProjId = new Map();
+  for (const r of (state.overview?.resources || [])) {
+    const pid = r.projectId ?? r.project_id;
+    if (pid != null) resByProjId.set(pid, r);
+  }
+
+  setHtmlIfChanged(container, filtered.map((p) => {
     const isOnline = p.app_status === 'running' || p.status?.running;
     const isBuilding = p.deployStatus?.status === 'in_progress' || p.deployStatus?.status === 'building';
     const statusText = isBuilding ? 'Building' : (isOnline ? 'Online' : 'Stopped');
@@ -186,7 +192,7 @@ export function renderServicesList() {
     const shaText = p.deployed_sha ? p.deployed_sha.slice(0, 7) : (p.deployedSha ? p.deployedSha.slice(0, 7) : (isLocal ? 'Manual' : 'Auto'));
     const portText = p.port ? `Port ${p.port}` : '';
     const accessText = p.access_mode === 'public' ? 'Public reverse proxy' : (p.access_mode === 'allowlist' || p.access_mode === 'allowed_ips' ? 'IP whitelist' : 'Localhost only');
-    const resItem = (state.overview?.resources || []).find((x) => (x.projectId === p.id || x.project_id === p.id));
+    const resItem = resByProjId.get(p.id);
     const diskStr = p.diskFormatted || p.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted;
     const uptimeText = isOnline && p.app_started_at ? formatRelativeTime(p.app_started_at) : '';
     const pidVal = (isOnline && (p.app_pid || p.status?.pid || resItem?.pid)) ? (p.app_pid || p.status?.pid || resItem?.pid) : null;
@@ -254,7 +260,7 @@ export function renderServicesList() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join(''));
 
   filtered.forEach(syncServiceCardPipeline);
   if (consumePendingViewStagger('services')) {

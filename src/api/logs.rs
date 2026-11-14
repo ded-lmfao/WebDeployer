@@ -282,9 +282,26 @@ pub(crate) async fn audit_handler(
             list.push(r);
         }
 
+        let mut existing_dep_ids = std::collections::HashSet::with_capacity(list.len());
+        let mut backup_ts: Vec<i64> = Vec::new();
+        for a in &list {
+            if a.action.starts_with("backup.") {
+                backup_ts.push(a.ts);
+            }
+            if let Some(detail) = a.detail.as_deref() {
+                for seg in detail.split('#').skip(1) {
+                    let digits: String = seg.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if let Ok(did) = digits.parse::<i64>() {
+                        existing_dep_ids.insert(did);
+                    }
+                }
+            }
+        }
+        backup_ts.sort_unstable();
+
         // Also include historical deployments & rollbacks from the `deployments` table
         // that predate per-website audit rows so the Activity tab shows the full timeline.
-        if let Ok(mut dstmt) = conn.prepare(
+        if let Ok(mut dstmt) = conn.prepare_cached(
             "SELECT id, kind, status, sha, trigger, actor, error, started_at, finished_at, release_id
              FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 200",
         ) {
@@ -304,11 +321,7 @@ pub(crate) async fn audit_handler(
             }) {
                 for d in drows.flatten() {
                     let (dep_id, kind, status, sha, trigger, actor, error, started_at, finished_at, rel_id) = d;
-                    let dep_tag = format!("#{}", dep_id);
-                    let already_logged = list.iter().any(|a| {
-                        a.detail.as_deref().map(|s| s.contains(&dep_tag)).unwrap_or(false)
-                    });
-                    if !already_logged {
+                    if !existing_dep_ids.contains(&dep_id) {
                         let short_sha = sha.as_deref().map(|s| &s[..s.len().min(7)]).unwrap_or("HEAD");
                         let action = match (kind.as_str(), status.as_str()) {
                             ("rollback", "success") => "rollback.success",
@@ -358,7 +371,7 @@ pub(crate) async fn audit_handler(
         }
 
         // Also include historical snapshots from the `backups` table if not already in audit
-        if let Ok(mut bstmt) = conn.prepare(
+        if let Ok(mut bstmt) = conn.prepare_cached(
             "SELECT id, kind, note, size_bytes, created_at FROM backups WHERE project_id = ? ORDER BY id DESC LIMIT 100",
         ) {
             if let Ok(brows) = bstmt.query_map(rusqlite::params![pid], |r| {
@@ -373,9 +386,8 @@ pub(crate) async fn audit_handler(
                 for b in brows.flatten() {
                     let (bid, bkind, bnote, bsize, bts) = b;
                     let note_str = bnote.unwrap_or_else(|| "Snapshot".to_string());
-                    let already_logged = list.iter().any(|a| {
-                        a.action.starts_with("backup.") && (a.ts - bts).abs() < 5000
-                    });
+                    let idx = backup_ts.partition_point(|&ts| ts <= bts - 5000);
+                    let already_logged = idx < backup_ts.len() && backup_ts[idx] < bts + 5000;
                     if !already_logged && bts > 0 {
                         list.push(AuditItem {
                             id: 2_000_000 + bid,

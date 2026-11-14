@@ -53,14 +53,10 @@ pub(crate) async fn github_webhook_handler(
     AxPath(slug): AxPath<String>,
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let projs = state
+    let p = state
         .projects
-        .list()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let p = projs
-        .into_iter()
-        .find(|x| x.slug == slug)
+        .get_by_slug(&slug)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found for this slug".to_string()))?;
 
     let secret = p

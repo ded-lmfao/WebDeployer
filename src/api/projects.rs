@@ -63,21 +63,26 @@ pub(crate) async fn list_projects_handler(
     let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
     let cache_key = format!("projects:u{}", user.id);
 
-    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
-        return Ok(res);
-    }
-
-    let cwd = cached_cwd();
-    let list: Vec<ProjectResponse> = state
-        .projects
-        .list()
+    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(4), || async {
+        let state = state.clone();
+        let user = user.clone();
+        tokio::task::spawn_blocking(move || {
+            let cwd = cached_cwd();
+            let list: Vec<ProjectResponse> = state
+                .projects
+                .list()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .into_iter()
+                .filter(|p| user.can_access_project(p.id))
+                .map(|p| to_project_response(p, cwd))
+                .collect();
+            let json = serde_json::to_string(&list).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            Ok(axum::body::Bytes::from(json))
+        })
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .into_iter()
-        .filter(|p| user.can_access_project(p.id))
-        .map(|p| to_project_response(p, cwd))
-        .collect();
-
-    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
+    })
+    .await
 }
 
 pub(crate) async fn get_project_handler(

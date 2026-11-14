@@ -157,7 +157,7 @@ window.handleHashRoute = handleHashRoute;
 window.addEventListener('popstate', handleHashRoute);
 window.addEventListener('hashchange', handleHashRoute);
 window.addEventListener('pageshow', (e) => {
-  if (e.persisted || !state.user || !state.csrf) {
+  if (e.persisted && (!state.user || !state.csrf)) {
     void initAuth();
   }
 });

@@ -2,8 +2,9 @@ use axum::body::Bytes;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
+use tokio::sync::watch;
 
 struct CacheEntry {
     bytes: Bytes,
@@ -22,19 +23,65 @@ pub struct CacheStats {
 
 pub struct AppCache {
     store: RwLock<HashMap<String, CacheEntry>>,
+    inflight: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    generation: AtomicU64,
     hits: AtomicU64,
     misses: AtomicU64,
     invalidations: AtomicU64,
+}
+
+pub enum InflightRole {
+    Leader(InflightGuard),
+    Follower(watch::Receiver<bool>),
+}
+
+pub struct InflightGuard {
+    key: String,
+    tx: watch::Sender<bool>,
+    inflight: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = self.inflight.lock() {
+            if let Some(current) = map.get(&self.key) {
+                if current.same_channel(&self.tx) {
+                    map.remove(&self.key);
+                }
+            }
+        }
+        let _ = self.tx.send(true);
+    }
 }
 
 impl AppCache {
     pub fn new() -> Self {
         Self {
             store: RwLock::new(HashMap::with_capacity(32)),
+            inflight: Arc::new(Mutex::new(HashMap::with_capacity(16))),
+            generation: AtomicU64::new(0),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             invalidations: AtomicU64::new(0),
         }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    pub fn acquire_inflight(&self, key: &str) -> InflightRole {
+        let mut map = self.inflight.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(existing) = map.get(key) {
+            return InflightRole::Follower(existing.subscribe());
+        }
+        let (tx, _rx) = watch::channel(false);
+        map.insert(key.to_string(), tx.clone());
+        InflightRole::Leader(InflightGuard {
+            key: key.to_string(),
+            tx,
+            inflight: Arc::clone(&self.inflight),
+        })
     }
 
     /// Returns pre-serialized JSON bytes directly as an `axum::body::Bytes`.
@@ -70,6 +117,13 @@ impl AppCache {
         }
     }
 
+    /// Stores pre-serialized Bytes only if no invalidation happened since `expected_gen`.
+    pub fn set_bytes_if_gen(&self, key: String, bytes: Bytes, ttl: Duration, expected_gen: u64) {
+        if self.generation.load(Ordering::Acquire) == expected_gen {
+            self.set_bytes(key, bytes, ttl);
+        }
+    }
+
     pub fn prune_expired(&self) {
         let now = Instant::now();
         if let Ok(mut map) = self.store.write() {
@@ -78,6 +132,7 @@ impl AppCache {
     }
 
     pub fn invalidate_prefix(&self, prefix: &str) {
+        self.generation.fetch_add(1, Ordering::Release);
         self.invalidations.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut map) = self.store.write() {
             map.retain(|k, _| !k.starts_with(prefix));
@@ -85,6 +140,7 @@ impl AppCache {
     }
 
     pub fn invalidate_project(&self, project_id: i64) {
+        self.generation.fetch_add(1, Ordering::Release);
         self.invalidations.fetch_add(1, Ordering::Relaxed);
         let p_tag = format!(":p{}:", project_id);
         if let Ok(mut map) = self.store.write() {
@@ -101,6 +157,7 @@ impl AppCache {
     }
 
     pub fn invalidate_all(&self) {
+        self.generation.fetch_add(1, Ordering::Release);
         self.invalidations.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut map) = self.store.write() {
             map.clear();

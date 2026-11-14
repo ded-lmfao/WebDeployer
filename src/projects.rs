@@ -17,6 +17,16 @@ impl Projects {
         Self { db, vault }
     }
 
+    fn ensure_project_port(conn: &rusqlite::Connection, p: &mut Project) {
+        if p.port.is_none() || p.port == Some(0) {
+            let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
+            if let Ok(new_port) = crate::db::allocate_global_unique_port(conn, None, default_start, Some(p.id), None) {
+                let _ = conn.execute("UPDATE projects SET port = ? WHERE id = ?", params![new_port as u32, p.id]);
+                p.port = Some(new_port);
+            }
+        }
+    }
+
     pub fn list(&self) -> Result<Vec<Project>, rusqlite::Error> {
         let conn = self.db.lock().unwrap();
         let query = format!("SELECT {} FROM projects ORDER BY id DESC", SELECT_PROJECT_FIELDS);
@@ -27,13 +37,7 @@ impl Projects {
         let mut list = Vec::new();
         for r in rows {
             let mut p = r?;
-            if p.port.is_none() || p.port == Some(0) {
-                let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
-                if let Ok(new_port) = crate::db::allocate_global_unique_port(&conn, None, default_start, Some(p.id), None) {
-                    let _ = conn.execute("UPDATE projects SET port = ? WHERE id = ?", params![new_port as u32, p.id]);
-                    p.port = Some(new_port);
-                }
-            }
+            Self::ensure_project_port(&conn, &mut p);
             list.push(p);
         }
         Ok(list)
@@ -42,21 +46,28 @@ impl Projects {
     pub fn get(&self, id: i64) -> Result<Option<Project>, rusqlite::Error> {
         let conn = self.db.lock().unwrap();
         let query = format!("SELECT {} FROM projects WHERE id = ?", SELECT_PROJECT_FIELDS);
-        let mut stmt = conn.prepare(&query)?;
+        let mut stmt = conn.prepare_cached(&query)?;
 
         let res = stmt.query_row(params![id], row_to_project).optional()?;
 
         if let Some(mut p) = res {
-            if p.port.is_none() || p.port == Some(0) {
-                let default_start = if p.project_kind == "service" { 8000 } else { 3000 };
-                if let Ok(new_port) = crate::db::allocate_global_unique_port(&conn, None, default_start, Some(p.id), None) {
-                    let _ = conn.execute("UPDATE projects SET port = ? WHERE id = ?", params![new_port as u32, p.id]);
-                    p.port = Some(new_port);
-                }
-            }
+            Self::ensure_project_port(&conn, &mut p);
             return Ok(Some(p));
         }
 
+        Ok(None)
+    }
+
+    pub fn get_by_slug(&self, slug: &str) -> Result<Option<Project>, rusqlite::Error> {
+        let conn = self.db.lock().unwrap();
+        let query = format!("SELECT {} FROM projects WHERE slug = ? LIMIT 1", SELECT_PROJECT_FIELDS);
+        let mut stmt = conn.prepare_cached(&query)?;
+
+        let res = stmt.query_row(params![slug], row_to_project).optional()?;
+        if let Some(mut p) = res {
+            Self::ensure_project_port(&conn, &mut p);
+            return Ok(Some(p));
+        }
         Ok(None)
     }
 

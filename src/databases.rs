@@ -123,6 +123,28 @@ pub struct Databases {
     public_ip: String,
 }
 
+struct RawDatabaseRow {
+    id: i64,
+    name: String,
+    engine: String,
+    db_name: String,
+    db_user: String,
+    enc_pass: String,
+    port: u16,
+    is_superuser: bool,
+    access_mode: String,
+    allowed_ips: String,
+    status: String,
+    container_id: Option<String>,
+    data_dir: String,
+    linked_project_id: Option<i64>,
+    linked_project_name: Option<String>,
+    domain: String,
+    created_at: i64,
+    updated_at: i64,
+    started_at_db: Option<i64>,
+}
+
 impl Databases {
     pub fn new(db: DbPool, vault: Arc<Vault>, logs: Logs, data_dir: &Path) -> Self {
         let raw_dir = data_dir.join("databases");
@@ -144,73 +166,88 @@ impl Databases {
         }
     }
 
-    fn row_to_managed_database(&self, r: &rusqlite::Row) -> Result<ManagedDatabase, rusqlite::Error> {
-        let id: i64 = r.get(0)?;
-        let name: String = r.get(1)?;
-        let engine: String = r.get(2)?;
-        let db_name: String = r.get(3)?;
-        let db_user: String = r.get(4)?;
-        let enc_pass: String = r.get(5)?;
-        let port: u16 = r.get(6)?;
-        let is_superuser: bool = r.get::<_, i64>(7)? != 0;
-        let access_mode: String = r.get(8)?;
-        let allowed_ips: String = r.get(9)?;
-        let status: String = r.get(10)?;
-        let container_id: Option<String> = r.get(11)?;
-        let data_dir: String = r.get(12)?;
-        let linked_project_id: Option<i64> = r.get(13)?;
-        let linked_project_name: Option<String> = r.get(14)?;
-        let domain: String = r.get::<_, Option<String>>(15)?.unwrap_or_default();
-        let created_at: i64 = r.get(16)?;
-        let updated_at: i64 = r.get(17)?;
-        let started_at_db: Option<i64> = r.get(18)?;
-        let started_at = if status == "running" {
-            let pg_data = Path::new(&data_dir).join("data");
-            started_at_db
+    fn read_raw_row(r: &rusqlite::Row) -> Result<RawDatabaseRow, rusqlite::Error> {
+        Ok(RawDatabaseRow {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            engine: r.get(2)?,
+            db_name: r.get(3)?,
+            db_user: r.get(4)?,
+            enc_pass: r.get(5)?,
+            port: r.get(6)?,
+            is_superuser: r.get::<_, i64>(7)? != 0,
+            access_mode: r.get(8)?,
+            allowed_ips: r.get(9)?,
+            status: r.get(10)?,
+            container_id: r.get(11)?,
+            data_dir: r.get(12)?,
+            linked_project_id: r.get(13)?,
+            linked_project_name: r.get(14)?,
+            domain: r.get::<_, Option<String>>(15)?.unwrap_or_default(),
+            created_at: r.get(16)?,
+            updated_at: r.get(17)?,
+            started_at_db: r.get(18)?,
+        })
+    }
+
+    fn hydrate_row(&self, row: RawDatabaseRow, include_secrets: bool) -> ManagedDatabase {
+        let started_at = if row.status == "running" {
+            let pg_data = Path::new(&row.data_dir).join("data");
+            row.started_at_db
                 .or_else(|| read_pg_started_at(&pg_data))
-                .or(Some(updated_at))
+                .or(Some(row.updated_at))
         } else {
             None
         };
 
-        let raw_pass = self.vault.decrypt(&enc_pass).unwrap_or(enc_pass);
-        let internal_url = build_postgres_url(&db_user, &raw_pass, "127.0.0.1", port, &db_name, false);
-        let host = if !domain.trim().is_empty() {
-            domain.trim()
+        let host = if !row.domain.trim().is_empty() {
+            row.domain.trim()
         } else {
             &self.public_ip
         };
-        let external_url = build_postgres_url(&db_user, &raw_pass, host, port, &db_name, true);
-        let psql_command = format!("psql -h {} -p {} -U {} -d {}", host, port, db_user, db_name);
+        let (db_password, internal_url, external_url) = if include_secrets {
+            let raw_pass = self.vault.decrypt(&row.enc_pass).unwrap_or(row.enc_pass);
+            let internal_url = build_postgres_url(&row.db_user, &raw_pass, "127.0.0.1", row.port, &row.db_name, false);
+            let external_url = build_postgres_url(&row.db_user, &raw_pass, host, row.port, &row.db_name, true);
+            (Some(raw_pass), internal_url, external_url)
+        } else {
+            (None, String::new(), String::new())
+        };
+        let psql_command = format!("psql -h {} -p {} -U {} -d {}", host, row.port, row.db_user, row.db_name);
 
-        Ok(ManagedDatabase {
-            id,
-            name,
-            engine,
-            db_name,
-            db_user,
-            db_password: Some(raw_pass),
-            port,
-            is_superuser,
-            access_mode,
-            allowed_ips,
-            domain,
-            status,
-            container_id,
+        ManagedDatabase {
+            id: row.id,
+            name: row.name,
+            engine: row.engine,
+            db_name: row.db_name,
+            db_user: row.db_user,
+            db_password,
+            port: row.port,
+            is_superuser: row.is_superuser,
+            access_mode: row.access_mode,
+            allowed_ips: row.allowed_ips,
+            domain: row.domain,
+            status: row.status,
+            container_id: row.container_id,
             started_at,
-            data_dir,
-            linked_project_id,
-            linked_project_name,
+            data_dir: row.data_dir,
+            linked_project_id: row.linked_project_id,
+            linked_project_name: row.linked_project_name,
             internal_url,
             external_url,
             psql_command,
-            created_at,
-            updated_at,
-        })
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
     }
 
+    #[allow(dead_code)]
     pub fn list(&self) -> Result<Vec<ManagedDatabase>, String> {
-        self.query_databases("ORDER BY d.id DESC", rusqlite::params![])
+        self.query_databases("ORDER BY d.id DESC", rusqlite::params![], true)
+    }
+
+    pub fn list_with_secrets(&self, include_secrets: bool) -> Result<Vec<ManagedDatabase>, String> {
+        self.query_databases("ORDER BY d.id DESC", rusqlite::params![], include_secrets)
     }
 
     pub fn list_overview_summaries(&self) -> Result<Vec<DatabaseOverviewSummary>, String> {
@@ -240,26 +277,39 @@ impl Databases {
     }
 
     pub fn get(&self, id: i64) -> Result<Option<ManagedDatabase>, String> {
-        Ok(self.query_databases("WHERE d.id = ? LIMIT 1", params![id])?.into_iter().next())
+        Ok(self.query_databases("WHERE d.id = ? LIMIT 1", params![id], true)?.into_iter().next())
     }
 
-    fn query_databases<P: rusqlite::Params>(&self, clause: &str, params: P) -> Result<Vec<ManagedDatabase>, String> {
-        let conn = self.db.lock().map_err(|e| e.to_string())?;
-        let sql = format!(
-            "SELECT d.id, d.name, d.engine, d.db_name, d.db_user, d.db_password, d.port,
-                    d.is_superuser, d.access_mode, d.allowed_ips, d.status, d.container_id,
-                    d.data_dir, d.linked_project_id, p.name, d.domain, d.created_at, d.updated_at,
-                    d.started_at
-             FROM databases d
-             LEFT JOIN projects p ON p.id = d.linked_project_id
-             {}",
-            clause
-        );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params, |r| self.row_to_managed_database(r))
-            .map_err(|e| e.to_string())?;
-        Ok(rows.flatten().collect())
+    fn query_databases<P: rusqlite::Params>(
+        &self,
+        clause: &str,
+        params: P,
+        include_secrets: bool,
+    ) -> Result<Vec<ManagedDatabase>, String> {
+        let raw_rows: Vec<RawDatabaseRow> = {
+            let conn = self.db.lock().map_err(|e| e.to_string())?;
+            let sql = format!(
+                "SELECT d.id, d.name, d.engine, d.db_name, d.db_user, d.db_password, d.port,
+                        d.is_superuser, d.access_mode, d.allowed_ips, d.status, d.container_id,
+                        d.data_dir, d.linked_project_id, p.name, d.domain, d.created_at, d.updated_at,
+                        d.started_at
+                 FROM databases d
+                 LEFT JOIN projects p ON p.id = d.linked_project_id
+                 {}",
+                clause
+            );
+            let mut stmt = conn.prepare_cached(&sql).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params, Self::read_raw_row)
+                .map_err(|e| e.to_string())?;
+            rows.flatten().collect()
+        };
+
+        // Decrypt credentials and check postmaster.pid outside the DB mutex lock.
+        Ok(raw_rows
+            .into_iter()
+            .map(|r| self.hydrate_row(r, include_secrets))
+            .collect())
     }
 
     pub fn get_logs(&self, id: i64) -> Result<String, String> {

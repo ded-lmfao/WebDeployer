@@ -264,14 +264,19 @@ fn load_overview_deployments(
     }
 
     if let Ok(mut success_stmt) = conn.prepare_cached(
-        "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at \
-         FROM deployments WHERE project_id = ? AND status = 'success' ORDER BY id DESC LIMIT 1",
+        "SELECT d.id, d.project_id, d.release_id, d.from_release_id, d.kind, d.status, d.stage, d.sha, d.trigger, d.actor, d.error, d.started_at, d.finished_at \
+         FROM deployments d \
+         INNER JOIN (SELECT project_id, MAX(id) AS max_id FROM deployments WHERE status = 'success' GROUP BY project_id) latest ON latest.max_id = d.id",
     ) {
-        for p in projects {
-            if let Ok(dep) = success_stmt.query_row(rusqlite::params![p.id], |r| {
-                row_to_overview_deployment(r, &p.name)
-            }) {
-                last_success_map.insert(p.id, dep);
+        if let Ok(rows) = success_stmt.query_map([], |r| {
+            let pid: i64 = r.get(1)?;
+            let pname = proj_names.get(&pid).copied().unwrap_or("");
+            row_to_overview_deployment(r, pname)
+        }) {
+            for dep in rows.flatten() {
+                if proj_names.contains_key(&dep.project_id) {
+                    last_success_map.insert(dep.project_id, dep);
+                }
             }
         }
     }
@@ -287,10 +292,20 @@ pub(crate) async fn overview_handler(
     state.monitor.touch_activity();
     let cache_key = format!("overview:u{}", user.id);
 
-    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
-        return Ok(res);
-    }
+    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(2), || async {
+        let state = state.clone();
+        let user = user.clone();
+        tokio::task::spawn_blocking(move || compute_overview_bytes(&state, &user))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    })
+    .await
+}
 
+fn compute_overview_bytes(
+    state: &AppState,
+    user: &crate::auth::User,
+) -> Result<axum::body::Bytes, StatusCode> {
     let mut projs = state.projects.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     projs.retain(|p| user.can_access_project(p.id));
 
@@ -578,7 +593,8 @@ pub(crate) async fn overview_handler(
         network: crate::monitor::get_network_metrics(),
     };
 
-    cached_json_response(&state.cache, cache_key, &payload, std::time::Duration::from_secs(2))
+    let json_str = serde_json::to_string(&payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(axum::body::Bytes::from(json_str))
 }
 
 pub(crate) async fn overview_network_handler(

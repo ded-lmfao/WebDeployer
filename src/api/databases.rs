@@ -135,24 +135,29 @@ pub(crate) async fn list_databases_handler(
 ) -> Result<Response, (StatusCode, String)> {
     let user = verify_any_power(&state, &headers, &["databases", "databases_manage"], None)?;
     let can_creds = user.has_any_power(&["databases_manage", "env"]);
-
     let cache_key = format!("databases:u{}:c{}", user.id, u8::from(can_creds));
-    if let Some(res) = check_api_cache(&state.cache, &cache_key) {
-        return Ok(res);
-    }
 
-    let cwd = cached_cwd();
-    let list: Vec<DatabaseResponse> = state
-        .databases
-        .list()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .into_iter()
-        .filter(|db| can_access_db(&user, db))
-        .map(|db| to_database_response(db, can_creds, cwd))
-        .collect();
-
-    cached_json_response(&state.cache, cache_key, &list, std::time::Duration::from_secs(4))
-        .map_err(|code| (code, "Serialization error".to_string()))
+    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(4), || async {
+        let state = state.clone();
+        let user = user.clone();
+        tokio::task::spawn_blocking(move || {
+            let cwd = cached_cwd();
+            let list: Vec<DatabaseResponse> = state
+                .databases
+                .list_with_secrets(can_creds)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .into_iter()
+                .filter(|db| can_access_db(&user, db))
+                .map(|db| to_database_response(db, can_creds, cwd))
+                .collect();
+            let json = serde_json::to_string(&list).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            Ok(axum::body::Bytes::from(json))
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    })
+    .await
+    .map_err(|code| (code, "Failed to list databases".to_string()))
 }
 
 pub(crate) async fn get_database_handler(

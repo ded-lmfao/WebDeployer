@@ -6,6 +6,49 @@ use std::time::Duration;
 use crate::projects::Project;
 use super::Runtime;
 
+#[cfg(windows)]
+mod win_pid {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut core::ffi::c_void;
+        fn WaitForSingleObject(hHandle: *mut core::ffi::c_void, dwMilliseconds: u32) -> u32;
+        fn GetExitCodeProcess(hProcess: *mut core::ffi::c_void, lpExitCode: *mut u32) -> i32;
+        fn CloseHandle(hObject: *mut core::ffi::c_void) -> i32;
+        fn GetLastError() -> u32;
+    }
+
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+    const STILL_ACTIVE: u32 = 259;
+    const ERROR_ACCESS_DENIED: u32 = 5;
+
+    pub fn is_alive(pid: u32) -> bool {
+        unsafe {
+            // SYNCHRONIZE allows WaitForSingleObject(..., 0) to detect signaled/exited processes cleanly
+            // without any ambiguity on exit code 259.
+            let h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if !h.is_null() {
+                let wait = WaitForSingleObject(h, 0);
+                CloseHandle(h);
+                return wait == WAIT_TIMEOUT;
+            }
+            if GetLastError() != ERROR_ACCESS_DENIED {
+                return false;
+            }
+            let h_limited = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if !h_limited.is_null() {
+                let mut code: u32 = 0;
+                let ok = GetExitCodeProcess(h_limited, &mut code);
+                CloseHandle(h_limited);
+                return ok != 0 && code == STILL_ACTIVE;
+            }
+            // ERROR_ACCESS_DENIED on both implies an elevated/protected live process exists.
+            GetLastError() == ERROR_ACCESS_DENIED
+        }
+    }
+}
+
 pub fn is_pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -14,7 +57,11 @@ pub fn is_pid_alive(pid: u32) -> bool {
     unsafe {
         libc::kill(pid as libc::pid_t, 0) == 0
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        win_pid::is_alive(pid)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(pid as usize)]), true);
@@ -376,6 +423,31 @@ impl Runtime {
 
         self.clear_container_pids(&container);
         !pids_to_kill.is_empty() || had_child
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_pid_alive;
+
+    #[test]
+    fn test_is_pid_alive_handles_zero_self_and_exited_child() {
+        assert!(!is_pid_alive(0));
+        assert!(is_pid_alive(std::process::id()));
+
+        #[cfg(windows)]
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "exit 0"])
+            .spawn()
+            .expect("spawn exit cmd");
+        #[cfg(not(windows))]
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        let child_pid = child.id();
+        let _ = child.wait();
+        assert!(!is_pid_alive(child_pid));
     }
 }
 

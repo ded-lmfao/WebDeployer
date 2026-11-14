@@ -8,4 +8,4 @@ tmp-*
 *.key
 .env
 .DS_Store
-
+*task*

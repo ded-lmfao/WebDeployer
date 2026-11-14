@@ -4,7 +4,7 @@
  */
 
 import { icon } from './icons.js';
-import { state, escapeHtml, DB_PIPELINE_STAGES, syncOverviewResourceStatus, formatRelativeTime } from './state.js';
+import { state, escapeHtml, DB_PIPELINE_STAGES, syncOverviewResourceStatus, formatRelativeTime, setHtmlIfChanged } from './state.js';
 import { api, toast } from './api.js';
 import { renderPipelineStages } from './deployments.js';
 import { consumePendingViewStagger, staggerElements } from './motion_ui.js';
@@ -153,7 +153,7 @@ export function renderDatabasesList() {
   });
 
   if (!filtered.length) {
-    container.innerHTML = `
+    setHtmlIfChanged(container, `
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-medium);">
         <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No databases found</p>
         <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">
@@ -161,11 +161,17 @@ export function renderDatabasesList() {
         </p>
         ${hasPower('databases_manage') ? '<button class="btn btn-primary" onclick="openCreateDatabaseModal()">Add New Database</button>' : ''}
       </div>
-    `;
+    `);
     return;
   }
 
-  container.innerHTML = filtered.map((d) => {
+  const resByDbId = new Map();
+  for (const r of (state.overview?.resources || [])) {
+    const did = r.databaseId ?? r.database_id;
+    if (did != null) resByDbId.set(did, r);
+  }
+
+  setHtmlIfChanged(container, filtered.map((d) => {
     const isRunning = d.status === 'running';
     const isStarting = d.status === 'starting';
     const isStopping = d.status === 'stopping';
@@ -205,7 +211,7 @@ export function renderDatabasesList() {
     const dbUser = d.dbUser || d.db_user || 'app_user';
     const hostOrDomain = d.domain ? d.domain : (d.host || '127.0.0.1');
     const psqlCmd = d.psqlCommand || d.psql_command || `psql -h ${hostOrDomain} -p ${d.port || 5432} -U ${dbUser} -d ${dbName}`;
-    const resItem = (state.overview?.resources || []).find((x) => (x.databaseId === d.id || x.database_id === d.id));
+    const resItem = resByDbId.get(d.id);
     const diskStr = d.diskFormatted || d.disk_formatted || resItem?.diskFormatted || resItem?.disk_formatted;
     const pidFromContainer = (d.containerId || d.container_id || '').startsWith('pid-')
       ? Number((d.containerId || d.container_id).slice(4))
@@ -270,7 +276,7 @@ export function renderDatabasesList() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join(''));
 
   if (consumePendingViewStagger('databases')) {
     staggerElements(container.querySelectorAll('.project-card'), { y: 12 });

@@ -10,6 +10,7 @@ import {
   showConfirmDialog,
   escapeHtml,
   invalidateClientCache,
+  setHtmlIfChanged,
 } from './state.js';
 import { api, toast } from './api.js';
 import {
@@ -160,31 +161,56 @@ export function stopPolling() {
   }
 }
 
+let _initAuthPromise = null;
+
 export async function initAuth() {
-  document.body.classList.remove('auth-verified');
-  const appEl = document.getElementById('app');
-  if (appEl) {
-    appEl.style.display = 'none';
-    appEl.setAttribute('aria-hidden', 'true');
-  }
+  if (_initAuthPromise) return _initAuthPromise;
+  _initAuthPromise = (async () => {
+    document.body.classList.remove('auth-verified');
+    const appEl = document.getElementById('app');
+    if (appEl) {
+      appEl.style.display = 'none';
+      appEl.setAttribute('aria-hidden', 'true');
+    }
+    try {
+      const me = await api('/api/auth/me', { noCache: true });
+      if (!me || !me.user || !me.csrf) {
+        showLogin();
+        return;
+      }
+      state.user = me.user;
+      state.csrf = me.csrf;
+      state.activeSessions = me.activeSessions || 1;
+      state.passkeyCount = me.passkeyCount || 0;
+      await onAuthenticated(false);
+    } catch {
+      const loginView = document.getElementById('login-view');
+      if (!loginView || loginView.style.display !== 'flex') {
+        showLogin();
+      }
+    }
+  })();
   try {
-    const me = await api('/api/auth/me', { noCache: true });
-    if (!me || !me.user || !me.csrf) {
-      showLogin();
-      return;
-    }
-    state.user = me.user;
-    state.csrf = me.csrf;
-    state.activeSessions = me.activeSessions || 1;
-    state.passkeyCount = me.passkeyCount || 0;
-    await onAuthenticated(false);
-  } catch {
-    const loginView = document.getElementById('login-view');
-    if (!loginView || loginView.style.display !== 'flex') {
-      showLogin();
-    }
+    return await _initAuthPromise;
+  } finally {
+    _initAuthPromise = null;
   }
 }
+
+const LOGOUT_CLEAR_CONTAINERS = [
+  'resource-breakdown-table',
+  'overview-deployments-list',
+  'projects-cards-container',
+  'services-cards-container',
+  'databases-cards-container',
+  'audit-table-body',
+  'deployments-history-body',
+  'releases-table-body',
+  'rollbacks-table-body',
+  'env-vars-table-body',
+  'monitor-projects-tbody',
+  'logs-terminal',
+];
 
 export function showLogin(skipIntro = false) {
   stopPolling();
@@ -194,10 +220,19 @@ export function showLogin(skipIntro = false) {
   state.csrf = null;
   state.pendingMfaToken = null;
   state.projects = [];
+  state.databases = [];
   state.overview = null;
+  state.auditLogs = [];
+  state.deployments = [];
+  state.releases = [];
   state.selectedProjectId = null;
+  state.selectedDatabaseId = null;
   state.currentView = 'overview';
   state.lastOverviewSig = null;
+  for (const id of LOGOUT_CLEAR_CONTAINERS) {
+    const el = document.getElementById(id);
+    if (el) setHtmlIfChanged(el, '');
+  }
   invalidateClientCache();
   try { sessionStorage.clear(); } catch (_) {}
 
