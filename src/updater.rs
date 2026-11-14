@@ -550,9 +550,10 @@ impl Updater {
             }
         }
 
-        // Keep local git origin synchronized on best-effort basis if running inside a git checkout
-        let git_url = format!("https://github.com/{}.git", slug);
+        // Keep local git origin synchronized on best-effort basis in live binaries (never mutate repo remote during tests)
+        #[cfg(not(test))]
         if Path::new(".git").exists() {
+            let git_url = format!("https://github.com/{}.git", slug);
             let set_out = Command::new("git")
                 .args(["remote", "set-url", "origin", &git_url])
                 .output();
