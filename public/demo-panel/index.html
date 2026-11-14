@@ -1,0 +1,3199 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b101d">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <title>WebDep — VPS Manager</title>
+  <link rel="icon" type="image/png" href="./favicon.png">
+  <link rel="icon" href="./favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="./logo.png">
+  <style>
+    /* Strict pre-auth gate: never render a single pixel of internal content until authentication & 2FA are finalized */
+    body:not(.auth-verified) #app,
+    body:not(.auth-verified) .modal-overlay {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+  </style>
+  <meta name="color-scheme" content="dark light">
+  <script>
+    try {
+      var savedTheme = localStorage.getItem('webdep.theme');
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    } catch (_) {}
+  </script>
+  <link rel="stylesheet" href="./style.css?v=3.27.0">
+  <link rel="modulepreload" href="./vendor/framer-motion/dom.js">
+  <link rel="modulepreload" href="./js/login_motion.js">
+  <link rel="modulepreload" href="./js/motion_ui.js">
+  <link rel="modulepreload" href="./js/icons.js">
+  <link rel="modulepreload" href="./js/state.js">
+  <link rel="modulepreload" href="./js/api.js">
+  <link rel="modulepreload" href="./js/themes.js">
+  <link rel="modulepreload" href="./js/auth.js">
+  <link rel="modulepreload" href="./js/workspace.js">
+</head>
+
+<body>
+
+  <!-- ======================== LOGIN VIEW ======================== -->
+  <div id="login-view" style="display: none;">
+    <!-- Minimalist Ambient Background -->
+    <div class="login-backdrop-minimal" aria-hidden="true">
+      <div class="login-glow-top"></div>
+      <div class="login-dot-grid"></div>
+    </div>
+
+    <!-- Pre-Login Framer Motion Splash: Pure Logo + Hello -> Welcome -> Login -->
+    <div class="login-intro" id="login-intro" aria-hidden="true">
+      <div class="login-intro-halo" id="login-intro-halo"></div>
+
+      <div class="login-intro-emblem" id="login-intro-emblem">
+        <div class="login-intro-logo" id="login-intro-logo">
+          <img src="./logo-mark.svg" alt="WebDep">
+        </div>
+      </div>
+
+      <div class="login-intro-stage" id="login-intro-stage">
+        <div class="login-greeting-beat login-greeting-hello" id="login-greeting-hello">
+          <h1 class="login-greeting-display">
+            <span>Hello</span><span class="login-greeting-accent">.</span>
+          </h1>
+        </div>
+
+        <div class="login-greeting-beat login-greeting-welcome" id="login-greeting-welcome">
+          <span class="login-greeting-eyebrow">Welcome to</span>
+          <h1 class="login-greeting-display">WebDep</h1>
+          <div class="login-greeting-sub">VPS Manager</div>
+        </div>
+      </div>
+
+      <div class="login-intro-progress" id="login-intro-progress" aria-hidden="true">
+        <div class="login-intro-progress-fill" id="login-intro-progress-fill"></div>
+      </div>
+
+      <button type="button" class="login-intro-skip" id="login-intro-skip" tabindex="-1">
+        Continue to Sign In &rarr;
+      </button>
+    </div>
+
+    <!-- Centered Minimalist Sign-In Card -->
+    <div class="login-card-container" id="login-card-container">
+      <div class="login-card">
+        <div class="login-card-header">
+          <div class="brand-icon"><img src="./logo-mark.svg" alt="WebDep"></div>
+          <div class="login-card-header-text">
+            <h2>WebDep</h2>
+            <p>Sign in to your VPS workspace</p>
+          </div>
+        </div>
+
+        <!-- Step 1: Standard Username/Password Form (Uncluttered) -->
+        <form id="login-form">
+          <div class="form-group">
+            <label class="form-label" for="login-username">Username</label>
+            <div class="input-with-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+              <input type="text" id="login-username" class="form-control" placeholder="admin" required
+                autocomplete="username webauthn">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div class="form-label-row">
+              <label class="form-label" for="login-password">Password</label>
+              <button type="button" class="btn-text-action" onclick="toggleLoginPasswordVisibility()"
+                id="toggle-pw-visibility">
+                Show
+              </button>
+            </div>
+            <div class="input-with-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <input type="password" id="login-password" class="form-control" placeholder="••••••••••••" required
+                autocomplete="current-password">
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-login-submit" id="login-btn">
+            <span>Sign In</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+
+          <!-- Minimalist Passkey Option -->
+          <div id="login-passkey-wrap" class="login-passkey-wrap">
+            <div class="login-divider">
+              <span>or</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-passkey-sleek" id="login-passkey-btn"
+              onclick="loginWithPasskey()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
+                <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
+                <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" />
+                <path d="M2 12a10 10 0 0 1 18-6" />
+                <path d="M2 16h.01" />
+                <path d="M21.8 16c.2-2 .131-5.354 0-6" />
+                <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" />
+                <path d="M8.65 22c.21-.66.45-1.32.57-2" />
+                <path d="M9 6.8a6 6 0 0 1 9 5.2v2" />
+              </svg>
+              <span>Sign in with Passkey</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Step 2: Two-Factor Authentication Challenge -->
+        <form id="login-2fa-form" style="display: none;">
+          <div class="login-2fa-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <div>
+              Signing in as <strong id="login-2fa-username">admin</strong>.<br>
+              <span>Enter the 6-digit code from your authenticator app or recovery code.</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="login-2fa-code">Authenticator or Recovery Code</label>
+            <input type="text" id="login-2fa-code" class="form-control login-2fa-input"
+              placeholder="123456 or ABCD-1234" required autocomplete="one-time-code">
+          </div>
+          <button type="submit" class="btn btn-primary btn-login-submit" id="login-2fa-btn">
+            <span>Verify &amp; Sign In</span>
+          </button>
+          <button type="button" class="btn-text-back" id="login-2fa-back-btn">
+            &larr; Back to sign-in
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== MAIN APP SHELL ======================== -->
+  <div id="app" style="display: none;" aria-hidden="true">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon"><img src="./logo.png" alt="WebDep"></div>
+        <div class="brand-name">
+          WebDep
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <div class="nav-section-title">Platform</div>
+        <a class="nav-item active" data-view="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          <span>Overview</span>
+        </a>
+        <a class="nav-item" data-view="projects">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span>Websites</span>
+          <span class="nav-badge" id="badge-projects-count">0</span>
+        </a>
+        <a class="nav-item" data-view="services">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+            <line x1="9" y1="1" x2="9" y2="4"></line>
+            <line x1="15" y1="1" x2="15" y2="4"></line>
+            <line x1="9" y1="20" x2="9" y2="23"></line>
+            <line x1="15" y1="20" x2="15" y2="23"></line>
+            <line x1="20" y1="9" x2="23" y2="9"></line>
+            <line x1="20" y1="14" x2="23" y2="14"></line>
+            <line x1="1" y1="9" x2="4" y2="9"></line>
+            <line x1="1" y1="14" x2="4" y2="14"></line>
+          </svg>
+          <span>Services</span>
+          <span class="nav-badge" id="badge-services-count">0</span>
+        </a>
+        <a class="nav-item" data-view="databases">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+          <span>Databases</span>
+          <span class="nav-badge" id="badge-databases-count">0</span>
+        </a>
+
+        <div class="nav-section-title">Administration</div>
+        <a class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+          </svg>
+          <span>Platform Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer" style="flex-direction: column; align-items: stretch; gap: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div class="user-snippet" id="user-profile-snippet" style="cursor: pointer;"
+            title="Open Account Security (Password & 2FA)">
+            <div class="user-avatar" id="current-user-avatar">AD</div>
+            <div class="user-info">
+              <span class="user-name" id="current-user-name">Admin</span>
+              <span class="user-role" id="current-user-role">admin</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-secondary btn-sm" id="logout-btn" title="Sign Out">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div
+          style="text-align: center; font-size: 11px; color: var(--text-dim); padding-top: 8px; border-top: 1px solid var(--border-subtle);">
+          Built by <strong style="color: var(--text-muted); font-weight: 500;">Just nixx</strong>
+        </div>
+      </div>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <!-- MAIN WRAPPER -->
+    <div class="main-wrapper">
+
+      <!-- TOP HEADER -->
+      <header class="top-header">
+        <div class="header-left">
+          <button class="mobile-menu-btn" id="mobile-sidebar-toggle" aria-label="Toggle navigation">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <nav class="breadcrumbs" id="top-breadcrumbs" aria-label="Breadcrumbs">
+            <span class="crumb-section" id="breadcrumb-section">Overview</span>
+          </nav>
+        </div>
+
+        <div class="header-right">
+          <div class="server-pill">
+            <span class="status-dot online" id="server-status-dot"></span>
+            <span id="server-status-text">Server Online</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- CONTENT AREA -->
+      <main class="content-area">
+
+        <!-- DEDICATED INSIDE-CARD WEBSITE WORKSPACE HEADER & TABS -->
+        <div id="website-workspace-banner" class="ws-banner" style="display: none;">
+          <div class="ws-banner-header">
+            <div class="ws-banner-identity">
+              <nav class="ws-breadcrumbs">
+                <a class="ws-back-crumb" onclick="navigateTo('projects')" title="Back to Hosted Websites">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                  <span>Websites</span>
+                </a>
+                <span class="ws-crumb-sep">/</span>
+                <span class="ws-crumb-current" id="ws-breadcrumb-slug">Website</span>
+              </nav>
+
+              <div class="ws-title-row">
+                <span class="status-dot offline" id="ws-status-dot"></span>
+                <h1 id="ws-project-title" class="ws-title">Website</h1>
+                <span class="badge badge-neutral" id="ws-status-badge">Stopped</span>
+              </div>
+
+              <!-- Refined, clean single-line metadata (No bulky clunky boxes) -->
+              <div id="ws-project-links" class="ws-meta-line"></div>
+            </div>
+
+            <!-- Grouped, prioritized action buttons -->
+            <div id="ws-project-actions" class="ws-actions-toolbar"></div>
+          </div>
+
+          <!-- Sleek Underline Navigation Tabs -->
+          <div id="ws-tabs-bar" class="ws-tabs-bar">
+            <button class="ws-tab-item" data-ws-tab="deployments" onclick="switchWebsiteTab('deployments')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polyline points="13 2 13 9 20 9"></polyline>
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+              </svg>
+              <span id="ws-tab-deployments-label">Overview</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="github" onclick="switchWebsiteTab('github')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="18" r="3"></circle>
+                <circle cx="6" cy="6" r="3"></circle>
+                <circle cx="18" cy="6" r="3"></circle>
+                <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path>
+                <path d="M12 12v3"></path>
+              </svg>
+              <span>Commits</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="logs" onclick="switchWebsiteTab('logs')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+              <span>Logs</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="files" onclick="switchWebsiteTab('files')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>Files</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="env" onclick="switchWebsiteTab('env')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 2l-2 2m-6 6l7 7a2 2 0 0 1-2.83 2.83l-7-7m-6-6L2 8l4 4 4-4-2-2z"></path>
+              </svg>
+              <span>Environment</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="releases" onclick="switchWebsiteTab('releases')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+              </svg>
+              <span>Releases</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="rollbacks" onclick="switchWebsiteTab('rollbacks')"
+              style="display: none;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              </svg>
+              <span>Rollbacks</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="monitor" onclick="switchWebsiteTab('monitor')"
+              style="display: none;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+              </svg>
+              <span>Monitoring</span>
+            </button>
+            <button class="ws-tab-item" data-ws-tab="audit" onclick="switchWebsiteTab('audit')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+              <span>Activity</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ==================== 1. OVERVIEW VIEW ==================== -->
+        <section id="view-overview" class="view-section active">
+          <!-- Compact Quick Stats Strip -->
+          <div class="stats-grid overview-stats-grid">
+            <div class="stat-card stat-card-network" id="overview-card-network">
+              <div class="overview-net-head">
+                <div class="stat-label" style="justify-content: flex-start; gap: 6px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  Global Network
+                </div>
+                <div class="app-net-legend">
+                  <span class="app-net-pill net-in" title="Whole VPS inbound throughput">
+                    <span class="app-net-dot"></span>In <strong id="overview-net-in-val">0 B/s</strong>
+                  </span>
+                  <span class="app-net-pill net-out" title="Whole VPS outbound throughput">
+                    <span class="app-net-dot"></span>Out <strong id="overview-net-out-val">0 B/s</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="app-usage-net-chart overview-net-chart" id="overview-net-chart"></div>
+              <div class="stat-meta overview-net-footer">
+                <span id="overview-net-iface">Whole VPS &bull; -- NICs</span>
+                <span id="overview-net-totals" class="app-net-totals">&#8595; 0 B &nbsp;&#8593; 0 B</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">CPU</div>
+              <div class="stat-value" id="stat-cpu-pct">0%</div>
+              <div class="progress-bar">
+                <div class="progress-fill green" id="stat-cpu-bar" style="width: 0%;"></div>
+              </div>
+              <div class="stat-meta" id="stat-cpu-meta">-- Cores</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">RAM</div>
+              <div class="stat-value" id="stat-mem-pct">0%</div>
+              <div class="progress-bar">
+                <div class="progress-fill green" id="stat-mem-bar" style="width: 0%;"></div>
+              </div>
+              <div class="stat-meta" id="stat-mem-meta">-- used</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Disk Free</div>
+              <div class="stat-value" id="stat-disk-free">-- GB</div>
+              <div class="progress-bar">
+                <div class="progress-fill green" id="stat-disk-bar" style="width: 0%;"></div>
+              </div>
+              <div class="stat-meta" id="stat-disk-meta">-- total</div>
+            </div>
+          </div>
+
+          <!-- Active Deployment Pipeline (Only visible when a deployment is active) -->
+          <div id="overview-active-deployment-box" style="display: none;" class="card">
+            <div class="card-header">
+              <span class="card-title">
+                <span class="status-dot building"></span>
+                Deploying: <strong id="active-dep-project-name">--</strong>
+              </span>
+              <span class="badge badge-warning" id="active-dep-kind">Deploy</span>
+            </div>
+            <div class="card-body">
+              <div class="pipeline-track" id="overview-pipeline-track">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Resource Consumption & Telemetry Breakdown -->
+          <div class="card resource-breakdown-card">
+            <div class="card-header"
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="card-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span class="status-dot online"></span>
+                  Active Resource Consumption
+                </span>
+                <span class="badge badge-neutral" id="res-workloads-count-badge">0 workloads</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="filter-pills" id="resource-filter-pills">
+                  <button class="pill active" data-res-filter="all" onclick="filterResourceBreakdown('all')">All
+                    Workloads</button>
+                  <button class="pill" data-res-filter="website"
+                    onclick="filterResourceBreakdown('website')">Websites</button>
+                  <button class="pill" data-res-filter="service"
+                    onclick="filterResourceBreakdown('service')">Services</button>
+                  <button class="pill" data-res-filter="database"
+                    onclick="filterResourceBreakdown('database')">Databases</button>
+                  <button class="pill" data-res-filter="panel" onclick="filterResourceBreakdown('panel')">Panel</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Resource Usage Strip -->
+            <div class="resource-summary-bar">
+              <div class="res-summary-item">
+                <span class="res-summary-label">WebDep Engine (Daemon)</span>
+                <span class="res-summary-val" id="res-panel-usage">-- MB &bull; 0% CPU</span>
+              </div>
+              <div class="res-summary-item">
+                <span class="res-summary-label">Managed Workloads</span>
+                <span class="res-summary-val" id="res-workloads-usage">-- MB &bull;
+                  0% CPU</span>
+              </div>
+              <div class="res-summary-item">
+                <span class="res-summary-label">System / OS Overhead</span>
+                <span class="res-summary-val" id="res-system-usage">-- MB</span>
+              </div>
+              <div class="res-summary-item">
+                <span class="res-summary-label">Available VPS Memory</span>
+                <span class="res-summary-val" id="res-free-memory">-- MB free</span>
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-resource-breakdown">
+                  <thead>
+                    <tr>
+                      <th>Workload</th>
+                      <th>Type</th>
+                      <th>Port / PID</th>
+                      <th>Status</th>
+                      <th style="min-width: 130px;">CPU usage</th>
+                      <th style="min-width: 170px;">Memory (RAM)</th>
+                      <th style="min-width: 160px;">Disk space</th>
+                      <th style="text-align: right;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="resource-breakdown-table">
+                    <tr>
+                      <td colspan="8" style="text-align: center; padding: 24px; color: var(--text-dim);">
+                        Aggregating resource metrics
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 2. WEBSITES (PROJECTS) VIEW ==================== -->
+        <section id="view-projects" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Hosted Websites</h1>
+              <p>Manage independent multi-project web applications, domains, and processes</p>
+            </div>
+            <div class="view-actions">
+              <div class="filter-pills" id="projects-status-filters">
+                <button class="pill active" data-filter="all">All (<span id="filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span id="filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span id="filter-count-stopped">0</span>)</button>
+              </div>
+              <input type="text" id="projects-search-input" class="form-control"
+                placeholder="Search websites or domains" style="width: 220px;"
+                aria-label="Search websites or domains">
+              <button class="btn btn-primary" id="add-website-header-btn" onclick="openAddWebsiteModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Website</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="projects-grid" id="projects-cards-container">
+            <!-- Dynamic cards injected via JS -->
+          </div>
+        </section>
+
+        <!-- ==================== BACKEND SERVICES VIEW ==================== -->
+        <section id="view-services" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Backend Services</h1>
+              <p>Run 24/7 background daemons, audio servers, queue workers, and scripts</p>
+            </div>
+            <div class="view-actions">
+              <div class="filter-pills" id="services-status-filters">
+                <button class="pill active" data-filter="all">All (<span
+                    id="services-filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span
+                    id="services-filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span
+                    id="services-filter-count-stopped">0</span>)</button>
+              </div>
+              <input type="text" id="services-search-input" class="form-control"
+                placeholder="Search backend services" style="width: 220px;" aria-label="Search backend services">
+              <button class="btn btn-primary" id="add-service-header-btn" onclick="openAddServiceModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Service</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="projects-grid" id="services-cards-container">
+            <!-- Dynamic service cards injected via JS -->
+          </div>
+        </section>
+
+        <!-- ==================== DATABASES VIEW ==================== -->
+        <section id="view-databases" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Managed Databases</h1>
+              <p>Deploy isolated PostgreSQL instances, manage remote IP allowlists, and inject credentials into hosted
+                websites</p>
+            </div>
+            <div class="view-actions">
+              <div class="filter-pills" id="databases-status-filters">
+                <button class="pill active" data-filter="all">All (<span
+                    id="databases-filter-count-all">0</span>)</button>
+                <button class="pill" data-filter="running">Running (<span
+                    id="databases-filter-count-running">0</span>)</button>
+                <button class="pill" data-filter="stopped">Stopped (<span
+                    id="databases-filter-count-stopped">0</span>)</button>
+              </div>
+              <input type="text" id="databases-search-input" class="form-control" placeholder="Search databases"
+                style="width: 220px;" aria-label="Search databases">
+              <button class="btn btn-primary" id="add-database-header-btn" onclick="openCreateDatabaseModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Database</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="projects-grid" id="databases-cards-container">
+            <!-- Dynamic database cards injected via JS -->
+          </div>
+        </section>
+
+        <!-- ==================== 3. GITHUB VIEW ==================== -->
+        <section id="view-github" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>GitHub Integration</h1>
+              <p>Remote repository synchronization, webhooks, and commit history</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary btn-sm" id="github-fetch-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                <span>Fetch Updates</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Recent Commits</span>
+              <span class="badge badge-neutral" id="github-branch-badge">main</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-commits">
+                  <thead>
+                    <tr>
+                      <th>Commit</th>
+                      <th>Message</th>
+                      <th>Author</th>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="github-commits-table">
+                    <tr>
+                      <td colspan="6" style="text-align: center; padding: 24px;">Select a project or fetch updates to
+                        load commits.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar" id="github-commits-pagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 4. DEPLOYMENTS VIEW ==================== -->
+        <!-- ==================== 4. APP OVERVIEW VIEW ==================== -->
+        <section id="view-deployments" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1 id="deployments-view-title">Overview</h1>
+              <p id="deployments-view-desc">Live resource usage, pipeline status, and last 5 deployment records</p>
+            </div>
+          </div>
+
+          <!-- 4 App Resource Usage Cards (CPU, RAM, Network Line Graph, Disk) -->
+          <div class="app-usage-grid" id="app-usage-cards-grid">
+            <!-- CPU Card -->
+            <div class="card app-usage-card" id="usage-card-cpu">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                    <rect x="9" y="9" width="6" height="6"></rect>
+                    <line x1="9" y1="1" x2="9" y2="4"></line>
+                    <line x1="15" y1="1" x2="15" y2="4"></line>
+                    <line x1="9" y1="20" x2="9" y2="23"></line>
+                    <line x1="15" y1="20" x2="15" y2="23"></line>
+                    <line x1="20" y1="9" x2="23" y2="9"></line>
+                    <line x1="20" y1="14" x2="23" y2="14"></line>
+                    <line x1="1" y1="9" x2="4" y2="9"></line>
+                    <line x1="1" y1="14" x2="4" y2="14"></line>
+                  </svg>
+                  CPU Usage
+                </span>
+                <span class="badge badge-neutral" id="usage-cpu-badge">Idle</span>
+              </div>
+              <div class="app-usage-value" id="usage-cpu-val">0.0%</div>
+              <div class="app-usage-meter">
+                <div class="app-usage-meter-fill" id="usage-cpu-bar" style="width: 0%;"></div>
+              </div>
+              <div class="app-usage-sub" id="usage-cpu-sub">Checking process metrics</div>
+            </div>
+
+            <!-- RAM Card -->
+            <div class="card app-usage-card" id="usage-card-ram">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M6 19v-8a6 6 0 0 1 12 0v8"></path>
+                    <rect x="2" y="11" width="20" height="8" rx="2"></rect>
+                    <line x1="6" y1="19" x2="6" y2="22"></line>
+                    <line x1="10" y1="19" x2="10" y2="22"></line>
+                    <line x1="14" y1="19" x2="14" y2="22"></line>
+                    <line x1="18" y1="19" x2="18" y2="22"></line>
+                  </svg>
+                  RAM Usage
+                </span>
+                <span class="badge badge-neutral" id="usage-ram-badge">0%</span>
+              </div>
+              <div class="app-usage-value" id="usage-ram-val">0 B</div>
+              <div class="app-usage-meter">
+                <div class="app-usage-meter-fill" id="usage-ram-bar" style="width: 0%;"></div>
+              </div>
+              <div class="app-usage-sub" id="usage-ram-sub">Resident process memory</div>
+            </div>
+
+            <!-- Network Card (Inbound / Outbound Line Graph) -->
+            <div class="card app-usage-card app-usage-card-network" id="usage-card-network">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  Network
+                </span>
+                <div class="app-net-legend">
+                  <span class="app-net-pill net-in" title="Inbound throughput">
+                    <span class="app-net-dot"></span>In <strong id="usage-net-in-val">0 B/s</strong>
+                  </span>
+                  <span class="app-net-pill net-out" title="Outbound throughput">
+                    <span class="app-net-dot"></span>Out <strong id="usage-net-out-val">0 B/s</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="app-usage-net-chart" id="usage-net-chart"></div>
+              <div class="app-usage-sub app-net-footer">
+                <span id="usage-net-iface"></span>
+                <span id="usage-net-totals" class="app-net-totals">↓ 0 B ↑ 0 B</span>
+              </div>
+            </div>
+
+            <!-- Disk Card -->
+            <div class="card app-usage-card" id="usage-card-disk">
+              <div class="app-usage-card-top">
+                <span class="app-usage-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                  </svg>
+                  Disk Usage
+                </span>
+                <span class="badge badge-neutral" id="usage-disk-badge">0%</span>
+              </div>
+              <div class="app-usage-value" id="usage-disk-val">0 B</div>
+              <div class="app-usage-meter">
+                <div class="app-usage-meter-fill" id="usage-disk-bar" style="width: 0%;"></div>
+              </div>
+              <div class="app-usage-sub" id="usage-disk-sub">App workspace &amp; releases</div>
+            </div>
+          </div>
+
+          <!-- Visual Stage Progression Container -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Pipeline Stages</span>
+              <span class="badge badge-neutral" id="pipeline-status-badge">Idle</span>
+            </div>
+            <div class="card-body">
+              <div class="pipeline-track" id="main-pipeline-track">
+                <!-- Rendered dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Deployments History Table -->
+          <div class="card deployments-records-card" id="deployments-records-card">
+            <div class="card-header deployments-records-header">
+              <div class="deployments-records-title-group">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span class="card-title">Deployment Records</span>
+              </div>
+              <div class="deployments-records-meta">
+                <span class="badge badge-neutral deployments-retention-badge" id="deployments-count-badge">0 / 5
+                  kept</span>
+              </div>
+            </div>
+            <div class="card-body deployments-records-body">
+              <div class="table-responsive deployments-table-wrap">
+                <table class="table tbl-deployments">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Kind</th>
+                      <th>Commit</th>
+                      <th>Duration</th>
+                      <th>Status</th>
+                      <th>Timestamp</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deployments-table-body">
+                    <tr>
+                      <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-dim);">Loading
+                        deployments</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar" id="deployments-pagination"></div>
+            </div>
+          </div>
+
+          <!-- Database Connection & Cluster Overview (visible inside Database workspace Overview) -->
+          <div class="card" id="db-overview-details-card" style="display: none;">
+            <div class="card-header">
+              <span class="card-title">PostgreSQL Cluster &amp; Endpoint</span>
+              <span class="badge badge-neutral" id="db-overview-access-badge">Localhost only</span>
+            </div>
+            <div class="card-body" id="db-overview-details-body"></div>
+          </div>
+        </section>
+
+        <!-- ==================== 5. RELEASES VIEW ==================== -->
+        <section id="view-releases" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Release Retention History</h1>
+              <p>Immutable releases, build artifacts, and instant rollback targets</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="create-release-btn" onclick="openCreateReleaseModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" width="16" height="16" stroke-width="1.5">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 8 8 12 12 16"></polyline>
+                  <line x1="16" y1="12" x2="8" y2="12"></line>
+                </svg>
+                <span>Create Release</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Retained Releases</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-releases">
+                  <thead>
+                    <tr>
+                      <th>Release ID</th>
+                      <th>Commit</th>
+                      <th>Message</th>
+                      <th>Author</th>
+                      <th>Deployed at</th>
+                      <th>Build status</th>
+                      <th>Health check</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="releases-table-body">
+                    <tr>
+                      <td colspan="9" style="text-align: center; padding: 24px;">Select a project to view releases.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar" id="releases-pagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 6. ROLLBACKS VIEW ==================== -->
+        <section id="view-rollbacks" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Release Rollback</h1>
+              <p>Restore verified releases with automated health checks</p>
+            </div>
+          </div>
+
+          <div class="card" style="border-left: 3px solid var(--accent);">
+            <div class="card-body"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+              <div>
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 4px;">Live release</h3>
+                <p style="color: var(--text-muted);" id="rollback-live-info">Checking live release</p>
+              </div>
+              <div id="rollback-live-badge-container">
+                <span class="badge badge-success">Live</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Restore points (retained releases)</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-rollbacks">
+                  <thead>
+                    <tr>
+                      <th>Release ID</th>
+                      <th>Commit</th>
+                      <th>Message</th>
+                      <th>Author</th>
+                      <th>Deployment date</th>
+                      <th>Safety check</th>
+                      <th>Rollback action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rollbacks-table-body">
+                    <tr>
+                      <td colspan="7" style="text-align: center; padding: 24px;">Select a project to inspect available
+                        rollback releases.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar" id="rollbacks-pagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 7. LIVE LOGS VIEW ==================== -->
+        <section id="view-logs" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1 id="logs-view-title">App Logs</h1>
+              <p id="logs-view-desc">Live application console output (stdout &amp; stderr)</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-secondary btn-sm" id="logs-copy-btn" title="Copy all logs to clipboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy Logs</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="logs-download-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Download</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="log-console-wrapper">
+            <div class="log-toolbar">
+              <div class="log-filters">
+                <select id="log-level-filter" class="form-control"
+                  style="width: 112px; height: 28px; padding: 4px 8px; font-size: 12px;" aria-label="Filter logs by level">
+                  <option value="">All Levels</option>
+                  <option value="info">Info</option>
+                  <option value="warn">Warn</option>
+                  <option value="error">Error</option>
+                </select>
+                <input type="text" id="log-search-input" class="form-control" placeholder="Search log lines"
+                  style="width: 180px; height: 28px; padding: 4px 8px; font-size: 12px;" aria-label="Search log lines">
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <label
+                  style="font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="log-autoscroll" checked>
+                  Auto-scroll
+                </label>
+                <button class="btn btn-secondary btn-sm" id="log-clear-btn">Clear</button>
+              </div>
+            </div>
+            <div class="log-terminal" id="log-terminal-output">
+              <div class="log-line log-empty-placeholder"><span class="log-ts">--:--:--</span><span
+                  class="log-lvl-info">Connecting to app log stream</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 8. ENVIRONMENT VARIABLES VIEW ==================== -->
+        <!-- ==================== SERVICE & WORKLOAD FILE SYSTEM VIEW ==================== -->
+        <section id="view-files" class="view-section">
+          <div class="view-header" style="margin-bottom: 16px;">
+            <div class="view-title-group">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <div
+                  style="width: 36px; height: 36px; border-radius: 8px; background: rgba(238, 241, 247, 0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h1 style="font-size: 20px; font-weight: 600; margin: 0;" id="files-view-title">Files &amp; Storage
+                  </h1>
+                  <p style="font-size: 12.5px; color: var(--text-muted); margin: 2px 0 0 0;">Inspect, edit, upload, and
+                    manage application files and configuration</p>
+                </div>
+              </div>
+            </div>
+            <div class="view-actions" id="files-header-actions"
+              style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <input type="file" id="service-file-upload-input" multiple style="display: none;"
+                onchange="handleFilesUpload(event)" aria-label="Upload files to service directory">
+              <input type="file" id="service-folder-upload-input" webkitdirectory directory multiple
+                style="display: none;" onchange="handleFilesUpload(event)"
+                aria-label="Upload directory to service directory">
+
+              <button class="btn btn-primary btn-sm files-write-only"
+                onclick="document.getElementById('service-file-upload-input').click()"
+                title="Upload files (.jar, .py, configs, assets) directly into this directory">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"
+                  style="margin-right: 4px; vertical-align: -2px;">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload File(s)
+              </button>
+
+              <button class="btn btn-secondary btn-sm files-write-only"
+                onclick="document.getElementById('service-folder-upload-input').click()"
+                title="Upload an entire directory folder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"
+                  style="margin-right: 4px; vertical-align: -2px;">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  <line x1="12" y1="11" x2="12" y2="17"></line>
+                  <line x1="9" y1="14" x2="15" y2="14"></line>
+                </svg>
+                Upload Folder
+              </button>
+
+              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFile()"
+                title="Create a new blank file in this folder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"
+                  style="margin-right: 4px; vertical-align: -2px;">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="12" y1="18" x2="12" y2="12"></line>
+                  <line x1="9" y1="15" x2="15" y2="15"></line>
+                </svg>
+                + New File
+              </button>
+
+              <button class="btn btn-secondary btn-sm files-write-only" onclick="filesNewFolder()"
+                title="Create a new subfolder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"
+                  style="margin-right: 4px; vertical-align: -2px;">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  <line x1="12" y1="11" x2="12" y2="17"></line>
+                </svg>
+                + New Folder
+              </button>
+
+              <button class="btn btn-secondary btn-sm" id="files-refresh-btn" onclick="loadFilesView()"
+                title="Refresh file directory">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"
+                  style="vertical-align: -2px;">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Main Unified File Explorer & In-Browser IDE Surface (1 Box, Dual Mode) -->
+          <div class="card file-explorer-card" id="file-explorer-dropzone"
+            style="padding: 0; overflow: hidden; position: relative;">
+            <!-- Drop overlay when dragging files from desktop -->
+            <div id="file-drop-overlay" class="file-drop-overlay" style="display: none;">
+              <div class="file-drop-overlay-box">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)"
+                  stroke-width="1.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <div style="font-size: 15px; font-weight: 600; margin-top: 10px; color: var(--text-main);">Drop files to
+                  upload</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="file-drop-path-label">
+                  Uploading to current folder</div>
+              </div>
+            </div>
+
+            <!-- View 1: File Browser & Directory Table -->
+            <div id="files-browser-view">
+              <!-- Breadcrumb Navigation & Filter Toolbar -->
+              <div class="file-explorer-bar"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                  <button class="btn btn-secondary btn-sm" id="files-up-btn" onclick="filesGoUp()"
+                    title="Go to parent directory" style="display: none; padding: 4px 8px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.5">
+                      <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                    <span style="font-size: 11.5px; margin-left: 2px;">Up</span>
+                  </button>
+                  <div id="files-breadcrumb" class="file-breadcrumb-trail"></div>
+                  <button class="file-copy-path-btn" onclick="filesCopyCurrentPath()"
+                    title="Copy current folder path to clipboard">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div class="file-search-input-wrap">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                      class="file-search-icon">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="files-filter-input" placeholder="Filter files" aria-label="Filter files"
+                      class="file-filter-input" oninput="filesFilterList(this.value)">
+                    <button type="button" id="files-filter-clear" class="file-filter-clear" onclick="filesClearFilter()"
+                      style="display: none;">&times;</button>
+                  </div>
+                  <span id="files-count-badge" class="badge badge-neutral"
+                    style="font-size: 11px; font-family: var(--font-mono); font-weight: 500;">
+                    0 items
+                  </span>
+                </div>
+              </div>
+
+              <!-- Structured File Explorer Table -->
+              <div id="files-table-container" class="file-table-container" style="overflow-x: auto;">
+                <table class="file-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                  <thead>
+                    <tr
+                      style="border-bottom: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-dim); background: rgba(238, 241, 247, 0.02);">
+                      <th style="padding: 12px 16px; font-weight: 500; width: 46%;">Name</th>
+                      <th style="padding: 12px 16px; font-weight: 500; width: 14%;">Size</th>
+                      <th style="padding: 12px 16px; font-weight: 500; width: 22%;">Modified</th>
+                      <th style="padding: 12px 16px; font-weight: 500; width: 18%; text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="files-list-body">
+                    <!-- Populated by renderFilesTable() in files.js -->
+                  </tbody>
+                </table>
+                <div id="files-empty-state" style="display: none; padding: 48px 20px; text-align: center;">
+                  <!-- Populated when directory has no matching items -->
+                </div>
+              </div>
+            </div>
+
+            <!-- View 2: In-Browser Code / Config Editor (Unified in Same Box) -->
+            <div class="file-editor-card" id="files-editor-card"
+              style="display: none; padding: 0; overflow: hidden; border: none; border-radius: 0; background: var(--bg-terminal);">
+              <div class="file-editor-header"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <button class="btn btn-secondary btn-sm" onclick="filesCloseEditor()" title="Back to files list"
+                    style="padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; font-weight: 500;">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="19" y1="12" x2="5" y2="12"></line>
+                      <polyline points="12 19 5 12 12 5"></polyline>
+                    </svg>
+                    <span>Back</span>
+                  </button>
+                  <div class="file-editor-tab-pill">
+                    <span id="files-editor-icon" style="display: inline-flex; align-items: center;"></span>
+                    <span id="files-editor-name"
+                      style="font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;"></span>
+                    <span id="files-editor-dirty-badge" class="file-editor-dirty-indicator" style="display: none;"
+                      title="Unsaved changes"></span>
+                  </div>
+                  <span id="files-editor-meta"
+                    style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);"></span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span class="file-editor-kbd hide-mobile" title="Press Ctrl+S to save">Ctrl+S</span>
+                  <button class="btn btn-secondary btn-sm" id="files-download-current-btn"
+                    onclick="filesDownloadCurrent()" title="Download file to computer">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" x2="12" y1="15" y2="3" />
+                    </svg>
+                    <span>Download</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm hide-mobile" id="files-fullscreen-btn"
+                    onclick="filesToggleFullscreen()" title="Toggle full-height workspace">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M15 3h6v6" />
+                      <path d="M10 14 21 3" />
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    </svg>
+                    <span>Fullscreen</span>
+                  </button>
+                  <button class="btn btn-primary btn-sm" id="files-save-btn" onclick="filesSaveCurrent(true)"
+                    title="Save changes and return to files (Ctrl+S)">
+                    <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    <span>Save</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Synchronized Editor Pane with line gutter and syntax overlay -->
+              <div class="file-editor-body" id="files-editor-body">
+                <div id="files-editor-gutter" class="file-editor-gutter" style="white-space: pre;">1</div>
+                <div class="file-editor-stage" id="files-editor-stage">
+                  <pre id="files-editor-pre" class="file-editor-pre"
+                    aria-hidden="true"><code id="files-editor-code" class="file-editor-code"></code></pre>
+                  <textarea id="files-editor" class="file-editor-textarea" aria-label="File content editor"
+                    spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+                </div>
+              </div>
+
+              <!-- Editor Status Footer -->
+              <div class="file-editor-footer">
+                <div style="display: flex; gap: 16px; align-items: center;">
+                  <span id="files-editor-pos">Ln 1, Col 1</span>
+                  <span id="files-editor-lines">1 lines</span>
+                  <span id="files-editor-size">0 KB</span>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                  <span id="files-editor-lang-badge" class="file-editor-lang-badge">Code</span>
+                  <span>UTF-8</span>
+                  <span>Spaces: 2</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-env" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Environment Variables &amp; Secrets</h1>
+              <p>Add, edit a single variable inline, edit multiple variables at once, or manage as a raw
+                <code>.env</code> file. Encrypted with AES-256-GCM.
+              </p>
+            </div>
+            <div class="view-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="file" id="env-file-upload-input" accept=".env,text/plain" style="display: none;"
+                onchange="handleEnvFileUpload(event)" aria-label="Upload .env file">
+              <button class="btn btn-secondary btn-sm"
+                onclick="document.getElementById('env-file-upload-input').click()"
+                title="Upload a .env file from your computer">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span>Import .env</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="export-env-btn" onclick="exportEnvFile()"
+                title="Download variables as .env file">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Export .env</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="env-restart-app-btn" onclick="restartCurrentProject()"
+                title="Restart application container to apply latest variables">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"></path>
+                </svg>
+                <span>Restart App to Apply</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Inline Quick-Add Single Variable Bar -->
+          <div class="card env-quick-add-card" id="env-quick-add-card">
+            <form id="env-inline-add-form" class="env-quick-add-bar" autocomplete="off"
+              onsubmit="handleInlineQuickAddEnv(event); return false;">
+              <div class="env-quick-field env-quick-key">
+                <label class="env-quick-label" for="env-quick-key-input">Key</label>
+                <input type="text" id="env-quick-key-input" class="form-control env-mono-input"
+                  placeholder="e.g. API_SECRET (or paste KEY=VALUE)" autocomplete="off">
+              </div>
+              <div class="env-quick-field env-quick-val">
+                <label class="env-quick-label" for="env-quick-val-input">Value</label>
+                <input type="text" id="env-quick-val-input" class="form-control env-mono-input"
+                  placeholder="e.g. your-secret-value" autocomplete="off">
+              </div>
+              <div class="env-quick-field env-quick-type">
+                <span class="env-quick-label">Visibility</span>
+                <button type="button" id="env-quick-secret-toggle" class="env-visibility-btn is-secret"
+                  onclick="toggleQuickAddSecret()" title="Click to toggle between Masked Secret and Public Plaintext">
+                  <span id="env-quick-secret-label">Secret (Masked)</span>
+                </button>
+              </div>
+              <div class="env-quick-field env-quick-submit">
+                <span class="env-quick-label">&nbsp;</span>
+                <button type="submit" class="btn btn-primary" id="env-quick-add-btn">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                  <span>Add Variable</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <!-- Mode Switcher: Key-Value Table vs Multi-Edit All vs Raw .env Text Editor -->
+                <div class="filter-pills" id="env-editor-mode-pills">
+                  <button type="button" class="pill active" id="env-pill-list" onclick="setEnvViewMode('list')">
+                    Key-Value List (<span id="env-count-badge">0</span>)
+                  </button>
+                  <button type="button" class="pill" id="env-pill-multi" onclick="setEnvViewMode('multi')">
+                    Edit Multiple (Table)
+                  </button>
+                  <button type="button" class="pill" id="env-pill-raw" onclick="setEnvViewMode('raw')">
+                    Raw .env Editor
+                  </button>
+                </div>
+                <span class="badge badge-neutral" id="env-active-project-label"></span>
+              </div>
+
+              <!-- Toolbar for Key-Value List Mode -->
+              <div id="env-list-toolbar" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <input type="text" id="env-search-input" class="form-control" placeholder="Filter keys or values"
+                  style="width: 192px; height: 28px; padding: 4px 10px; font-size: 12px;" oninput="renderEnvTableFromState()"
+                  aria-label="Filter keys or values">
+                <button type="button" class="btn btn-secondary btn-sm" id="env-toggle-all-reveal-btn"
+                  onclick="toggleRevealAllEnv()">
+                  Show All Values
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" id="env-delete-selected-btn" style="display: none;"
+                  onclick="deleteSelectedEnvVars()">
+                  Delete Selected (<span id="env-selected-count">0</span>)
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="setEnvViewMode('multi')"
+                  title="Edit multiple variables simultaneously">
+                  Edit All Variables
+                </button>
+              </div>
+
+              <!-- Toolbar for Edit Multiple (Table) Mode -->
+              <div id="env-multi-toolbar" style="display: none; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addMultiEditEnvRow()">+ Add Row</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setEnvViewMode('list')">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm" id="env-multi-save-btn"
+                  onclick="saveMultiEditEnv(false)">Save All Changes</button>
+                <button type="button" class="btn btn-success btn-sm" onclick="saveMultiEditEnv(true)">Save &amp; Restart
+                  App</button>
+              </div>
+
+              <!-- Toolbar for Raw .env Editor Mode -->
+              <div id="env-raw-toolbar" style="display: none; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="copyRawEnvToClipboard()">Copy
+                  All</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="setEnvViewMode('list')">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm" id="env-raw-save-btn"
+                  onclick="saveInlineRawEnv(false)">Save .env</button>
+                <button type="button" class="btn btn-success btn-sm" onclick="saveInlineRawEnv(true)">Save &amp; Restart
+                  App</button>
+              </div>
+            </div>
+
+            <!-- PANE 1: KEY-VALUE LIST (WITH 1-CLICK SINGLE ROW INLINE EDIT) -->
+            <div id="env-pane-list" class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table env-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 36px; text-align: center;">
+                        <input type="checkbox" id="env-select-all-check" onchange="toggleSelectAllEnvVars(this.checked)"
+                          title="Select all variables" aria-label="Select all variables">
+                      </th>
+                      <th style="width: 28%;">Key name</th>
+                      <th>Value</th>
+                      <th style="width: 110px;">Visibility</th>
+                      <th style="width: 210px; text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="env-vars-table-body">
+                    <tr>
+                      <td colspan="5" style="text-align: center; padding: 24px;">Select a project to inspect environment
+                        variables.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar" id="env-vars-pagination"></div>
+            </div>
+
+            <!-- PANE 2: EDIT MULTIPLE VARIABLES IN TABLE SPREADSHEET MODE -->
+            <div id="env-pane-multi" class="card-body" style="display: none; padding: 0;">
+              <div
+                style="padding: 12px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12.5px; color: var(--text-muted);">
+                <span>Edit multiple keys and values below, add new rows, or remove rows, then click <strong>Save All
+                    Changes</strong>.</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addMultiEditEnvRow()">+ Add Variable
+                  Row</button>
+              </div>
+              <div class="table-responsive">
+                <table class="table env-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 32%;">Variable key</th>
+                      <th>Value</th>
+                      <th style="width: 130px;">Visibility</th>
+                      <th style="width: 70px; text-align: right;">Remove</th>
+                    </tr>
+                  </thead>
+                  <tbody id="env-multi-edit-tbody"></tbody>
+                </table>
+              </div>
+              <div
+                style="padding: 16px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addMultiEditEnvRow()">+ Add Another
+                  Variable</button>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary" onclick="setEnvViewMode('list')">Cancel</button>
+                  <button type="button" class="btn btn-primary" onclick="saveMultiEditEnv(false)">Save All
+                    Changes</button>
+                  <button type="button" class="btn btn-success" onclick="saveMultiEditEnv(true)">Save &amp; Restart
+                    App</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANE 3: RAW .ENV TEXT EDITOR (INLINE, NO MODAL NEEDED) -->
+            <div id="env-pane-raw" class="card-body" style="display: none;">
+              <div
+                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+                <div style="font-size: 12.5px; color: var(--text-muted);">
+                  Edit all environment variables directly in standard <code>KEY=VALUE</code> format. Comments
+                  (<code>#</code>) and empty lines are ignored.
+                </div>
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                  <label
+                    style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-main); cursor: pointer;">
+                    <input type="checkbox" id="env-raw-sync-delete-check" checked>
+                    <span>Delete variables removed from editor</span>
+                  </label>
+                  <label
+                    style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-main); cursor: pointer;">
+                    <input type="checkbox" id="env-raw-secret-check" checked>
+                    <span>Mark variables as Secret (masked)</span>
+                  </label>
+                </div>
+              </div>
+              <textarea id="env-raw-editor-textarea" class="form-control env-raw-textarea" rows="16" spellcheck="false"
+                placeholder="# Paste or edit your .env variables here&#10;PORT=3000&#10;NODE_ENV=production&#10;JWT_SECRET=your-secret-key"
+                aria-label="Raw .env editor"></textarea>
+              <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 10px;">
+                <span id="env-raw-line-stats" style="font-size: 12px; color: var(--text-dim);">0 variables
+                  detected</span>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary" onclick="setEnvViewMode('list')">Back to List</button>
+                  <button type="button" class="btn btn-primary" onclick="saveInlineRawEnv(false)">Save .env</button>
+                  <button type="button" class="btn btn-success" onclick="saveInlineRawEnv(true)">Save &amp; Restart
+                    App</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 10. SERVER MONITORING VIEW ==================== -->
+        <section id="view-monitor" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Server Health & Resources</h1>
+              <p>Real-time Linux VM telemetry, resource consumption, and process supervisors</p>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Host Machine</div>
+              <div class="stat-value" style="font-size: 16px;" id="mon-hostname">--</div>
+              <div class="stat-meta" id="mon-platform">--</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">System Uptime</div>
+              <div class="stat-value" style="font-size: 20px;" id="mon-uptime">--</div>
+              <div class="stat-meta">Uptime in days/hours</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">CPU Cores & Load</div>
+              <div class="stat-value" id="mon-cpu-cores">--</div>
+              <div class="stat-meta" id="mon-cpu-load">Load: --</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Nginx Status</div>
+              <div class="stat-value" style="font-size: 18px;" id="mon-nginx-status">--</div>
+              <div class="stat-meta" id="mon-nginx-version">Version: --</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">Per-Project Resource Usage</span></div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-monitor">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Process status</th>
+                      <th>Uptime</th>
+                      <th>Deployed SHA</th>
+                      <th>Disk usage</th>
+                      <th>Deploy status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="monitor-projects-table">
+                    <tr>
+                      <td colspan="6" style="text-align: center; padding: 24px;">Loading metrics</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 11. SETTINGS VIEW ==================== -->
+        <section id="view-settings" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1>Settings</h1>
+            </div>
+          </div>
+
+          <div class="settings-cards-grid">
+            <!-- 1. Account Security Card -->
+            <div class="project-card settings-card" id="settings-security-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>Account Security</span>
+                    </div>
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Passkeys &bull; TOTP 2FA &bull; Sessions
+                    </div>
+                  </div>
+                </div>
+                <span class="badge badge-neutral" id="settings-2fa-status-badge"
+                  style="flex-shrink: 0;">Checking</span>
+              </div>
+
+              <div class="settings-sec-summary-row">
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">User</div>
+                  <div class="settings-sec-val" id="settings-sec-username">admin</div>
+                </div>
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">Passkeys</div>
+                  <div class="settings-sec-val" id="settings-sec-passkeys-text">None</div>
+                </div>
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">2FA (TOTP)</div>
+                  <div class="settings-sec-val" id="settings-sec-2fa-text">Disabled</div>
+                </div>
+                <div class="settings-sec-item">
+                  <div class="settings-sec-label">Sessions</div>
+                  <div class="settings-sec-val" id="settings-sec-sessions">1 active</div>
+                </div>
+              </div>
+
+              <div class="project-card-actions" style="justify-content: flex-start;">
+                <button type="button" class="btn btn-primary btn-sm" id="settings-open-passkeys-btn"
+                  onclick="openSecurityModal('passkeys')">Passkeys</button>
+                <button type="button" class="btn btn-secondary btn-sm"
+                  onclick="openSecurityModal('password')">Password</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="settings-open-2fa-btn"
+                  onclick="openSecurityModal('2fa')">2FA</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="revokeOtherSessions()">Revoke</button>
+              </div>
+            </div>
+
+            <!-- 2. GitHub Tokens & Deploy Defaults Card -->
+            <div class="project-card settings-card" id="settings-global-config-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path
+                        d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>GitHub &amp; Deploy</span>
+                    </div>
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Tokens &bull; Thresholds
+                    </div>
+                  </div>
+                </div>
+                <span id="github-token-status-badge" style="font-size: 11px; flex-shrink: 0;"></span>
+              </div>
+
+              <form id="settings-form" autocomplete="off">
+                <div class="settings-card-inset">
+                  <div
+                    style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span class="form-label"
+                      style="margin: 0; font-size: 12px; font-weight: 500; color: var(--text-dim);">Access tokens</span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addGithubTokenRow()"
+                      style="padding: 2px 8px; font-size: 11px;">+ Add</button>
+                  </div>
+                  <div id="github-tokens-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+                </div>
+
+                <details class="minimal-details" style="margin-bottom: 0;">
+                  <summary>System Thresholds &amp; Timeouts</summary>
+                  <div class="minimal-details-body">
+                    <div class="form-row" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-min-free-mb">Min Disk (MB)</label>
+                        <input type="number" id="setting-min-free-mb" class="form-control" required min="100">
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-default-retention">Keep Releases</label>
+                        <input type="number" id="setting-default-retention" class="form-control" required min="2"
+                          max="50">
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-step-timeout">Step Timeout (s)</label>
+                        <input type="number" id="setting-step-timeout" class="form-control" required min="30">
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="setting-deploy-timeout">Deploy Timeout (s)</label>
+                        <input type="number" id="setting-deploy-timeout" class="form-control" required min="60">
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <div class="project-card-actions" style="justify-content: space-between;">
+                  <span class="badge badge-neutral" style="font-size: 10.5px; font-family: var(--font-mono);">SQLite
+                    persisted</span>
+                  <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- 3. Platform Version & 1-Click Self-Update Card -->
+            <div class="project-card settings-card" id="settings-update-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <polyline points="23 4 23 10 17 10"></polyline>
+                      <polyline points="1 20 1 14 7 14"></polyline>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>Platform Update</span>
+                    </div>
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Version &bull; GitHub Release
+                    </div>
+                  </div>
+                </div>
+                <span class="badge badge-neutral" id="platform-version-badge"
+                  style="font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;">Checking</span>
+              </div>
+
+              <div class="settings-card-inset">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                  <div
+                    style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-family: var(--font-mono);">
+                    <span style="font-weight: 500; color: var(--text-main);">Instance: <span
+                        id="platform-branch-name">main</span></span>
+                    <span style="color: var(--text-dim);">&bull;</span>
+                    <code id="platform-commit-hash" style="color: var(--text-muted); font-size: 12px;">--</code>
+                  </div>
+                </div>
+                <div id="platform-commit-msg"
+                  style="font-size: 11.5px; color: var(--text-dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  Fetching commit details
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="text" class="form-control" id="platform-update-repo-input"
+                  placeholder="owner/repo or https://github.com/owner/repo.git"
+                  style="flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11.5px;"
+                  aria-label="Platform update repository">
+                <button type="button" class="btn btn-secondary btn-sm" id="save-platform-repo-btn"
+                  onclick="savePlatformUpdateRepo()" style="flex-shrink: 0;">
+                  Save Repo
+                </button>
+              </div>
+
+              <div class="project-card-actions" style="justify-content: space-between;">
+                <span class="badge badge-neutral" style="font-size: 10.5px; gap: 4px;" title="Preserves data/ and .env"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="20 6 9 17 4 12"></polyline></svg>Safe (data/ &amp; .env)</span>
+                <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="check-platform-update-btn"
+                    onclick="checkPlatformUpdates(true)">
+                    Check
+                  </button>
+                  <button type="button" class="btn btn-primary btn-sm" id="trigger-platform-update-btn"
+                    onclick="startPlatformUpdate()">
+                    Update
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Server Controls Card -->
+            <div class="project-card settings-card" id="settings-panel-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                      <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                      <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                      <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>Server Controls</span>
+                    </div>
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Daemon &bull; Cache Engine
+                    </div>
+                  </div>
+                </div>
+                <span class="badge badge-success" style="flex-shrink: 0;">Online</span>
+              </div>
+
+              <div class="settings-card-inset"
+                style="font-size: 11.5px; color: var(--text-dim); font-family: var(--font-mono); line-height: 1.5;">
+                Restart the WebDep panel daemon safely without stopping running workloads, or clear caches.
+              </div>
+
+              <div class="project-card-actions" style="justify-content: flex-start;">
+                <button type="button" class="btn btn-secondary btn-sm" id="restart-panel-btn">Restart Panel</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="clear-cache-btn">Clear Cache</button>
+              </div>
+            </div>
+
+            <!-- 5. Platform Appearance & Predefined Themes Card -->
+            <div class="project-card settings-card settings-card-wide" id="settings-theme-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                      <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                      <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                      <path
+                        d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z">
+                      </path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>Platform Theme</span>
+                      <span class="badge badge-info" id="settings-active-theme-badge"
+                        style="font-size: 10.5px;">Midnight Ink</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                      Color palette and surface contrast across the workspace
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="reset-theme-btn"
+                  onclick="resetPlatformTheme()">Reset</button>
+              </div>
+
+              <div class="theme-picker-grid" id="settings-theme-grid" role="group"
+                aria-label="Predefined platform themes"></div>
+            </div>
+
+            <!-- 6. User Permissions Card (Full Width Table Card) -->
+            <div class="project-card settings-card settings-card-wide" id="settings-users-card">
+              <div class="project-card-header"
+                style="min-height: 40px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                  <div class="project-card-icon" style="color: var(--text-main);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="9" cy="7" r="4"></circle>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                  </div>
+                  <div style="min-width: 0;">
+                    <div class="project-info-title" style="font-size: 15px; font-weight: 500;">
+                      <span>User Permissions</span>
+                      <span class="badge badge-neutral" id="settings-users-count-badge"
+                        style="font-size: 10.5px;">RBAC</span>
+                    </div>
+                    <div
+                      style="font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">
+                      Access &amp; Powers &bull; 2FA &bull; Scope
+                    </div>
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="create-user-modal-btn">+ Add User</button>
+              </div>
+
+              <div class="table-responsive"
+                style="border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-alt);">
+                <table class="table tbl-users">
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>2FA</th>
+                      <th>Websites</th>
+                      <th>Powers</th>
+                      <th>Status</th>
+                      <th style="text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="users-table-body">
+                    <tr>
+                      <td colspan="6" style="text-align: center; padding: 24px;">Loading users</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar settings-users-pagination" id="users-pagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 12. ACTIVITY VIEW ==================== -->
+        <section id="view-audit" class="view-section">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h1 id="audit-view-title">Website Activity</h1>
+              <p id="audit-view-subtitle">Complete timeline of who deployed, started/stopped, edited .env, or took
+                snapshots on this website</p>
+            </div>
+            <div class="view-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <select id="audit-category-filter" class="form-control" style="width: 155px; font-size: 12.5px;"
+                aria-label="Filter activity by category">
+                <option value="">All Activity</option>
+                <option value="deploy">Deployments</option>
+                <option value="rollback">Rollbacks</option>
+                <option value="container">Start / Stop / Restart</option>
+                <option value="env">Environment (.env)</option>
+                <option value="backup">Backups &amp; Restore</option>
+                <option value="website">Website Settings</option>
+                <option value="database">Database Events</option>
+                <option value="git">Git &amp; Webhooks</option>
+                <option value="domains">Domains &amp; SSL</option>
+              </select>
+              <input type="text" id="audit-search-input" class="form-control"
+                placeholder="Search user, activity, or detail" style="width: 220px;"
+                aria-label="Search user, activity, or detail">
+              <button class="btn btn-secondary btn-sm" id="audit-refresh-btn" onclick="loadAuditView()">Refresh</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body" style="padding: 0;">
+              <div class="table-responsive">
+                <table class="table tbl-audit">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>User</th>
+                      <th>Activity</th>
+                      <th>Details</th>
+                      <th>IP</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-table-body">
+                    <tr>
+                      <td colspan="5" style="text-align: center; padding: 24px;">Loading activity</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination-bar" id="audit-pagination"></div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      <!-- MOBILE BOTTOM NAVIGATION BAR -->
+      <nav class="mobile-bottom-nav" id="mobile-bottom-nav" aria-label="Mobile Navigation">
+        <button type="button" class="mobile-nav-item" data-mobile-view="services" onclick="navigateTo('services')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+          </svg>
+          <span>Services</span>
+        </button>
+        <button type="button" class="mobile-nav-item mobile-nav-create" onclick="openAddServiceModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="9"></circle>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+          <span>Create Service</span>
+        </button>
+        <button type="button" class="mobile-nav-item active mobile-nav-home" data-mobile-view="overview"
+          onclick="navigateTo('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+          </svg>
+          <span>Home</span>
+        </button>
+        <button type="button" class="mobile-nav-item" data-mobile-view="settings" onclick="navigateTo('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+          </svg>
+          <span>Settings</span>
+        </button>
+        <button type="button" class="mobile-nav-item mobile-nav-logout"
+          onclick="document.getElementById('logout-btn')?.click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <span>Log Out</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+  <!-- ======================== MODALS ======================== -->
+
+  <!-- ADD / EDIT WEBSITE MODAL -->
+  <div class="modal-overlay" id="modal-website">
+    <div class="modal-container" style="max-width: 640px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title" id="modal-website-title">Add New Website</h3>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">Provisioned in an isolated container
+            with dedicated port and database</div>
+        </div>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Application Presets (Compact Single-Row Pill Bar) -->
+        <div style="margin-bottom: 12px;">
+          <div class="preset-selector" id="preset-buttons">
+            <div class="preset-chip active" data-type="node">Node.js</div>
+            <div class="preset-chip" data-type="express">Express</div>
+            <div class="preset-chip" data-type="nextjs">Next.js</div>
+            <div class="preset-chip" data-type="vite">Vite / React</div>
+            <div class="preset-chip" data-type="python">Python</div>
+            <div class="preset-chip" data-type="java">Java</div>
+            <div class="preset-chip" data-type="custom">Custom</div>
+          </div>
+        </div>
+
+        <form id="website-form" autocomplete="off" onsubmit="return false;">
+          <input type="hidden" id="website-form-id">
+
+          <!-- Row 1: Name, Port, Branch -->
+          <div class="modal-grid-3"
+            style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-name">Website Name *</label>
+              <input type="text" id="website-name" class="form-control" placeholder="e.g. LSMD Portal" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-port">Port *</label>
+              <input type="number" id="website-port" class="form-control" placeholder="3000" required min="1"
+                max="65535">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-branch">Branch *</label>
+              <input type="text" id="website-branch" class="form-control" value="main" required>
+            </div>
+          </div>
+
+          <!-- Row 2: GitHub Repository & Optional Domain -->
+          <div class="modal-grid-2"
+            style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label class="form-label" for="website-repo">GitHub Repository URL <span
+                    style="color:var(--text-dim); font-weight:400;">(or blank for manual)</span></label>
+                <a href="javascript:void(0)" id="browse-github-repos-btn"
+                  style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse
+                  Repos &nearr;</a>
+              </div>
+              <input type="text" id="website-repo" class="form-control"
+                placeholder="https://github.com/owner/repo.git (optional)">
+              <select id="github-repos-select" class="form-control"
+                style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-domains">Custom Domains <span
+                  style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="text" id="website-domains" class="form-control" placeholder="app.example.com">
+            </div>
+          </div>
+
+          <!-- Row 3: Commands (Install, Build, Start in 1 clean row) -->
+          <div class="modal-grid-3"
+            style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-install-cmd">Install Command</label>
+              <input type="text" id="website-install-cmd" class="form-control" placeholder="npm ci">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-build-cmd">Build Command</label>
+              <input type="text" id="website-build-cmd" class="form-control" placeholder="npm run build">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="website-start-cmd">Start Command *</label>
+              <input type="text" id="website-start-cmd" class="form-control" placeholder="node server.js" required>
+            </div>
+          </div>
+
+          <!-- Row 4: Network Access Policy (Firewall & Direct Access) -->
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" for="website-access-mode">Network Access Policy</label>
+            <select id="website-access-mode" class="form-control"
+              onchange="toggleDatabaseAccessIpFields('website-access-mode', 'website-allowed-ips-wrap')">
+              <option value="local">Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
+              <option value="allowlist">Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
+              <option value="public">Public Access — Open port to external internet with auto firewall rules</option>
+            </select>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+              If a custom domain is configured, HTTPS traffic is reverse-proxied through Caddy automatically. Direct TCP
+              port exposure is governed by this policy.
+            </div>
+          </div>
+          <div class="form-group" id="website-allowed-ips-wrap" style="display: none; margin-bottom: 12px;">
+            <label class="form-label" for="website-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
+            <textarea id="website-allowed-ips" class="form-control" rows="2"
+              placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)"
+              style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port
+              from these remote IPs.</span>
+          </div>
+
+          <!-- Hidden defaults: auto-deploy disabled by default, slug and deploy dir auto-derived -->
+          <input type="checkbox" id="website-auto-deploy" style="display: none;" aria-label="Enable auto deploy">
+          <input type="checkbox" id="website-auto-backup" checked style="display: none;"
+            aria-label="Enable auto backup">
+          <input type="hidden" id="website-slug">
+          <input type="hidden" id="website-deploy-dir">
+          <input type="hidden" id="website-deploy-method" value="managed">
+          <input type="hidden" id="website-health-url">
+        </form>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px;">
+        <button class="btn btn-secondary btn-sm" id="website-detect-btn" style="display: none; margin-right: auto;"
+          onclick="detectProjectConfiguration()">Auto-Detect Commands</button>
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-website-submit-btn">Create Website</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD / EDIT BACKEND SERVICE MODAL -->
+  <div class="modal-overlay" id="modal-service">
+    <div class="modal-container" style="max-width: 620px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title" id="modal-service-title">Add Backend Service</h3>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">24/7 background daemon with automatic
+            process supervision and environment secrets</div>
+        </div>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Service Template Preset Selector -->
+        <div style="margin-bottom: 12px;">
+          <span class="form-label" style="display: block; margin-bottom: 6px;">Service Template Preset</span>
+          <div class="preset-selector" id="service-preset-buttons">
+            <div class="preset-chip active" data-service-preset="lavalink">Lavalink (Java)</div>
+            <div class="preset-chip" data-service-preset="node-service">Node.js Service</div>
+            <div class="preset-chip" data-service-preset="python-service">Python Service</div>
+            <div class="preset-chip" data-service-preset="worker-py">Queue Worker</div>
+            <div class="preset-chip" data-service-preset="custom">Custom Daemon</div>
+          </div>
+        </div>
+
+        <!-- Deployment Source Selector (Manual File Upload vs GitHub Repo) -->
+        <div style="margin-bottom: 12px;">
+          <span class="form-label" style="display: block; margin-bottom: 6px;">Deployment Source</span>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-secondary btn-sm active" id="service-source-mode-manual"
+              onclick="setServiceSourceMode('manual')"
+              style="flex: 1; padding: 8px 12px; font-size: 12px; justify-content: center;">
+              Manual File Upload (No Git)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="service-source-mode-git"
+              onclick="setServiceSourceMode('git')"
+              style="flex: 1; padding: 8px 12px; font-size: 12px; justify-content: center;">
+              GitHub Repository
+            </button>
+          </div>
+          <input type="hidden" id="service-source-mode" value="manual">
+        </div>
+
+        <!-- Informative note for manual file upload -->
+        <div id="service-manual-info-box"
+          style="background: rgba(238, 241, 247, 0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; font-size: 12px; line-height: 1.45; color: var(--text-dim);">
+          <strong style="color: var(--text-main);">Manual File Upload Mode:</strong> No Git repository required. Upload
+          your application files, jar files, or scripts directly in the built-in <strong>Files</strong> tab after
+          creating this service.
+        </div>
+
+        <form id="service-form" autocomplete="off" onsubmit="return false;">
+          <input type="hidden" id="service-form-id">
+          <input type="hidden" id="service-preset-type" value="custom">
+
+          <!-- Row 1: Name & Branch -->
+          <div id="service-name-branch-row" class="modal-grid-2"
+            style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-name">Service Name *</label>
+              <input type="text" id="service-name" class="form-control" placeholder="e.g. My Backend Service" required>
+            </div>
+            <div class="form-group" id="service-branch-group" style="margin-bottom: 0; display: none;">
+              <label class="form-label" for="service-branch">Branch *</label>
+              <input type="text" id="service-branch" class="form-control" value="main">
+            </div>
+          </div>
+
+          <!-- Row 2: GitHub Repository URL (shown only in Git mode) -->
+          <div class="form-group" id="service-repo-group" style="margin-bottom: 12px; display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label class="form-label" for="service-repo">GitHub Repository URL</label>
+              <a href="javascript:void(0)" id="service-browse-github-repos-btn"
+                style="font-size: 11px; color: var(--accent-light); text-decoration: none; font-weight: 500;">Browse
+                Repos &nearr;</a>
+            </div>
+            <input type="text" id="service-repo" class="form-control"
+              placeholder="https://github.com/owner/repository.git">
+            <select id="service-github-repos-select" class="form-control"
+              style="display: none; margin-top: 6px; font-size: 12px;" aria-label="Select GitHub repository"></select>
+          </div>
+
+          <!-- Row 3: Install & Start Commands -->
+          <div class="modal-grid-2"
+            style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-install-cmd">Install Command <span
+                  style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="text" id="service-install-cmd" class="form-control"
+                placeholder="e.g. npm ci or pip install -r requirements.txt">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-start-cmd">Start Command *</label>
+              <input type="text" id="service-start-cmd" class="form-control"
+                placeholder="e.g. java -jar Lavalink.jar or node index.js" required>
+            </div>
+          </div>
+
+          <!-- Row 4: Listening Port & Custom Domain -->
+          <div class="modal-grid-2"
+            style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-port">Assigned Port *</label>
+              <input type="number" id="service-port" class="form-control" placeholder="e.g. 1112 or 8000" min="1"
+                max="65535" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="service-domain">Custom Domain <span
+                  style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+              <input type="text" id="service-domain" class="form-control" placeholder="e.g. service.yourdomain.com">
+            </div>
+          </div>
+
+          <!-- Row 6: Network Access Policy (Firewall & Direct Access) -->
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" for="service-access-mode">Network Access Policy</label>
+            <select id="service-access-mode" class="form-control"
+              onchange="toggleDatabaseAccessIpFields('service-access-mode', 'service-allowed-ips-wrap')">
+              <option value="local">Localhost Only (127.0.0.1) — Safest (VPS &amp; Caddy Reverse Proxy only)</option>
+              <option value="allowlist">Specific Remote IP Allowlist — Firewall allows specified IPs only</option>
+              <option value="public">Public Access — Open port to external internet with auto firewall rules</option>
+            </select>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+              If a custom domain is configured, HTTPS &amp; WebSocket traffic is reverse-proxied through Caddy
+              automatically. Direct TCP port exposure is governed by this policy.
+            </div>
+          </div>
+          <div class="form-group" id="service-allowed-ips-wrap" style="display: none; margin-bottom: 12px;">
+            <label class="form-label" for="service-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
+            <textarea id="service-allowed-ips" class="form-control" rows="2"
+              placeholder="e.g. 203.0.113.80, 198.51.100.0/24 (comma or newline separated)"
+              style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections to this port
+              from these remote IPs.</span>
+          </div>
+
+          <input type="hidden" id="service-slug">
+          <input type="hidden" id="service-deploy-dir">
+        </form>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px;">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-service-submit-btn">Create Service</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CADDY REVERSE PROXY & AUTO-SSL MODAL -->
+  <div class="modal-overlay" id="modal-nginx">
+    <div class="modal-container" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Domains &amp; SSL (Caddy Reverse Proxy)</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="nginx-modal-status-banner" style="margin-bottom: 16px;"></div>
+
+        <!-- DOMAINS CONFIGURATION CARD -->
+        <div class="card"
+          style="padding: 16px; margin-bottom: 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="caddy-domains-input"
+              style="font-weight: 600; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <span>Custom Domain(s)</span>
+              <span style="font-size: 11px; font-weight: 400; color: var(--text-muted);">Separate multiple with
+                commas</span>
+            </label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="caddy-domains-input" class="form-control"
+                placeholder="e.g. portal.example.com, app.example.com">
+              <button class="btn btn-primary" id="caddy-save-domains-btn" onclick="saveCaddyDomains()"
+                style="white-space: nowrap;">Save &amp; Apply</button>
+            </div>
+            <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+              <span style="color: var(--accent); font-weight: 600;">DNS Setup:</span> Point your domain's
+              <strong>A</strong> or <strong>CNAME</strong> record to this server's public IP. Caddy will automatically
+              provision and renew a free Let's Encrypt / ZeroSSL TLS certificate.
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="nginx-config-preview">Auto-Generated Caddyfile</label>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Caddy automatically provisions,
+            verifies, and renews Let's Encrypt / ZeroSSL certificates out-of-the-box with zero certbot setup.</p>
+          <textarea id="nginx-config-preview" class="form-control" rows="8" readonly
+            style="font-family: monospace; font-size: 13px;" aria-label="Auto-Generated Caddyfile"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Close</button>
+        <button class="btn btn-primary" id="nginx-apply-btn" onclick="saveCaddyDomains()">Apply &amp; Reload
+          Caddy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD / BULK ENV VAR MODAL -->
+  <div class="modal-overlay" id="modal-env">
+    <div class="modal-container" style="max-width: 620px; width: 94%;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="env-modal-title">Add Environment Variable</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Target Website Indicator in Modal -->
+        <div
+          style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-card); padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid var(--border-subtle); font-size: 12px;">
+          <span style="color: var(--text-muted);">Target Website:</span>
+          <strong id="env-modal-target-project" style="color: var(--accent-light);">Loading</strong>
+        </div>
+
+        <!-- Mode Switch Tabs -->
+        <div class="env-mode-tabs"
+          style="display: flex; gap: 4px; background: var(--bg-input); padding: 4px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border-subtle);">
+          <button type="button" class="env-mode-tab active" id="tab-env-single" onclick="switchEnvModalTab('single')"
+            style="flex: 1; padding: 8px 12px; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: 6px; color: var(--text-main); font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Single Variable</span>
+          </button>
+          <button type="button" class="env-mode-tab" id="tab-env-bulk" onclick="switchEnvModalTab('bulk')"
+            style="flex: 1; padding: 8px 12px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer;">
+            Bulk .env File
+          </button>
+        </div>
+
+        <!-- Mode 1: Single Variable Form -->
+        <div id="env-section-single">
+          <form id="add-env-form" autocomplete="off" onsubmit="handleSaveEnv(event); return false;">
+            <div class="form-group">
+              <label class="form-label" for="env-key-input">Variable Key *</label>
+              <input type="text" id="env-key-input" class="form-control" placeholder="API_SECRET" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="env-value-input">Value *</label>
+              <textarea id="env-value-input" class="form-control" rows="3" placeholder="your-secret-value" autocomplete="off"></textarea>
+            </div>
+            <div class="form-group">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="env-secret-checkbox" checked>
+                Mask as Sensitive Secret (AES-256-GCM encrypted)
+              </label>
+            </div>
+          </form>
+        </div>
+
+        <!-- Mode 2: Bulk .env File Form -->
+        <div id="env-section-bulk" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label class="form-label" for="env-bulk-input" style="margin-bottom: 0;">Copy & Paste Raw .env File</label>
+            <button type="button" class="btn btn-secondary btn-sm" id="env-load-existing-btn" onclick="loadCurrentEnv()"
+              style="font-size: 11px; padding: 4px 8px;">
+              Load Current .env
+            </button>
+          </div>
+          <div class="form-group">
+            <textarea id="env-bulk-input" class="form-control" rows="11"
+              placeholder="# Paste your .env file here&#10;PORT=3000&#10;JWT_SECRET=supersecret123&#10;NODE_ENV=production"
+              style="font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre;"></textarea>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Supports KEY=VALUE, comments (#),
+              optional "export", and quoted strings.</p>
+          </div>
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="env-bulk-secret-checkbox" checked>
+              Mask imported variables as Sensitive Secrets
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="env-bulk-replace-checkbox">
+              Replace ALL existing variables (Warning: deletes variables not in this list)
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-env-btn" onclick="handleSaveEnv(event)">Save Variable</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVEAL PASSWORD CONFIRMATION MODAL -->
+  <div class="modal-overlay" id="modal-reveal">
+    <div class="modal-container" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Confirm Password to Reveal</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Enter your admin password to view
+          this secret value.</p>
+        <div class="form-group">
+          <label class="form-label" for="reveal-password-input">Current Password</label>
+          <input type="password" id="reveal-password-input" class="form-control" placeholder="Current password" required
+            aria-label="Current password">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="confirm-reveal-btn">Reveal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEPLOYMENT DETAILS MODAL -->
+  <div class="modal-overlay" id="modal-dep-details">
+    <div class="modal-container" style="max-width: 720px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="dep-details-title">Deployment Details</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="dep-details-meta" style="margin-bottom: 12px;"></div>
+        <div class="log-console-wrapper" style="height: 380px;">
+          <div class="log-terminal" id="dep-details-logs"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREATE / EDIT USER MODAL -->
+  <div class="modal-overlay" id="modal-create-user">
+    <div class="modal-container" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="user-modal-title">Create Platform User</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="create-user-form" autocomplete="off">
+          <input type="hidden" id="user-edit-id" value="">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="user-new-username">Username *</label>
+              <input type="text" id="user-new-username" class="form-control" placeholder="e.g. dev_alex" required autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="user-new-password" id="user-password-label">Password (min 6 chars)
+                *</label>
+              <input type="password" id="user-new-password" class="form-control" minlength="6" placeholder="••••••••" autocomplete="new-password">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
+              <span class="form-label" style="margin-bottom: 0;">Granular Powers (Permissions)</span>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn-secondary btn-xs" onclick="setUserPowerPreset('all')">Select
+                  All</button>
+                <button type="button" class="btn btn-secondary btn-xs"
+                  onclick="setUserPowerPreset('defaults')">Defaults</button>
+                <button type="button" class="btn btn-secondary btn-xs"
+                  onclick="setUserPowerPreset('readonly')">Read-Only</button>
+                <button type="button" class="btn btn-secondary btn-xs"
+                  onclick="setUserPowerPreset('none')">Clear</button>
+              </div>
+            </div>
+            <div
+              style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+              <div
+                style="font-size: 12px; font-weight: 500; color: var(--text-dim);">
+                Workloads &amp; deploy</div>
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="deploy" checked>
+                  <span>Deploy, Fetch &amp; Rollback</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="process" checked>
+                  <span>Start / Stop / Restart</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="projects_manage">
+                  <span>Add / Edit / Delete Websites</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="services_manage">
+                  <span>Add / Edit / Delete Services</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="domains">
+                  <span>Domains &amp; SSL (Caddy)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="backups" checked>
+                  <span>Create &amp; Restore Backups</span>
+                </label>
+              </div>
+
+              <div
+                style="font-size: 12px; font-weight: 500; color: var(--text-dim); margin-top: 4px;">
+                Storage, env &amp; databases</div>
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="files" checked>
+                  <span>Browse &amp; Download Files</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="files_write">
+                  <span>Edit, Upload &amp; Delete Files</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="env">
+                  <span>Manage Env Variables (.env)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="databases">
+                  <span>Control Databases &amp; Logs</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="databases_manage">
+                  <span>Create, Expose &amp; Delete DBs</span>
+                </label>
+              </div>
+
+              <div
+                style="font-size: 12px; font-weight: 500; color: var(--text-dim); margin-top: 4px;">
+                Observability &amp; platform</div>
+              <div class="modal-grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="logs" checked>
+                  <span>View &amp; Download Logs</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="audit">
+                  <span>View Activity &amp; Audit Logs</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="monitor">
+                  <span>Server Telemetry &amp; Monitor</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="settings_manage">
+                  <span>Platform Settings &amp; Cache</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="user-power-check" value="system_manage">
+                  <span>Panel Restart &amp; Updates</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
+              <span class="form-label" style="margin-bottom: 0;">Website Access</span>
+              <label
+                style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--accent);">
+                <input type="checkbox" id="user-all-projects-check" checked>
+                <span>Allow Access to All Websites (*)</span>
+              </label>
+            </div>
+            <div id="user-projects-checklist" class="modal-grid-2"
+              style="max-height: 150px; overflow-y: auto; background: var(--bg-input); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            </div>
+            <span class="form-hint">Uncheck "Allow Access to All Websites" to restrict this user to specific websites
+              only.</span>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="save-new-user-btn">Save User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT SECURITY MODAL (PASSWORD, PASSKEYS, TOTP 2FA & SESSIONS) -->
+  <div class="modal-overlay" id="modal-change-password">
+    <div class="modal-container" style="max-width: 580px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Account Security, Passkeys &amp; 2FA</h3>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">Manage Face ID / Fingerprint
+            Passkeys, password, Two-Factor Authentication (TOTP), and active sessions</div>
+        </div>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Security Tabs -->
+        <div class="modal-tabs">
+          <button type="button" class="modal-tab-btn" id="sec-tab-btn-passkeys"
+            onclick="switchSecurityTab('passkeys')">Passkeys &amp; Biometrics</button>
+          <button type="button" class="modal-tab-btn active" id="sec-tab-btn-password"
+            onclick="switchSecurityTab('password')">Password</button>
+          <button type="button" class="modal-tab-btn" id="sec-tab-btn-2fa" onclick="switchSecurityTab('2fa')">Two-Factor
+            Auth (2FA)</button>
+          <button type="button" class="modal-tab-btn" id="sec-tab-btn-sessions"
+            onclick="switchSecurityTab('sessions')">Active Sessions</button>
+        </div>
+
+        <!-- TAB 0: PASSKEYS & BIOMETRICS (WEBAUTHN) -->
+        <div id="sec-pane-passkeys" style="display: none;">
+          <div
+            style="background: rgba(238, 241, 247, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px;">
+            <div
+              style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+              <strong style="font-size: 13.5px; color: var(--text-main);">Passkey &amp; Biometric Sign-In (Face ID /
+                Touch ID / Fingerprint)</strong>
+              <span class="badge badge-neutral" id="sec-passkey-modal-badge">0 Registered</span>
+            </div>
+            <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+              Register your iPhone Face ID, Android Fingerprint, Mac Touch ID, or Windows Hello to sign in with one
+              biometric tap — no password or 6-digit code required.
+            </p>
+          </div>
+
+          <div
+            style="background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+            <label class="form-label" for="passkey-device-name" style="margin-bottom: 6px;">Device / Biometric
+              Label</label>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;">
+              <button type="button" class="btn btn-secondary btn-xs"
+                onclick="document.getElementById('passkey-device-name').value='iPhone Face ID'">iPhone Face ID</button>
+              <button type="button" class="btn btn-secondary btn-xs"
+                onclick="document.getElementById('passkey-device-name').value='Android Fingerprint'">Android
+                Fingerprint</button>
+              <button type="button" class="btn btn-secondary btn-xs"
+                onclick="document.getElementById('passkey-device-name').value='MacBook Touch ID'">MacBook Touch
+                ID</button>
+              <button type="button" class="btn btn-secondary btn-xs"
+                onclick="document.getElementById('passkey-device-name').value='Windows Hello'">Windows Hello</button>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="passkey-device-name" class="form-control"
+                placeholder="e.g. iPhone Face ID or Android Fingerprint" style="flex: 1; min-width: 190px;">
+              <button type="button" class="btn btn-primary" id="register-passkey-btn" onclick="registerNewPasskey()"
+                style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
+                  <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
+                  <path d="M2 12a10 10 0 0 1 18-6" />
+                  <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" />
+                  <path d="M9 6.8a6 6 0 0 1 9 5.2v2" />
+                </svg>
+                <span>Register Passkey / Biometric</span>
+              </button>
+            </div>
+            <div id="passkey-https-hint"
+              style="display: none; font-size: 11.5px; color: var(--warning-light); margin-top: 8px;">
+              Note: Browser WebAuthn requires HTTPS (your domain SSL) or <code>localhost</code> to enroll Face ID /
+              Fingerprint.
+            </div>
+          </div>
+
+          <div
+            style="font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px;">
+            Registered passkeys &amp; biometric devices</div>
+          <div id="passkeys-list-container"
+            style="display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto;">
+            <div
+              style="font-size: 12.5px; color: var(--text-dim); padding: 12px; text-align: center; border: 1px dashed var(--border-subtle); border-radius: var(--radius-md);">
+              No passkeys registered yet.
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 1: CHANGE PASSWORD -->
+        <div id="sec-pane-password">
+          <form id="change-password-form" onsubmit="return false;">
+            <div class="form-group">
+              <label class="form-label" for="pwd-current">Current Password *</label>
+              <div style="display: flex; gap: 8px;">
+                <input type="password" id="pwd-current" class="form-control" placeholder="Enter current password"
+                  required autocomplete="current-password">
+                <button type="button" class="btn btn-secondary btn-sm"
+                  onclick="togglePasswordField('pwd-current', this)" style="min-width: 60px;">Show</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label class="form-label" for="pwd-next">New Password (min 8 chars) *</label>
+                <span id="pwd-strength-label" style="font-size: 11px; color: var(--text-dim);"></span>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <input type="password" id="pwd-next" class="form-control" minlength="8"
+                  placeholder="At least 8 characters" required autocomplete="new-password">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="togglePasswordField('pwd-next', this)"
+                  style="min-width: 60px;">Show</button>
+              </div>
+              <div class="progress-bar" style="height: 4px; margin-top: 6px;">
+                <div class="progress-fill green" id="pwd-strength-bar" style="width: 0%;"></div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="pwd-confirm">Confirm New Password *</label>
+              <input type="password" id="pwd-confirm" class="form-control" minlength="8"
+                placeholder="Re-enter new password" required autocomplete="new-password">
+            </div>
+            <div class="form-group" id="pwd-2fa-group" style="display: none;">
+              <label class="form-label" for="pwd-2fa-code">6-Digit 2FA Authenticator Code *</label>
+              <input type="text" id="pwd-2fa-code" class="form-control" placeholder="123456" autocomplete="off"
+                style="font-family: var(--font-mono); letter-spacing: 0.12em;">
+            </div>
+            <label
+              style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; margin-bottom: 12px;">
+              <input type="checkbox" id="pwd-revoke-others" checked>
+              <span>Sign out all other devices &amp; sessions after changing password</span>
+            </label>
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+              <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+              <button type="submit" class="btn btn-primary" id="save-change-password-btn">Update Password</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- TAB 2: TWO-FACTOR AUTHENTICATION (TOTP) -->
+        <div id="sec-pane-2fa" style="display: none;">
+          <!-- State A: 2FA Currently Disabled -->
+          <div id="sec-2fa-disabled-box">
+            <div
+              style="background: rgba(238, 241, 247, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <strong style="font-size: 13.5px; color: var(--text-main); font-weight: 500;">Two-Factor Authentication (TOTP)</strong>
+                <span class="badge badge-warning">Not enabled</span>
+              </div>
+              <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+                Require a 6-digit time-based code from Google Authenticator, Authy, 1Password, or Microsoft
+                Authenticator whenever signing in.
+              </p>
+            </div>
+
+            <div id="sec-2fa-step1-password">
+              <div class="form-group">
+                <label class="form-label" for="tfa-setup-password">Confirm Your Current Password to Begin Setup
+                  *</label>
+                <input type="password" id="tfa-setup-password" class="form-control" placeholder="Current password" autocomplete="current-password">
+              </div>
+              <button type="button" class="btn btn-primary" style="width: 100%;" id="tfa-start-setup-btn"
+                onclick="start2faSetup()">
+                Generate 2FA Secret &amp; QR Code
+              </button>
+            </div>
+
+            <!-- Step 2: Scan QR + Verify 6-digit code -->
+            <div id="sec-2fa-step2-verify" style="display: none;">
+              <div class="tfa-qr-grid"
+                style="display: grid; grid-template-columns: 168px 1fr; gap: 16px; align-items: center; background: rgba(238, 241, 247, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px;">
+                <div id="tfa-qr-container"
+                  style="width: 156px; height: 156px; background: #fff; padding: 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                </div>
+                <div>
+                  <div style="font-size: 12.5px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">1. Scan
+                    with Authenticator App</div>
+                  <p style="font-size: 11.5px; color: var(--text-muted); line-height: 1.45; margin-bottom: 10px;">
+                    Scan the QR code with your authenticator app, or manually enter this Base32 setup key:
+                  </p>
+                  <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="text" id="tfa-secret-display" class="form-control" readonly
+                      style="font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; color: var(--accent-light);"
+                      aria-label="2FA Base32 setup key">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="copy2faSecret()">Copy</button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="tfa-verify-code">2. Enter 6-Digit Code from Authenticator App *</label>
+                <input type="text" id="tfa-verify-code" class="form-control" placeholder="123456" maxlength="10"
+                  autocomplete="one-time-code"
+                  style="font-family: var(--font-mono); font-size: 16px; letter-spacing: 0.14em; text-align: center; font-weight: 600;">
+              </div>
+              <button type="button" class="btn btn-success" style="width: 100%;" id="tfa-enable-confirm-btn"
+                onclick="confirmEnable2fa()">
+                Verify Code &amp; Activate 2FA
+              </button>
+            </div>
+
+            <!-- Step 3: Recovery Codes Display -->
+            <div id="sec-2fa-step3-recovery" style="display: none;">
+              <div
+                style="background: var(--success-bg); border: 1px solid var(--success-border); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 12px;">
+                <strong style="color: var(--success-light); font-size: 13px; font-weight: 500;">Two-factor authentication is active</strong>
+                <p style="font-size: 12px; color: var(--text-main); margin-top: 4px; margin-bottom: 0;">
+                  Save these 8 one-time recovery codes in a safe place. Each code can be used once to sign in if you
+                  lose access to your phone.
+                </p>
+              </div>
+              <div id="tfa-recovery-codes-grid"
+                style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--bg-terminal); border: 1px solid var(--border-medium); padding: 12px; border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 13px; text-align: center; color: var(--accent-light); margin-bottom: 12px;">
+              </div>
+              <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="copyRecoveryCodes()">Copy Codes</button>
+                <button type="button" class="btn btn-primary btn-sm" data-close-modal>Done</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- State B: 2FA Currently Enabled -->
+          <div id="sec-2fa-enabled-box" style="display: none;">
+            <div
+              style="background: var(--success-bg); border: 1px solid var(--success-border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                <strong style="font-size: 13.5px; color: var(--success-light);">2FA Protection Active</strong>
+                <span class="badge badge-success">Enabled</span>
+              </div>
+              <p style="font-size: 12.5px; color: var(--text-main); margin: 0;">
+                Your account requires both your password and a 6-digit TOTP authenticator code (or recovery code) on
+                sign-in.
+              </p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="tfa-disable-password">Current Password *</label>
+              <input type="password" id="tfa-disable-password" class="form-control"
+                placeholder="Enter your current password" autocomplete="current-password">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="tfa-disable-code">6-Digit Authenticator Code or Recovery Code *</label>
+              <input type="text" id="tfa-disable-code" class="form-control" placeholder="123456 or ABCD-1234"
+                autocomplete="off" style="font-family: var(--font-mono);">
+            </div>
+            <button type="button" class="btn btn-danger" style="width: 100%;" onclick="disable2fa()">
+              Disable Two-Factor Authentication
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 3: ACTIVE SESSIONS -->
+        <div id="sec-pane-sessions" style="display: none;">
+          <div
+            style="background: rgba(238, 241, 247, 0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px;">
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">Active Browser
+              Sessions</div>
+            <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px;"
+              id="sec-modal-sessions-summary">
+              Your account currently has 1 active authenticated session.
+            </p>
+            <ul style="font-size: 12px; color: var(--text-dim); padding-left: 16px; line-height: 1.6; margin: 0;">
+              <li>HttpOnly, SameSite=Strict session cookies prevent XSS &amp; cross-site cookie theft</li>
+              <li>Per-session cryptographic CSRF tokens enforced on all state-changing API calls</li>
+              <li>Automatic brute-force lockout after 5 failed login or 2FA attempts</li>
+            </ul>
+          </div>
+          <button type="button" class="btn btn-danger" style="width: 100%;" onclick="revokeOtherSessions()">
+            Sign Out All Other Devices &amp; Sessions
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREATE RELEASE MODAL -->
+  <div class="modal-overlay" id="modal-create-release">
+    <div class="modal-container" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Create Website Release</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="release-modal-target-project"
+          style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        </div>
+        <form id="create-release-form" autocomplete="off" onsubmit="confirmCreateRelease(event)">
+          <div class="form-group" id="release-project-select-group" style="display: none;">
+            <label class="form-label" for="release-project-select">Target Website</label>
+            <select id="release-project-select" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="release-source-select">Release Source</label>
+            <select id="release-source-select" class="form-control">
+              <option value="deploy">Build & Deploy Latest Git Commit (Full Pipeline)</option>
+              <option value="snapshot">Snapshot Current Live Website as New Immutable Release</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="release-note-input">Release Note / Version Tag</label>
+            <input type="text" id="release-note-input" class="form-control"
+              placeholder="e.g. Release v2.0 - Production">
+            <span class="form-hint">Recorded in SQLite and retained as an immutable instant rollback target.</span>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal>Cancel</button>
+        <button class="btn btn-primary" id="confirm-create-release-btn" onclick="confirmCreateRelease(event)">Build &
+          Create Release</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CREATE DATABASE -->
+  <div class="modal-overlay" id="modal-create-database">
+    <div class="modal-container" style="max-width: 540px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Create PostgreSQL Database</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="create-database-form" autocomplete="off" onsubmit="handleCreateDatabaseSubmit(event)">
+          <div class="form-group">
+            <label class="form-label" for="db-create-name">Display Name</label>
+            <input type="text" id="db-create-name" class="form-control" placeholder="e.g. Production PostgreSQL"
+              required autocomplete="off">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label" for="db-create-dbname">Database Name</label>
+              <input type="text" id="db-create-dbname" class="form-control" placeholder="e.g. app_production" required autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="db-create-user">Database User</label>
+              <input type="text" id="db-create-user" class="form-control" placeholder="e.g. app_user" required autocomplete="off">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="db-create-password">Password</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="password" id="db-create-password" class="form-control" placeholder="Strong password" required
+                autocomplete="new-password" style="font-family: var(--font-mono);">
+              <button type="button" class="btn btn-secondary btn-sm"
+                onclick="togglePasswordVisibility('db-create-password')">Show</button>
+              <button type="button" class="btn btn-secondary btn-sm"
+                onclick="generateRandomDbPassword('db-create-password')">Generate</button>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label" for="db-create-port">TCP Port</label>
+              <input type="number" id="db-create-port" class="form-control" value="5432" min="1024" max="65535"
+                required autocomplete="off">
+            </div>
+            <div class="form-group"
+              style="display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 8px;">
+              <label class="form-checkbox" style="font-size: 13px;">
+                <input type="checkbox" id="db-create-superuser">
+                <span>Superuser Privileges</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="db-create-domain">Custom Domain / Hostname <span
+                style="color:var(--text-dim); font-weight:400;">(optional)</span></label>
+            <input type="text" id="db-create-domain" class="form-control" placeholder="e.g. postgres.yourdomain.com">
+            <span class="form-hint">If set, external connection URLs and psql commands will use this hostname instead of
+              the VPS IP address.</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="db-create-access-mode">Network Access Policy</label>
+            <select id="db-create-access-mode" class="form-control"
+              onchange="toggleDatabaseAccessIpFields('db-create-access-mode', 'db-create-allowed-ips-wrap')">
+              <option value="local">Localhost Only (127.0.0.1) — Safest (VPS Apps only)</option>
+              <option value="allowlist">Specific Remote IP Allowlist — For remote VPS / dev machines</option>
+              <option value="public">Public Access (0.0.0.0) — Open to external networks</option>
+            </select>
+          </div>
+          <div class="form-group" id="db-create-allowed-ips-wrap" style="display: none;">
+            <label class="form-label" for="db-create-allowed-ips">Allowed Client IP Addresses / CIDRs</label>
+            <textarea id="db-create-allowed-ips" class="form-control" rows="2"
+              placeholder="e.g. 203.0.113.80, 198.51.100.0/24"
+              style="font-family: var(--font-mono); font-size: 12.5px;"></textarea>
+            <span class="form-hint">Firewall rules (UFW) will be configured to strictly permit connections from these
+              remote IPs.</span>
+          </div>
+
+          <!-- Real-time database provisioning progress track -->
+          <div id="db-create-progress-container"
+            style="display: none; margin-top: 12px; padding: 12px; background: rgba(238, 241, 247, 0.03); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; font-weight: 500;" id="db-create-progress-title">Provisioning PostgreSQL
+                instance</span>
+              <span class="badge badge-warning" id="db-create-progress-step">Stage 1/5</span>
+            </div>
+            <div class="progress-bar" style="height: 4px;">
+              <div class="progress-fill green" id="db-create-progress-bar"
+                style="width: 20%;"></div>
+            </div>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 8px; font-family: var(--font-mono);"
+              id="db-create-progress-detail">
+              Allocating dedicated TCP port and preparing filesystem sandbox
+            </div>
+          </div>
+
+          <div class="modal-footer" style="padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border);">
+            <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+            <button type="submit" class="btn btn-primary" id="db-create-submit-btn">Create & Start Database</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: DATABASE CONNECTION DETAILS -->
+  <div class="modal-overlay" id="modal-database-details">
+    <div class="modal-container" style="max-width: 600px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h3 class="modal-title" id="db-details-title">PostgreSQL Connection Details</h3>
+          <span class="badge badge-neutral" title="Locked after creation">Locked at creation</span>
+        </div>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(7, 11, 20, 0.55); border: 1px solid rgba(238, 241, 247, 0.08); font-size: 12px; color: var(--text-dim);">
+          Credentials, port, and network access are locked once created. Delete and recreate this database to change them.
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="db-detail-internal-url">Internal Connection URL (For websites on this
+            VPS)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="db-detail-internal-url" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12px;">
+            <button class="btn btn-secondary btn-sm" onclick="copyElementValue('db-detail-internal-url')">Copy</button>
+          </div>
+        </div>
+        <div class="form-group" id="db-detail-external-url-wrap">
+          <label class="form-label" for="db-detail-external-url">External Connection URL (For remote VPS or external
+            clients)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="db-detail-external-url" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12px;">
+            <button class="btn btn-secondary btn-sm" onclick="copyElementValue('db-detail-external-url')">Copy</button>
+          </div>
+          <span class="form-hint">Includes ?sslmode=prefer. Uses the Network Access policy configured at creation.</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;">
+          <div class="form-group">
+            <label class="form-label" for="db-detail-dbname">Database Name</label>
+            <input type="text" id="db-detail-dbname" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12.5px;">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="db-detail-user">Username</label>
+            <input type="text" id="db-detail-user" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12.5px;">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label class="form-label" for="db-detail-host">Host</label>
+            <input type="text" id="db-detail-host" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12.5px;" value="127.0.0.1">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="db-detail-port">Port</label>
+            <input type="text" id="db-detail-port" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12.5px;">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="db-detail-password">Password</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="password" id="db-detail-password" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12.5px;">
+            <button class="btn btn-secondary btn-sm"
+              onclick="togglePasswordVisibility('db-detail-password')">Show</button>
+            <button class="btn btn-secondary btn-sm" onclick="copyElementValue('db-detail-password')">Copy</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="db-detail-psql">CLI Command (psql)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="db-detail-psql" class="form-control" readonly
+              style="font-family: var(--font-mono); font-size: 12px;">
+            <button class="btn btn-secondary btn-sm" onclick="copyElementValue('db-detail-psql')">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" data-close-modal>Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- UNIVERSAL THEMED DIALOG MODAL (CONFIRM / PROMPT / COPY) -->
+  <div class="modal-overlay" id="modal-dialog">
+    <div class="modal-container" style="max-width: 460px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="dialog-modal-title">Confirm Action</h3>
+        <button class="modal-close" id="dialog-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="dialog-modal-message"
+          style="font-size: 13.5px; color: var(--text-muted); line-height: 1.5; white-space: pre-line; margin-bottom: 12px;">
+        </p>
+        <div class="form-group" id="dialog-input-wrapper" style="display: none; margin-bottom: 4px;">
+          <input type="text" id="dialog-modal-input" class="form-control" autocomplete="off" aria-label="Dialog input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="dialog-cancel-btn">Cancel</button>
+        <button class="btn btn-primary" id="dialog-confirm-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: 1-CLICK PLATFORM UPDATE -->
+  <div class="modal-overlay" id="modal-platform-update">
+    <div class="modal-container" style="max-width: 580px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Updating WebDep</h3>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">
+            Downloading prebuilt GitHub Release, verifying SHA-256, and restarting
+          </div>
+        </div>
+        <button class="modal-close" id="modal-platform-update-close" data-close-modal>&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Progress Bar & Status -->
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span id="update-step-text" style="font-weight: 500; font-size: 13px; color: var(--text-main);">Updating
+              WebDep</span>
+            <span id="update-pct-text" style="font-weight: 500; font-size: 12px; color: var(--accent-light); font-variant-numeric: tabular-nums;">0%</span>
+          </div>
+          <div class="progress"
+            style="height: 4px; background: rgba(238, 241, 247, 0.08); border-radius: 4px; overflow: hidden;">
+            <div id="update-progress-bar" class="progress-bar"
+              style="width: 0%; background: var(--accent);"></div>
+          </div>
+        </div>
+
+        <div id="update-status-banner"
+          style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          <div class="spinner-sm" id="update-active-spinner"
+            style="border: 2px solid rgba(238, 241, 247, 0.16); border-top-color: var(--accent-light); width: 12px; height: 12px; border-radius: 50%; animation: btnSpin 0.8s linear infinite;">
+          </div>
+          <span id="update-banner-msg">Downloading verified GitHub Release binary. Panel will restart
+            automatically.</span>
+        </div>
+
+        <!-- Live Release Console Logs -->
+        <div class="form-group" style="margin-bottom: 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span class="form-label" style="margin: 0; font-size: 11.5px; color: var(--text-dim);">Update Output</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyUpdateLogs()"
+              style="padding: 2px 8px; font-size: 11px;">Copy</button>
+          </div>
+          <div id="update-console-logs"
+            style="height: 180px; overflow-y: auto; background: var(--bg-terminal); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; color: var(--text-normal); white-space: pre-wrap; word-break: break-all;">
+            Waiting for update to start</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 12px 20px; justify-content: flex-end;" id="update-modal-footer">
+        <button class="btn btn-secondary btn-sm" id="update-dismiss-btn" data-close-modal disabled>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Client Script -->
+  <script src="./js/demo_mock.js"></script>
+  <script type="module" src="./app.js?v=3.17.0"></script>
+</body>
+
+</html>

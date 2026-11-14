@@ -1,0 +1,221 @@
+/**
+ * WebDep Deployments Fluid Water Pipeline Engine & Compact Card Pipelines
+ */
+/* ---------- Pipeline ---------- */
+.pipeline-track {
+  display: flex;
+  align-items: center;
+  background: transparent;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.card .pipeline-track { border: none; margin-bottom: 0; padding: 8px 0 12px; }
+
+.water-pipeline-wrapper { display: flex; align-items: center; width: 100%; min-width: 820px; position: relative; }
+.water-stage-unit { display: flex; align-items: center; flex: 1; position: relative; min-width: 120px; }
+.water-stage-unit:last-child { flex: 0 0 auto; min-width: auto; }
+
+.water-node-vial {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-medium);
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--transition-base);
+  z-index: 2;
+}
+.water-vial-bg { position: absolute; inset: 0; z-index: 1; }
+.water-vial-liquid {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  opacity: 0.35;
+  z-index: 2;
+  transform-origin: bottom center;
+  transform: scaleY(0);
+  will-change: transform;
+}
+.water-node-vial.completed .water-vial-liquid { background: var(--success); opacity: 0.25; }
+.water-node-vial.failed .water-vial-liquid { background: var(--danger); opacity: 0.25; }
+.water-wave-surface { display: none; }
+
+.water-vial-content { position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.water-vial-num {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  line-height: 1;
+  position: absolute;
+  transition: opacity var(--transition-base), color var(--transition-fast);
+}
+.water-node-vial.active .water-vial-num { color: var(--text-main); }
+.water-vial-icon {
+  position: absolute;
+  opacity: 0;
+  transition: opacity var(--transition-base);
+  pointer-events: none;
+}
+.water-node-vial.completed .water-vial-check {
+  display: block;
+  opacity: 1;
+  stroke: var(--success-light);
+  stroke-width: 1.5;
+}
+.water-node-vial.failed .water-vial-cross {
+  display: block;
+  opacity: 1;
+  stroke: var(--danger-light);
+  stroke-width: 1.5;
+}
+.water-node-vial.completed .water-vial-num,
+.water-node-vial.failed .water-vial-num {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.water-node-vial.active { border-color: var(--accent); }
+.water-node-vial.completed { border-color: var(--success); }
+.water-node-vial.failed { border-color: var(--danger); }
+.water-node-vial.queued { border-color: var(--border-medium); }
+.water-node-vial.draining { border-color: var(--accent); }
+.water-node-vial.draining .water-vial-liquid { background: var(--accent); opacity: 0.35; }
+.water-node-vial.draining .water-vial-num { color: var(--accent-light); }
+
+.water-node-info { display: flex; flex-direction: column; gap: 0; margin-left: 8px; flex-shrink: 0; }
+.water-node-name { font-size: 12.5px; font-weight: 500; color: var(--text-dim); white-space: nowrap; transition: color var(--transition-fast); }
+.water-node-name.active { color: var(--text-main); font-weight: 500; }
+.water-node-name.completed { color: var(--text-normal); }
+.water-node-name.failed { color: var(--danger-light); font-weight: 500; }
+.water-node-sub { font-size: 11px; font-weight: 500; color: var(--text-dim); }
+.water-node-sub.active { color: var(--accent-light); }
+.water-node-sub.completed { color: var(--success-light); }
+.water-node-sub.failed { color: var(--danger-light); }
+.water-node-sub.queued { color: var(--text-dim); }
+.water-node-sub.draining { color: var(--accent-light); font-weight: 500; }
+
+.water-pipe-segment { flex: 1; margin: 0 12px; position: relative; height: 4px; display: flex; align-items: center; }
+.water-pipe-glass { width: 100%; height: 2px; background: var(--border-medium); border-radius: 1px; position: relative; overflow: hidden; }
+.water-pipe-liquid {
+  height: 100%;
+  width: 100%;
+  border-radius: 1px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
+}
+.water-pipe-liquid.flowing { background: var(--accent); }
+.water-pipe-liquid.filled { background: var(--success); }
+.water-pipe-liquid.draining { background: var(--accent); opacity: 0.85; }
+.water-pipe-liquid.empty { background: transparent; transform: scaleX(0) !important; }
+.water-pipe-meniscus { display: none; }
+
+/* ---------- Compact Card Pipeline (Fits gracefully inside cards) ---------- */
+.card .pipeline-track,
+.card-pipeline-track {
+  border: none !important;
+  margin-bottom: 0 !important;
+  padding: 4px 0 6px !important;
+  overflow: hidden !important;
+  min-height: auto !important;
+}
+
+.water-pipeline-wrapper.compact {
+  min-width: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  position: relative !important;
+}
+
+.water-pipeline-wrapper.compact .water-stage-unit {
+  min-width: 0 !important;
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  position: relative !important;
+  text-align: center !important;
+}
+
+.water-pipeline-wrapper.compact .water-stage-unit:last-child {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.water-pipeline-wrapper.compact .water-node-vial {
+  width: 22px !important;
+  height: 22px !important;
+  border-width: 1.5px !important;
+  margin-bottom: 4px !important;
+  z-index: 2 !important;
+}
+
+.water-pipeline-wrapper.compact .water-vial-num {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+}
+
+.water-pipeline-wrapper.compact .water-vial-icon {
+  width: 11px !important;
+  height: 11px !important;
+}
+
+.water-pipeline-wrapper.compact .water-node-info {
+  margin-left: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  width: 100% !important;
+}
+
+.water-pipeline-wrapper.compact .water-node-name {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+  line-height: 1.2 !important;
+}
+
+.water-pipeline-wrapper.compact .water-node-sub {
+  font-size: 8.5px !important;
+  line-height: 1.1 !important;
+  margin-top: 1px !important;
+}
+
+.water-pipeline-wrapper.compact .water-pipe-segment {
+  position: absolute !important;
+  top: 10px !important;
+  left: 50% !important;
+  width: 100% !important;
+  height: 2px !important;
+  margin: 0 !important;
+  z-index: 1 !important;
+}
+
+.water-pipeline-wrapper.compact .water-pipe-glass {
+  width: 100% !important;
+  height: 2px !important;
+}
+
+

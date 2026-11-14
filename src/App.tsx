@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { MotionConfig } from "motion/react";
 import CapabilitiesBento from "@/components/CapabilitiesBento";
 import ComparisonAndProsCons from "@/components/ComparisonAndProsCons";
@@ -6,6 +6,8 @@ import DocsAndInstallSection from "@/components/DocsAndInstallSection";
 import HeroSection from "@/components/HeroSection";
 import NavbarHeader from "@/components/NavbarHeader";
 import PanelTourSection from "@/components/PanelTourSection";
+
+const PanelDemo = lazy(() => import("@/components/PanelDemo"));
 
 type ThemeMode = "light" | "dark";
 
@@ -22,6 +24,12 @@ function getInitialTheme(): ThemeMode {
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
+  const [demoMode, setDemoMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.location.hash === "#demo";
+  });
 
   const syncDocumentTheme = useCallback((next: ThemeMode) => {
     const root = document.documentElement;
@@ -39,6 +47,14 @@ export default function App() {
     syncDocumentTheme(theme);
   }, [theme, syncDocumentTheme]);
 
+  useEffect(() => {
+    const handleHashChange = () => {
+      setDemoMode(window.location.hash === "#demo");
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
   const handleThemeChange = useCallback(
     (next: ThemeMode) => {
       setTheme(next);
@@ -46,6 +62,26 @@ export default function App() {
     },
     [syncDocumentTheme]
   );
+
+  const handleOpenDemo = useCallback(() => {
+    setDemoMode(true);
+    if (window.location.hash !== "#demo") {
+      window.location.hash = "demo";
+    }
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
+
+  const handleExitDemo = useCallback(() => {
+    setDemoMode(false);
+    if (window.location.hash === "#demo") {
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search
+      );
+    }
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
 
   const handleJumpToSection = useCallback((sectionId: string) => {
     const el = document.getElementById(sectionId);
@@ -56,20 +92,36 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen overflow-x-clip bg-background text-foreground">
-        <NavbarHeader
-          theme={theme}
-          onJumpToSection={handleJumpToSection}
-          onThemeChange={handleThemeChange}
-        />
-        <main>
-          <HeroSection onJumpToSection={handleJumpToSection} />
-          <CapabilitiesBento />
-          <PanelTourSection />
-          <ComparisonAndProsCons />
-          <DocsAndInstallSection />
-        </main>
-      </div>
+      {demoMode ? (
+        <Suspense
+          fallback={
+            <div className="flex min-h-screen items-center justify-center bg-background font-mono text-xs text-muted-foreground">
+              Loading WebDep Control Plane demo...
+            </div>
+          }
+        >
+          <PanelDemo onExit={handleExitDemo} />
+        </Suspense>
+      ) : (
+        <div className="min-h-screen overflow-x-clip bg-background text-foreground">
+          <NavbarHeader
+            theme={theme}
+            onJumpToSection={handleJumpToSection}
+            onOpenDemo={handleOpenDemo}
+            onThemeChange={handleThemeChange}
+          />
+          <main>
+            <HeroSection
+              onJumpToSection={handleJumpToSection}
+              onOpenDemo={handleOpenDemo}
+            />
+            <CapabilitiesBento />
+            <PanelTourSection onOpenDemo={handleOpenDemo} />
+            <ComparisonAndProsCons />
+            <DocsAndInstallSection />
+          </main>
+        </div>
+      )}
     </MotionConfig>
   );
 }

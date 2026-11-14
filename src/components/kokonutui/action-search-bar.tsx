@@ -77,6 +77,13 @@ export interface ActionSearchBarProps {
   onOpenChange?: (open: boolean) => void;
   defaultOpen?: boolean;
   /**
+   * Render inline in document flow (e.g. inside a modal dialog) instead of a
+   * 46px anchor with an absolutely-positioned dropdown.
+   */
+  inline?: boolean;
+  /** Focus the search input immediately on mount. */
+  autoFocus?: boolean;
+  /**
    * ⌘K / Ctrl+K toggles the palette. By default it only does so while the
    * palette is focused or hovered, so the host page keeps its own ⌘K. Set
    * `true` to take ⌘K page-wide whenever the palette is on screen.
@@ -500,6 +507,8 @@ function ActionSearchBar({
   onSelect,
   onOpenChange,
   defaultOpen = false,
+  inline = false,
+  autoFocus = false,
   shortcut = false,
   label = "Search commands",
   placeholder = "Search or jump to…",
@@ -513,7 +522,8 @@ function ActionSearchBar({
   const reduce = useReducedMotion();
   const isMac = useIsMac();
 
-  const [open, setOpen] = useState(defaultOpen);
+  const [openState, setOpenRaw] = useState(defaultOpen || inline);
+  const open = inline ? true : openState;
   const [query, setQuery] = useState("");
   const [stack, setStack] = useState<CommandItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -560,11 +570,21 @@ function ActionSearchBar({
 
   const setOpenState = useCallback(
     (next: boolean) => {
-      setOpen(next);
+      if (!inline) {
+        setOpenRaw(next);
+      }
       onOpenChange?.(next);
     },
-    [onOpenChange]
+    [inline, onOpenChange]
   );
+
+  useEffect(() => {
+    if (!inline) return;
+    const raf = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [inline]);
 
   const openPalette = useCallback(
     (source: InputSource) => {
@@ -597,6 +617,12 @@ function ActionSearchBar({
   );
 
   useEffect(() => () => window.clearTimeout(holdTimer.current), []);
+
+  useEffect(() => {
+    if (autoFocus) {
+      inputRef.current?.focus();
+    }
+  }, [autoFocus]);
 
   /* -- ⌘K, only while the palette is on screen -- */
 
@@ -857,6 +883,15 @@ function ActionSearchBar({
   };
 
   const handleEscape = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (inline) {
+      e.preventDefault();
+      if (query) {
+        setQuery("");
+      } else {
+        closePalette(false);
+      }
+      return;
+    }
     if (open) {
       e.preventDefault();
       closePalette(true);
@@ -908,6 +943,7 @@ function ActionSearchBar({
 
   // Close when focus leaves the whole palette (Tab away, click outside).
   const handleBlur = (e: FocusEvent<HTMLDivElement>) => {
+    if (inline) return;
     const next = e.relatedTarget;
     if (open && !(next instanceof Node && e.currentTarget.contains(next))) {
       returnFocus.current = null;
@@ -925,7 +961,10 @@ function ActionSearchBar({
     // biome-ignore lint/a11y/noStaticElementInteractions: focusout from the whole palette closes it
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: same focusout handler
     <div
-      className={cn("relative h-[46px] w-full max-w-md", className)}
+      className={cn(
+        inline ? "relative w-full" : "relative h-[46px] w-full max-w-md",
+        className
+      )}
       onBlur={handleBlur}
       onPointerEnter={(e) => {
         hoverRef.current = e.pointerType === "mouse";
@@ -937,10 +976,15 @@ function ActionSearchBar({
     >
       <div
         className={cn(
-          "@container/palette absolute inset-x-0 top-0 z-30 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
-          open
-            ? "shadow-[0_16px_40px_-16px_rgb(0_0_0/0.2)] dark:shadow-[0_16px_40px_-16px_rgb(0_0_0/0.7)]"
-            : "shadow-xs"
+          "@container/palette overflow-hidden rounded-xl border border-border bg-background",
+          inline
+            ? "relative w-full bg-card shadow-[0_24px_64px_-12px_rgb(0_0_0/0.65)]"
+            : cn(
+                "absolute inset-x-0 top-0 z-30",
+                open
+                  ? "shadow-[0_16px_40px_-16px_rgb(0_0_0/0.2)] dark:shadow-[0_16px_40px_-16px_rgb(0_0_0/0.7)]"
+                  : "shadow-xs"
+              )
         )}
       >
         <div className="flex h-11 items-center gap-2 px-3">
@@ -977,7 +1021,7 @@ function ActionSearchBar({
             aria-controls={open ? listboxId : undefined}
             aria-expanded={open}
             autoComplete="off"
-            className="h-full min-w-0 flex-1 bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+            className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-subtle"
             id={inputId}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -1005,13 +1049,16 @@ function ActionSearchBar({
             onPointerDown={(e) => e.preventDefault()}
             ref={panelRef}
           >
-            <div className="border-zinc-100 border-t dark:border-zinc-800/80" />
+            <div className="border-t border-border" />
             <div className="overflow-hidden" ref={bodyRef}>
               <div ref={contentRef}>
                 <div
                   aria-busy={running?.phase === "pending"}
                   aria-label={page ? page.label : "Commands"}
-                  className="relative max-h-72 overflow-y-auto overscroll-contain p-1.5"
+                  className={cn(
+                    "relative overflow-y-auto overscroll-contain p-1.5",
+                    inline ? "max-h-80" : "max-h-72"
+                  )}
                   id={listboxId}
                   ref={listRef}
                   role="listbox"
@@ -1045,7 +1092,7 @@ function ActionSearchBar({
                           <div
                             aria-disabled={running !== null && !status}
                             aria-selected={index === highlighted}
-                            className="group/row flex h-9 cursor-default items-center gap-2.5 rounded-md px-2 text-sm text-zinc-700 aria-disabled:opacity-50 aria-selected:bg-zinc-100 dark:text-zinc-300 dark:aria-selected:bg-zinc-800/70"
+                            className="group/row flex h-9 cursor-pointer items-center gap-2.5 rounded-md px-2 text-sm text-muted-foreground aria-disabled:opacity-50 aria-selected:bg-secondary aria-selected:text-foreground"
                             id={optionId(index)}
                             key={row.key}
                             onClick={() => choose(row, "pointer")}

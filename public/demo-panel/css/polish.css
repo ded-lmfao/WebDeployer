@@ -1,0 +1,52 @@
+/**
+ * WebDep Visual Polish & Interaction Discipline
+ */
+
+/* Browser Layout & Style Containment for Fast Repaints */
+.project-card, .stat-card, .log-line {
+  contain: layout style;
+}
+
+/* Active Nav Row with Focused Cobalt Accent Indicator */
+.nav-item {
+  position: relative;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-item.active {
+  background: var(--bg-card-hover) !important;
+  color: var(--text-main) !important;
+  font-weight: 500;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* File Actions Row Hover Reveal */
+.file-tr .file-actions-cell {
+  opacity: 0.85;
+  transition: opacity var(--transition-fast);
+}
+.file-tr:hover .file-actions-cell {
+  opacity: 1;
+}
+
+/* Reduced motion preference (preserve explicit pre-login splash choreography) */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.login-intro):not(.login-intro *):not(.login-card-container),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+

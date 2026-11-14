@@ -1,0 +1,17 @@
+/**
+ * WebDep Platform Master Stylesheet (Modular Cascade)
+ */
+
+@import './css/variables.css';
+@import './css/themes.css';
+@import './css/layout.css';
+@import './css/components.css';
+@import './css/pipelines.css';
+@import './css/modals.css';
+@import './css/auth.css';
+@import './css/workspace.css';
+@import './css/views.css';
+@import './css/files.css';
+@import './css/icons.css';
+@import './css/polish.css';
+@import './css/responsive.css';

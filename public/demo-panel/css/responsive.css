@@ -1,0 +1,244 @@
+/**
+ * WebDep Responsive Layout: Mobile Drawer, Tablet Breakpoints & Touch Adapters
+ */
+/* ---------- Responsive (Minimal, Uncluttered Mobile & Tablet Layout) ---------- */
+@media (max-width: 1080px) {
+  .content-area { padding: 20px 20px 32px; }
+  .top-header { padding: 0 20px; }
+  .env-quick-add-bar { grid-template-columns: 1fr 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .overview-stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .overview-stats-grid .stat-card-network { grid-column: 1 / -1; }
+}
+
+@media (max-width: 900px) {
+  /* Remove top-left hamburger menu and sidebar drawer completely on mobile */
+  .mobile-menu-btn,
+  .sidebar,
+  .sidebar-backdrop {
+    display: none !important;
+  }
+
+  .projects-grid,
+  .settings-cards-grid { grid-template-columns: 1fr; }
+  .top-header { padding: 0 16px; height: 50px; }
+  .content-area { padding: 16px 16px 80px; }
+  .env-quick-add-bar { grid-template-columns: 1fr; gap: 10px; }
+  .env-quick-submit .env-quick-label { display: none; }
+  .gh-token-row,
+  .settings-card .gh-token-row { grid-template-columns: 1fr auto auto !important; }
+  .gh-token-row .gh-token-label-input { grid-column: 1 / -1; }
+  .ws-banner-header { padding: 16px; gap: 12px; }
+  .ws-banner-identity { min-width: 0; width: 100%; }
+  .ws-actions-toolbar { width: 100%; justify-content: flex-start; gap: 8px; }
+  .ws-tabs-bar {
+    padding: 12px 12px 16px;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Clean Bottom Navigation Bar (Services, Create Service, Home [Middle], Settings, Log Out) */
+  .mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: center;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-subtle);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+    z-index: 25;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .mobile-nav-item {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px 2px;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    user-select: none;
+    min-width: 0;
+    width: 100%;
+    -webkit-tap-highlight-color: transparent;
+    transition: color var(--transition-fast);
+  }
+  .mobile-nav-item svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .mobile-nav-item span {
+    font-size: 10.5px;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .mobile-nav-item.active {
+    color: var(--accent-light);
+    font-weight: 500;
+  }
+  .mobile-nav-home svg {
+    width: 19px;
+    height: 19px;
+  }
+  .mobile-nav-logout {
+    color: var(--danger-light);
+    opacity: 0.85;
+  }
+  .mobile-nav-logout:hover,
+  .mobile-nav-logout:active {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 680px) {
+  /* Collapse multi-column form grids cleanly to single column on phones */
+  .modal-grid-3,
+  .modal-grid-2,
+  .form-row,
+  .tfa-qr-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .tfa-qr-grid {
+    justify-items: center;
+    text-align: center;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .overview-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .overview-stats-grid .stat-card-network,
+  .overview-stats-grid .stat-card:last-child {
+    grid-column: 1 / -1;
+  }
+  .stat-card { padding: 12px 16px; }
+  .stat-value { font-size: 20px; }
+
+  /* Compact, uncluttered headers and toolbars */
+  .view-header { gap: 10px; margin-bottom: 16px; }
+  .view-title-group h1 { font-size: 18px; }
+  .view-title-group p { font-size: 12px; }
+  .view-actions { width: 100%; gap: 6px; }
+  .filter-pills {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px;
+  }
+  .filter-pills .pill { white-space: nowrap; flex-shrink: 0; }
+
+  .ws-banner { margin-bottom: 16px; }
+  .ws-title { font-size: 17px; }
+  .ws-meta-line { font-size: 12px; gap: 6px; }
+  .ws-tabs-bar {
+    padding: 12px 12px 16px;
+    gap: 8px;
+  }
+  .ws-tab-item {
+    padding: 8px 12px;
+    font-size: 12.5px;
+    margin: 0;
+  }
+
+  /* Ensure all horizontal scrollers on mobile never scroll vertically and have space above scrollbar */
+  .table-responsive,
+  .pipeline-track,
+  .modal-tabs {
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    padding-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Flexible search and filter inputs on mobile */
+  #projects-search-input,
+  #audit-search-input,
+  #audit-category-filter,
+  #env-search-input,
+  #log-search-input,
+  #log-level-filter {
+    width: auto !important;
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  /* Compact cards and tables (clean horizontal scroll without stacked label clutter) */
+  .card { margin-bottom: 16px; }
+  .card-header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+  .card-body { padding: 16px; }
+  .table th, .table td { padding: 8px 12px; font-size: 12.5px; }
+
+  /* Clean centered modals adapted for mobile screens */
+  .modal-overlay { padding: 12px; }
+  .modal-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 90vh;
+    max-height: 90dvh;
+    border-radius: var(--radius-xl);
+  }
+  .modal-header { padding: 16px; }
+  .modal-body { padding: 16px; -webkit-overflow-scrolling: touch; }
+  .modal-footer { padding: 12px 16px !important; flex-wrap: wrap; gap: 8px; }
+  .modal-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .modal-tab-btn { white-space: nowrap; font-size: 12px; padding: 6px 8px; }
+
+  /* Logs console height on mobile */
+  .log-console-wrapper {
+    height: calc(100dvh - 210px);
+    min-height: 300px;
+  }
+  .log-toolbar { padding: 8px 10px; gap: 8px; }
+  .log-filters { width: 100%; }
+  .log-terminal { padding: 10px 12px; font-size: 11.5px; }
+
+  /* Prevent iOS Safari zoom on input focus */
+  input.form-control,
+  select.form-control,
+  textarea.form-control {
+    font-size: 16px;
+  }
+
+  /* Toasts */
+  .toast-container { left: 12px; right: 12px; bottom: 66px; }
+  .toast { min-width: 0; width: 100%; max-width: none; }
+
+  /* Pagination bar */
+  .pagination-bar { padding: 12px 16px; gap: 8px; }
+}
+
+@media (max-width: 440px) {
+  .top-header { padding: 0 12px; height: 50px; }
+  .content-area { padding: 16px 12px 80px; }
+  .server-pill span#server-status-text { display: none; }
+  .server-pill { padding: 6px; }
+  .project-card { padding: 16px; }
+  .login-card { padding: 24px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+

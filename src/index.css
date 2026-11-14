@@ -7,6 +7,12 @@
   --background: #f5f7fa;
   --surface-deep: #eceff4;
   --foreground: #111827;
+  --surface: #ffffff;
+  --surface-foreground: #111827;
+  --surface-secondary: #eceff4;
+  --surface-secondary-foreground: #111827;
+  --overlay: #ffffff;
+  --overlay-foreground: #111827;
   --card: #ffffff;
   --card-foreground: #111827;
   --popover: #ffffff;
@@ -15,25 +21,37 @@
   --primary-foreground: #ffffff;
   --secondary: #eceff4;
   --secondary-foreground: #111827;
-  --muted: #eceff4;
+  --default: #eceff4;
+  --default-foreground: #111827;
+  --muted: #4b5565;
   --muted-foreground: #4b5565;
   --muted-subtle: #6b7487;
-  --accent: #eceff4;
-  --accent-foreground: #111827;
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
   --brand-accent: #2563eb;
   --brand-accent-foreground: #ffffff;
   --positive: #16a34a;
   --destructive: #dc2626;
   --border: rgba(17, 24, 39, 0.08);
+  --separator: rgba(17, 24, 39, 0.08);
   --input: rgba(17, 24, 39, 0.14);
   --ring: #2563eb;
+  --focus: #2563eb;
+  --link: #111827;
   --radius: 0.75rem;
 }
 
-.dark {
+.dark,
+[data-theme="dark"] {
   --background: #0b0d14;
   --surface-deep: #07080d;
   --foreground: #eef0f5;
+  --surface: #11141c;
+  --surface-foreground: #eef0f5;
+  --surface-secondary: #1a1e28;
+  --surface-secondary-foreground: #eef0f5;
+  --overlay: #11141c;
+  --overlay-foreground: #eef0f5;
   --card: #11141c;
   --card-foreground: #eef0f5;
   --popover: #11141c;
@@ -42,18 +60,23 @@
   --primary-foreground: #07080d;
   --secondary: #1a1e28;
   --secondary-foreground: #eef0f5;
-  --muted: #1a1e28;
+  --default: #1a1e28;
+  --default-foreground: #eef0f5;
+  --muted: #a3a9b8;
   --muted-foreground: #a3a9b8;
   --muted-subtle: #7a8296;
-  --accent: #1a1e28;
-  --accent-foreground: #eef0f5;
+  --accent: #4f8ef7;
+  --accent-foreground: #07080d;
   --brand-accent: #4f8ef7;
   --brand-accent-foreground: #07080d;
   --positive: #4cc38a;
   --destructive: #e5484d;
   --border: rgba(238, 240, 245, 0.08);
+  --separator: rgba(238, 240, 245, 0.08);
   --input: rgba(238, 240, 245, 0.14);
   --ring: #4f8ef7;
+  --focus: #4f8ef7;
+  --link: #eef0f5;
 }
 
 @theme inline {
@@ -97,4 +120,47 @@
     font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     font-variant-numeric: tabular-nums;
   }
+}
+
+.ink-table.table-root--primary,
+.ink-table.table-root--secondary {
+  padding: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+.ink-table .table__header,
+.ink-table.table-root--secondary .table__header {
+  border-bottom: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--surface-deep) 75%, transparent);
+}
+
+.ink-table .table__column {
+  background-color: transparent;
+  border-radius: 0;
+}
+
+.ink-table .table__body tr:first-child td:first-child,
+.ink-table .table__body tr:first-child td:last-child,
+.ink-table .table__body tr:last-child td:first-child,
+.ink-table .table__body tr:last-child td:last-child {
+  border-radius: 0;
+}
+
+.ink-table .table__cell {
+  background-color: transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.ink-table .table__row {
+  border-bottom-width: 0;
+}
+
+.ink-table .table__row:last-child .table__cell {
+  border-bottom-width: 0;
+}
+
+.ink-table .table__row:hover .table__cell,
+.ink-table .table__row[data-hovered="true"] .table__cell {
+  background-color: color-mix(in srgb, var(--secondary) 45%, transparent);
 }

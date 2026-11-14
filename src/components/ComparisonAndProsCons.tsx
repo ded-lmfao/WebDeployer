@@ -5,13 +5,14 @@ import { Check, Minus } from "lucide-react";
 import {
   COMPARISON_ROWS,
   CONS_ITEMS,
-  DECISION_GUIDE,
   PROS_ITEMS,
   type ComparisonRow,
 } from "@/data/webdepData";
 import { cn } from "@/lib/utils";
 
 type FilterCategory = "all" | ComparisonRow["category"];
+
+const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 const CATEGORY_FILTERS: { id: FilterCategory; label: string }[] = [
   { id: "all", label: "All criteria (9)" },
@@ -34,7 +35,13 @@ export default function ComparisonAndProsCons() {
       className="border-b border-border bg-background py-20 lg:py-24"
     >
       <div className="mx-auto max-w-6xl px-6">
-        <div className="max-w-3xl">
+        <motion.div
+          className="max-w-3xl"
+          initial={{ opacity: 0, y: 10 }}
+          transition={{ duration: 0.36, ease: EASE_OUT }}
+          viewport={{ once: true, margin: "-40px" }}
+          whileInView={{ opacity: 1, y: 0 }}
+        >
           <h2 className="text-3xl font-medium tracking-[-0.02em] text-foreground sm:text-4xl">
             Strengths, trade-offs, and comparison against Coolify, Dokku, and
             Pterodactyl
@@ -44,14 +51,14 @@ export default function ComparisonAndProsCons() {
             trades multi-server container clustering and 100+ community app
             templates for native speed, Windows support, and ~20 MB idle RAM.
           </p>
-        </div>
+        </motion.div>
 
         {/* Pros & Cons two-column grid */}
         <div className="mt-10 grid gap-6 lg:grid-cols-2">
           <motion.div
             className="rounded-2xl border border-border bg-card p-6"
-            initial={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.36, delay: 0.04, ease: EASE_OUT }}
             viewport={{ once: true, margin: "-40px" }}
             whileInView={{ opacity: 1, y: 0 }}
           >
@@ -88,8 +95,8 @@ export default function ComparisonAndProsCons() {
 
           <motion.div
             className="rounded-2xl border border-border bg-card p-6"
-            initial={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.35, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.36, delay: 0.09, ease: EASE_OUT }}
             viewport={{ once: true, margin: "-40px" }}
             whileInView={{ opacity: 1, y: 0 }}
           >
@@ -126,7 +133,13 @@ export default function ComparisonAndProsCons() {
         </div>
 
         {/* Comparison Table */}
-        <div className="mt-16">
+        <motion.div
+          className="mt-16"
+          initial={{ opacity: 0, y: 12 }}
+          transition={{ duration: 0.38, ease: EASE_OUT }}
+          viewport={{ once: true, margin: "-40px" }}
+          whileInView={{ opacity: 1, y: 0 }}
+        >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h3 className="text-xl font-medium tracking-[-0.015em] text-foreground">
@@ -137,21 +150,28 @@ export default function ComparisonAndProsCons() {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-1.5">
+            <div className="relative flex flex-wrap gap-1.5">
               {CATEGORY_FILTERS.map((cat) => {
                 const active = filter === cat.id;
                 return (
                   <button
                     key={cat.id}
                     className={cn(
-                      "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "relative z-10 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       active
-                        ? "border-primary bg-primary text-primary-foreground"
+                        ? "border-transparent text-primary-foreground"
                         : "border-border bg-card text-muted-foreground hover:text-foreground"
                     )}
                     type="button"
                     onClick={() => setFilter(cat.id)}
                   >
+                    {active && (
+                      <motion.span
+                        className="absolute inset-0 -z-10 rounded-lg bg-primary"
+                        layoutId="comparison-filter-pill"
+                        transition={{ duration: 0.24, ease: EASE_OUT }}
+                      />
+                    )}
                     {cat.label}
                   </button>
                 );
@@ -160,10 +180,10 @@ export default function ComparisonAndProsCons() {
           </div>
 
           <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-card">
-            <Table variant="primary">
+            <Table className="ink-table" variant="primary">
               <Table.ScrollContainer>
                 <Table.Content aria-label="WebDep comparison against Coolify, Dokku, and Pterodactyl">
-                  <Table.Header className="border-b border-border bg-surface-deep/60">
+                  <Table.Header>
                     <Table.Column
                       className="w-[22%] text-xs font-medium text-muted-foreground"
                       isRowHeader
@@ -212,32 +232,8 @@ export default function ComparisonAndProsCons() {
               </Table.ScrollContainer>
             </Table>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Decision Rules */}
-        <div className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
-          {DECISION_GUIDE.map((item, idx) => (
-            <div key={item.platform} className="bg-card p-6">
-              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                {idx === 0 && (
-                  <span
-                    aria-hidden="true"
-                    className="size-1.5 rounded-full bg-positive"
-                  />
-                )}
-                <span className={idx === 0 ? "text-foreground" : undefined}>
-                  {item.platform}
-                </span>
-              </div>
-              <h4 className="mt-2 text-sm font-medium text-foreground">
-                {item.fit}
-              </h4>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                {item.reason}
-              </p>
-            </div>
-          ))}
-        </div>
       </div>
     </section>
   );

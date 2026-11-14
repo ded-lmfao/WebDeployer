@@ -1,17 +1,18 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Accordion, Link, Separator, Table, Tabs } from "@heroui/react";
-import { ArrowUpRight, Check, Copy, GitCommitHorizontal } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import {
-  CI_COMMIT_RULES,
   ENV_VARIABLES,
   FAQ_ITEMS,
   GITHUB_RELEASES_URL,
   GITHUB_REPO_URL,
   INSTALL_METHODS,
-  SONAR_URL,
   SUPPORTED_RUNTIMES,
 } from "@/data/webdepData";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+
+const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 function CopyCommandBlock({
   command,
@@ -30,16 +31,27 @@ function CopyCommandBlock({
         <div className="mb-3 flex items-center justify-between border-b border-white/8 pb-2.5 text-xs text-[#7a8296]">
           <span>{shellLabel}</span>
           <button
-            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/12 bg-white/5 px-2.5 text-xs text-[#eef0f5] transition-colors duration-150 hover:bg-white/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-7 min-w-18 items-center justify-center gap-1.5 rounded-md border border-white/12 bg-white/5 px-2.5 text-xs text-[#eef0f5] transition-colors duration-150 hover:bg-white/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             type="button"
             onClick={() => copyToClipboard(command)}
           >
-            {isCopied ? (
-              <Check className="size-3.5 text-[#4cc38a]" strokeWidth={1.5} />
-            ) : (
-              <Copy className="size-3.5" strokeWidth={1.5} />
-            )}
-            <span>{isCopied ? "Copied" : "Copy"}</span>
+            <AnimatePresence initial={false} mode="wait">
+              <motion.span
+                key={isCopied ? "copied" : "copy"}
+                animate={{ opacity: 1, y: 0 }}
+                className="inline-flex items-center gap-1.5"
+                exit={{ opacity: 0, y: -4 }}
+                initial={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.14, ease: EASE_OUT }}
+              >
+                {isCopied ? (
+                  <Check className="size-3.5 text-[#4cc38a]" strokeWidth={1.5} />
+                ) : (
+                  <Copy className="size-3.5" strokeWidth={1.5} />
+                )}
+                <span>{isCopied ? "Copied" : "Copy"}</span>
+              </motion.span>
+            </AnimatePresence>
           </button>
         </div>
         <pre className="overflow-x-auto leading-relaxed text-[#a3a9b8]">
@@ -61,7 +73,13 @@ export default function DocsAndInstallSection() {
         className="border-b border-border bg-surface-deep/40 py-20 lg:py-24"
       >
         <div className="mx-auto max-w-6xl px-6">
-          <div className="max-w-2xl">
+          <motion.div
+            className="max-w-2xl"
+            initial={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.36, ease: EASE_OUT }}
+            viewport={{ once: true, margin: "-40px" }}
+            whileInView={{ opacity: 1, y: 0 }}
+          >
             <h2 className="text-3xl font-medium tracking-[-0.02em] text-foreground sm:text-4xl">
               Install and configuration
             </h2>
@@ -69,9 +87,15 @@ export default function DocsAndInstallSection() {
               Fetch the prebuilt Linux binary, compile from Rust source, or run
               natively on Windows.
             </p>
-          </div>
+          </motion.div>
 
-          <div className="mt-10 rounded-2xl border border-border bg-card p-6">
+          <motion.div
+            className="mt-10 rounded-2xl border border-border bg-card p-6"
+            initial={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.38, delay: 0.04, ease: EASE_OUT }}
+            viewport={{ once: true, margin: "-40px" }}
+            whileInView={{ opacity: 1, y: 0 }}
+          >
             <Tabs
               selectedKey={installTab}
               variant="secondary"
@@ -80,7 +104,11 @@ export default function DocsAndInstallSection() {
               <Tabs.ListContainer>
                 <Tabs.List aria-label="Installation methods">
                   {INSTALL_METHODS.map((method) => (
-                    <Tabs.Tab key={method.id} id={method.id}>
+                    <Tabs.Tab
+                      key={method.id}
+                      className="text-muted-foreground transition-colors hover:text-foreground data-[selected=true]:text-foreground"
+                      id={method.id}
+                    >
                       <Tabs.Indicator />
                       {method.label}
                     </Tabs.Tab>
@@ -108,59 +136,69 @@ export default function DocsAndInstallSection() {
                 </Tabs.Panel>
               ))}
             </Tabs>
-          </div>
+          </motion.div>
 
           {/* .env Variables + Supported Runtimes */}
           <div className="mt-8 grid gap-6 lg:grid-cols-12">
-            <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card p-6 lg:col-span-7">
+            <motion.div
+              className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card p-6 lg:col-span-7"
+              initial={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.38, delay: 0.04, ease: EASE_OUT }}
+              viewport={{ once: true, margin: "-40px" }}
+              whileInView={{ opacity: 1, y: 0 }}
+            >
               <h3 className="text-base font-medium text-foreground">
                 Control-plane configuration (.env)
               </h3>
               <p className="mt-1 mb-5 text-xs text-muted-foreground">
                 Auto-populated by start.sh or edited before first launch
               </p>
-              <Table variant="secondary">
-                <Table.ScrollContainer>
-                  <Table.Content aria-label="WebDep .env variables">
-                    <Table.Header className="border-b border-border bg-surface-deep/60">
-                      <Table.Column
-                        className="text-xs font-medium text-muted-foreground"
-                        isRowHeader
-                      >
-                        Variable
-                      </Table.Column>
-                      <Table.Column className="text-xs font-medium text-muted-foreground">
-                        Default
-                      </Table.Column>
-                      <Table.Column className="text-xs font-medium text-muted-foreground">
-                        Purpose
-                      </Table.Column>
-                    </Table.Header>
-                    <Table.Body>
-                      {ENV_VARIABLES.map((row) => (
-                        <Table.Row
-                          key={row.name}
-                          className="border-b border-border/60 transition-colors last:border-b-0 hover:bg-secondary/40"
-                          id={row.name}
+              <div className="overflow-hidden rounded-xl border border-border bg-background/40">
+                <Table className="ink-table" variant="secondary">
+                  <Table.ScrollContainer>
+                    <Table.Content aria-label="WebDep .env variables">
+                      <Table.Header>
+                        <Table.Column
+                          className="text-xs font-medium text-muted-foreground"
+                          isRowHeader
                         >
-                          <Table.Cell className="font-mono text-xs font-medium text-foreground">
-                            {row.name}
-                          </Table.Cell>
-                          <Table.Cell className="font-mono text-xs text-muted-foreground">
-                            {row.defaultValue}
-                          </Table.Cell>
-                          <Table.Cell className="text-xs text-muted-foreground">
-                            {row.description}
-                          </Table.Cell>
-                        </Table.Row>
-                      ))}
-                    </Table.Body>
-                  </Table.Content>
-                </Table.ScrollContainer>
-              </Table>
-            </div>
+                          Variable
+                        </Table.Column>
+                        <Table.Column className="text-xs font-medium text-muted-foreground">
+                          Default
+                        </Table.Column>
+                        <Table.Column className="text-xs font-medium text-muted-foreground">
+                          Purpose
+                        </Table.Column>
+                      </Table.Header>
+                      <Table.Body>
+                        {ENV_VARIABLES.map((row) => (
+                          <Table.Row key={row.name} id={row.name}>
+                            <Table.Cell className="font-mono text-xs font-medium text-foreground">
+                              {row.name}
+                            </Table.Cell>
+                            <Table.Cell className="font-mono text-xs text-muted-foreground">
+                              {row.defaultValue}
+                            </Table.Cell>
+                            <Table.Cell className="text-xs text-muted-foreground">
+                              {row.description}
+                            </Table.Cell>
+                          </Table.Row>
+                        ))}
+                      </Table.Body>
+                    </Table.Content>
+                  </Table.ScrollContainer>
+                </Table>
+              </div>
+            </motion.div>
 
-            <div className="min-w-0 rounded-2xl border border-border bg-card p-6 lg:col-span-5">
+            <motion.div
+              className="min-w-0 rounded-2xl border border-border bg-card p-6 lg:col-span-5"
+              initial={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.38, delay: 0.09, ease: EASE_OUT }}
+              viewport={{ once: true, margin: "-40px" }}
+              whileInView={{ opacity: 1, y: 0 }}
+            >
               <h3 className="text-base font-medium text-foreground">
                 Supported runtimes
               </h3>
@@ -184,57 +222,17 @@ export default function DocsAndInstallSection() {
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-
-          {/* CI Release Gate & Commit Keywords */}
-          <div className="mt-8 rounded-2xl border border-border bg-card p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <GitCommitHorizontal
-                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                  strokeWidth={1.5}
-                />
-                <div>
-                  <h3 className="text-base font-medium text-foreground">
-                    Release gate and commit rules
-                  </h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Releases are blocked if the SonarCloud gate fails; docs
-                    updates opt out via commit prefixes
-                  </p>
-                </div>
-              </div>
-              <Link
-                className="inline-flex items-center gap-1 font-mono text-xs text-foreground underline-offset-4 hover:underline"
-                href={SONAR_URL}
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                SonarCloud Gate
-                <ArrowUpRight className="size-4 text-muted-foreground" strokeWidth={1.5} />
-              </Link>
-            </div>
-
-            <div className="mt-5 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
-              {CI_COMMIT_RULES.map((rule) => (
-                <div key={rule.pattern} className="bg-background/60 p-4">
-                  <p className="font-mono text-xs font-medium text-foreground">
-                    {rule.pattern}
-                  </p>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    {rule.effect}
-                  </p>
-                  <p className="mt-3 rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-xs text-foreground">
-                    {rule.example}
-                  </p>
-                </div>
-              ))}
-            </div>
+            </motion.div>
           </div>
 
           {/* FAQ Accordion */}
-          <div className="mt-16">
+          <motion.div
+            className="mt-16"
+            initial={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.38, ease: EASE_OUT }}
+            viewport={{ once: true, margin: "-40px" }}
+            whileInView={{ opacity: 1, y: 0 }}
+          >
             <h3 className="text-2xl font-medium tracking-[-0.015em] text-foreground">
               Frequently asked questions
             </h3>
@@ -257,7 +255,7 @@ export default function DocsAndInstallSection() {
                 ))}
               </Accordion>
             </div>
-          </div>
+          </motion.div>
         </div>
       </section>
 
@@ -267,7 +265,11 @@ export default function DocsAndInstallSection() {
             <img
               alt="WebDep"
               className="size-7 rounded-md border border-border bg-card object-cover"
+              decoding="async"
+              height={28}
+              loading="lazy"
               src="./images/logo.png"
+              width={28}
             />
             <div>
               <p className="text-sm font-medium text-foreground">
@@ -296,15 +298,6 @@ export default function DocsAndInstallSection() {
               target="_blank"
             >
               Releases
-            </Link>
-            <Separator className="h-3" orientation="vertical" />
-            <Link
-              className="transition-colors hover:text-foreground"
-              href={SONAR_URL}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              SonarCloud quality gate
             </Link>
           </div>
         </div>

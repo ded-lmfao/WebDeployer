@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
-import { Button, Link, Modal } from "@heroui/react";
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { Button, Link } from "@heroui/react";
 import {
   ArrowUpRight,
   Cpu,
   Database,
-  GitBranch,
   Layers,
+  LayoutDashboard,
   Menu,
   Scale,
   Terminal,
@@ -22,6 +23,7 @@ interface NavbarHeaderProps {
   theme: "light" | "dark";
   onThemeChange: (next: "light" | "dark") => void;
   onJumpToSection: (sectionId: string) => void;
+  onOpenDemo: () => void;
 }
 
 const NAV_LINKS = [
@@ -35,19 +37,31 @@ export default function NavbarHeader({
   theme,
   onThemeChange,
   onJumpToSection,
+  onOpenDemo,
 }: NavbarHeaderProps) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  useEffect(() => {
+    if (!commandOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setCommandOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [commandOpen]);
+
   const commandItems = useMemo<CommandItem[]>(
     () => [
       {
-        id: "cmd-pipeline",
-        label: "Simulate 7-stage deploy pipeline",
-        icon: <GitBranch className="size-4 text-muted-foreground" strokeWidth={1.5} />,
+        id: "cmd-demo",
+        label: "Launch interactive panel demo",
+        icon: <LayoutDashboard className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Interactive",
-        keywords: ["deploy", "pipeline", "simulate", "sse"],
-        shortcut: ["1"],
+        keywords: ["panel", "demo", "sandbox", "theme", "accent", "color", "deploy"],
+        shortcut: ["D"],
       },
       {
         id: "cmd-capabilities",
@@ -55,7 +69,7 @@ export default function NavbarHeader({
         icon: <Cpu className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Sections",
         keywords: ["ram", "rust", "benchmark", "metrics"],
-        shortcut: ["2"],
+        shortcut: ["1"],
       },
       {
         id: "cmd-tour",
@@ -63,7 +77,7 @@ export default function NavbarHeader({
         icon: <Layers className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Sections",
         keywords: ["screenshots", "ui", "overview", "websites", "postgres"],
-        shortcut: ["3"],
+        shortcut: ["2"],
       },
       {
         id: "cmd-comparison",
@@ -71,7 +85,7 @@ export default function NavbarHeader({
         icon: <Scale className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Evaluation",
         keywords: ["pros", "cons", "coolify", "dokku", "pterodactyl"],
-        shortcut: ["4"],
+        shortcut: ["3"],
       },
       {
         id: "cmd-install",
@@ -79,7 +93,7 @@ export default function NavbarHeader({
         icon: <Terminal className="size-4 text-muted-foreground" strokeWidth={1.5} />,
         group: "Documentation",
         keywords: ["start.sh", "cargo", "windows", "env", "postgres"],
-        shortcut: ["5"],
+        shortcut: ["4"],
       },
       {
         id: "cmd-github",
@@ -95,8 +109,11 @@ export default function NavbarHeader({
 
   const handleSelectCommand = (item: CommandItem) => {
     setCommandOpen(false);
+    if (item.id === "cmd-demo") {
+      onOpenDemo();
+      return;
+    }
     const map: Record<string, string> = {
-      "cmd-pipeline": "hero-pipeline",
       "cmd-capabilities": "capabilities",
       "cmd-tour": "panel-tour",
       "cmd-comparison": "comparison",
@@ -123,7 +140,10 @@ export default function NavbarHeader({
             <img
               alt="WebDep"
               className="size-7 rounded-md border border-border bg-card object-cover"
+              decoding="async"
+              height={28}
               src="./images/logo.png"
+              width={28}
             />
             <span className="text-base font-medium tracking-tight text-foreground">
               WebDep
@@ -147,6 +167,17 @@ export default function NavbarHeader({
           </nav>
 
           <div className="flex items-center gap-2">
+            <button
+              className="hidden h-8 items-center gap-1.5 rounded-lg border border-border bg-secondary px-3 text-xs font-medium text-foreground transition-colors duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-foreground/25 hover:bg-card sm:inline-flex"
+              type="button"
+              onClick={onOpenDemo}
+              onFocus={() => void import("@/components/PanelDemo")}
+              onMouseEnter={() => void import("@/components/PanelDemo")}
+            >
+              <LayoutDashboard className="size-3.5 text-muted-foreground" strokeWidth={1.5} />
+              Live demo
+            </button>
+
             <CommandButton
               className="hidden sm:inline-flex"
               global
@@ -191,72 +222,105 @@ export default function NavbarHeader({
           </div>
         </div>
 
-        {mobileMenuOpen && (
-          <div className="border-t border-border bg-card px-6 py-4 md:hidden">
-            <div className="flex flex-col gap-1">
-              {NAV_LINKS.map((item) => (
-                <button
-                  key={item.target}
-                  className="flex h-9 items-center rounded-lg px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onJumpToSection(item.target);
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-              <div className="mt-2 flex items-center gap-2 border-t border-border pt-3">
-                <button
-                  className="flex h-9 flex-1 items-center justify-center rounded-lg border border-border bg-secondary px-3 text-sm font-medium text-foreground"
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    setCommandOpen(true);
-                  }}
-                >
-                  Quick jump
-                </button>
-                <Link
-                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-border bg-card px-3 text-sm text-foreground"
-                  href={GITHUB_REPO_URL}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  GitHub
-                  <ArrowUpRight className="size-4" strokeWidth={1.5} />
-                </Link>
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.div
+              animate={{ opacity: 1, y: 0 }}
+              className="border-t border-border bg-card px-6 py-4 md:hidden"
+              exit={{ opacity: 0, y: -6 }}
+              initial={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div className="flex flex-col gap-1">
+                {NAV_LINKS.map((item) => (
+                  <button
+                    key={item.target}
+                    className="flex h-9 items-center rounded-lg px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      onJumpToSection(item.target);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                <div className="mt-2 flex items-center gap-2 border-t border-border pt-3">
+                  <button
+                    className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground"
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      onOpenDemo();
+                    }}
+                  >
+                    <LayoutDashboard className="size-4" strokeWidth={1.5} />
+                    Live demo
+                  </button>
+                  <button
+                    className="flex h-9 items-center justify-center rounded-lg border border-border bg-secondary px-3 text-sm font-medium text-foreground"
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setCommandOpen(true);
+                    }}
+                  >
+                    Quick jump
+                  </button>
+                  <Link
+                    className="inline-flex h-9 items-center gap-1 rounded-lg border border-border bg-card px-3 text-sm text-foreground"
+                    href={GITHUB_REPO_URL}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    GitHub
+                    <ArrowUpRight className="size-4" strokeWidth={1.5} />
+                  </Link>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
-      <Modal isOpen={commandOpen} onOpenChange={setCommandOpen}>
-        <Modal.Backdrop isDismissable>
-          <Modal.Container placement="top" size="lg">
-            <Modal.Dialog className="mt-12 rounded-2xl border border-border bg-card text-foreground">
-              <Modal.Header className="flex items-center justify-between border-b border-border px-4 py-3">
-                <Modal.Heading className="text-sm font-medium text-foreground">
-                  Jump to section or reference
-                </Modal.Heading>
-                <Modal.CloseTrigger />
-              </Modal.Header>
-              <Modal.Body className="p-3">
-                <ActionSearchBar
-                  defaultOpen
-                  items={commandItems}
-                  label="Search sections, guides, and benchmarks"
-                  placeholder="Search sections or references"
-                  shortcut={false}
-                  onSelect={(item) => handleSelectCommand(item)}
-                />
-              </Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
+      <AnimatePresence>
+        {commandOpen && (
+          <motion.div
+            animate={{ opacity: 1 }}
+            aria-label="Quick jump search"
+            aria-modal="true"
+            className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-20 backdrop-blur-sm sm:pt-24"
+            exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }}
+            role="dialog"
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => setCommandOpen(false)}
+          >
+            <motion.div
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="w-full max-w-lg"
+              exit={{ opacity: 0, scale: 0.98, y: -6 }}
+              initial={{ opacity: 0, scale: 0.97, y: -8 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ActionSearchBar
+                autoFocus
+                defaultOpen
+                inline
+                items={commandItems}
+                label="Search sections, guides, and benchmarks"
+                placeholder="Search sections or references"
+                shortcut={false}
+                onOpenChange={(open) => {
+                  if (!open) setCommandOpen(false);
+                }}
+                onSelect={(item) => handleSelectCommand(item)}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

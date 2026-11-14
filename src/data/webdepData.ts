@@ -5,15 +5,6 @@ export interface TelemetryMetric {
   detail: string;
 }
 
-export interface PipelineStage {
-  id: string;
-  step: number;
-  label: string;
-  summary: string;
-  durationMs: number;
-  logs: string[];
-}
-
 export interface CapabilityItem {
   id: string;
   title: string;
@@ -46,12 +37,6 @@ export interface ComparisonRow {
   pterodactyl: string;
 }
 
-export interface DecisionRule {
-  platform: string;
-  fit: string;
-  reason: string;
-}
-
 export interface InstallMethod {
   id: string;
   label: string;
@@ -73,12 +58,6 @@ export interface RuntimeRow {
   notes: string;
 }
 
-export interface CommitRule {
-  pattern: string;
-  effect: string;
-  example: string;
-}
-
 export interface FaqEntry {
   id: string;
   question: string;
@@ -88,8 +67,6 @@ export interface FaqEntry {
 export const GITHUB_REPO_URL = "https://github.com/ded-lmfao/WebDep";
 export const GITHUB_RELEASES_URL =
   "https://github.com/ded-lmfao/WebDep/releases";
-export const SONAR_URL =
-  "https://sonarcloud.io/summary/new_code?id=ded-lmfao_WebDeployer";
 
 export interface FootprintBar {
   id: string;
@@ -102,19 +79,11 @@ export interface FootprintBar {
 
 export const RAM_FOOTPRINT_BENCHMARKS: FootprintBar[] = [
   {
-    id: "webdep-idle",
-    label: "WebDep (idle)",
-    stack: "Single Rust binary + SQLite WAL",
-    mb: 18.4,
-    displayValue: "18.4 MB",
-    highlight: true,
-  },
-  {
-    id: "webdep-load",
-    label: "WebDep (25 apps)",
-    stack: "10 active PIDs + SSE stream",
-    mb: 23.7,
-    displayValue: "23.7 MB",
+    id: "webdep-daemon",
+    label: "WebDep (daemon)",
+    stack: "Static Rust binary + SQLite WAL + RustEmbed UI",
+    mb: 20,
+    displayValue: "~20 MB",
     highlight: true,
   },
   {
@@ -142,115 +111,28 @@ export const RAM_FOOTPRINT_BENCHMARKS: FootprintBar[] = [
 
 export const TELEMETRY_STRIP: TelemetryMetric[] = [
   {
-    id: "idle-rss",
-    label: "Idle control-plane RSS",
-    value: "~18.4 MB",
-    detail: "Single Rust binary, Axum, SQLite WAL, embedded UI",
+    id: "daemon-rss",
+    label: "Daemon RAM footprint",
+    value: "~20 MB",
+    detail: "Axum + SQLite WAL + UI",
   },
   {
-    id: "peak-rss",
-    label: "Peak RSS (25 apps / 10 PIDs)",
-    value: "~23.7 MB",
-    detail: "Sysinfo telemetry collector + concurrent SSE streams",
+    id: "deploy-stages",
+    label: "Deploy pipeline",
+    value: "7 stages",
+    detail: "Queued FIFO via live SSE",
   },
   {
-    id: "overview-p50",
-    label: "/api/overview cold P50",
-    value: "~2.0 ms",
-    detail: "Measured across 25 projects (down from 116.4 ms)",
+    id: "targets",
+    label: "Target platforms",
+    value: "x86_64 · arm64",
+    detail: "Linux musl & Windows",
   },
   {
-    id: "binary-footprint",
-    label: "Release binary size",
-    value: "~10.0 MB",
-    detail: "No Node, Python, or Docker required for the panel",
-  },
-];
-
-export const PIPELINE_STAGES: PipelineStage[] = [
-  {
-    id: "pending",
-    step: 1,
-    label: "Pending",
-    summary:
-      "Webhook verified (HMAC) or manual deploy queued with branch + commit metadata.",
-    durationMs: 400,
-    logs: [
-      "[00:00.04] deploy#184 queued for billing-api (branch: main)",
-      "[00:00.06] lock acquired on workspace /srv/webdep/apps/billing-api",
-    ],
-  },
-  {
-    id: "fetching",
-    step: 2,
-    label: "Fetching",
-    summary:
-      "Resolves encrypted per-project GitHub/Git PAT via AES-256-GCM or public clone target.",
-    durationMs: 650,
-    logs: [
-      "[00:00.18] decrypting project git token via AES-256-GCM key",
-      "[00:00.42] git fetch origin main --depth=1 -> commit 9c4e21a",
-    ],
-  },
-  {
-    id: "pulling",
-    step: 3,
-    label: "Pulling",
-    summary:
-      "Checks out immutable workspace state and injects decrypted .env secrets securely.",
-    durationMs: 600,
-    logs: [
-      "[00:00.78] checked out tree 9c4e21a cleanly",
-      "[00:00.84] injected 14 encrypted env secrets (0 written to logs)",
-    ],
-  },
-  {
-    id: "installing",
-    step: 4,
-    label: "Installing",
-    summary:
-      "Executes configured package manager or detected runtime setup command.",
-    durationMs: 850,
-    logs: [
-      "[00:01.02] detected Node.js + pnpm workspace",
-      "[00:01.64] pnpm install --frozen-lockfile completed in 620 ms",
-    ],
-  },
-  {
-    id: "building",
-    step: 5,
-    label: "Building",
-    summary:
-      "Compiles production bundle or release target and streams live build stdout/stderr over SSE.",
-    durationMs: 950,
-    logs: [
-      "[00:01.70] running build command: pnpm build",
-      "[00:02.48] build artifacts emitted cleanly (exit code 0)",
-    ],
-  },
-  {
-    id: "deploying",
-    step: 6,
-    label: "Deploying",
-    summary:
-      "Assigns dynamic loopback port, spawns native OS process supervisor, and syncs Caddy route.",
-    durationMs: 700,
-    logs: [
-      "[00:02.52] bound upstream 127.0.0.1:4128 via OS process supervisor",
-      "[00:02.79] synced Caddy reverse proxy route api.example.com -> 127.0.0.1:4128",
-    ],
-  },
-  {
-    id: "health-checking",
-    step: 7,
-    label: "Health Checking",
-    summary:
-      "Verifies HTTP/TCP readiness, shifts live traffic, and notifies configured webhooks.",
-    durationMs: 550,
-    logs: [
-      "[00:02.86] probing http://127.0.0.1:4128/healthz -> 200 OK (2.4 ms)",
-      "[00:03.05] deploy#184 LIVE (rollback snapshot retained)",
-    ],
+    id: "themes",
+    label: "Embedded UI themes",
+    value: "10 presets",
+    detail: "8 dark · 2 light palettes",
   },
 ];
 
@@ -260,11 +142,10 @@ export const CAPABILITIES: CapabilityItem[] = [
     title: "Websites & Auto Caddy TLS",
     eyebrow: "Reverse proxy",
     summary:
-      "Deploy static bundles, Next.js or Astro SSR servers, Python ASGI/WSGI apps, Go binaries, or custom shells with managed Caddy routes",
+      "Deploy Node.js, Python, Go, Rust, or static apps with zero-conflict port allocation and managed Caddy HTTPS.",
     specs: [
-      "7-stage pipeline streamed live over Server-Sent Events (SSE)",
-      "Per-domain HTTPS TLS and loopback upstream routing via Caddy",
-      "GitHub/Git HMAC webhook auto-deploy with branch filtering",
+      "7-stage FIFO build pipeline with rollback snapshots",
+      "Auto Caddyfile sync & HMAC-SHA256 GitHub webhooks",
     ],
     iconName: "globe",
   },
@@ -273,11 +154,10 @@ export const CAPABILITIES: CapabilityItem[] = [
     title: "24/7 Background Workers",
     eyebrow: "Process supervisor",
     summary:
-      "Run Discord or Telegram bots, queue consumers, AI agents, cron loops, and long-lived daemons natively without systemd boilerplate",
+      "Supervise Discord/Telegram bots, Lavalink Java servers, and queue daemons natively as OS processes.",
     specs: [
-      "Capped restart backoff and persistent stdout/stderr log buffers",
-      "Real-time per-PID CPU% and RSS memory sampled by sysinfo",
-      "Start, stop, restart, and clear logs directly from the panel",
+      "Auto-resumes running workloads across restarts",
+      "Live PID CPU%/RSS tracking & log streaming",
     ],
     iconName: "cpu",
   },
@@ -286,50 +166,46 @@ export const CAPABILITIES: CapabilityItem[] = [
     title: "Isolated PostgreSQL Clusters",
     eyebrow: "pg_ctl + firewall",
     summary:
-      "Provision standalone data-directory PostgreSQL clusters on arbitrary ports while WebDep manages roles, backups, and host firewall rules",
+      "Launch standalone PostgreSQL instances with SCRAM-SHA-256 auth and automatic pg_hba.conf firewall rules.",
     specs: [
-      "3 access modes: Local Only (127.0.0.1), IP/CIDR Allowlist, Public",
-      "pg_hba.conf + UFW / iptables / netsh firewall sync",
-      "Live pg_dump & psql SQL console with one-click .sql snapshots",
+      "Localhost, IP/CIDR allowlist, or public network modes",
+      "1-click DATABASE_URL injection & live Postgres logs",
     ],
     iconName: "database",
   },
   {
     id: "security",
-    title: "Hardened Auth & Encrypted Secrets",
-    eyebrow: "Passkeys + TOTP",
+    title: "Passkeys & Encrypted Secrets",
+    eyebrow: "Security",
     summary:
-      "Protect control-plane operations with hardware passkeys, role-based access, and AES-256-GCM encrypted secret storage",
+      "Protect the panel with WebAuthn Passkeys, RFC 6238 TOTP 2FA, Argon2 passwords, and AES-256-GCM secrets.",
     specs: [
-      "WebAuthn hardware/platform Passkeys + TOTP 2FA authenticator",
-      "Argon2id password hashing and AES-256-GCM encrypted secrets",
-      "Viewer & Admin RBAC plus IP, session, and audit trails",
+      "HttpOnly SameSite sessions + X-CSRF-Token checks",
+      "Encrypted .env vault & Git tokens inside SQLite",
     ],
     iconName: "shield",
   },
   {
     id: "workspace",
-    title: "Workspace Shell, SFTP & IDE",
-    eyebrow: "Browser workspace",
+    title: "File Explorer & Code Editor",
+    eyebrow: "Workspace",
     summary:
-      "Open an interactive PTY terminal, manage file trees with drag-and-drop uploads, or edit source files in an embedded Monaco workspace",
+      "Browse, upload, create, rename, edit, and download release files locked inside each canonical root.",
     specs: [
-      "Embedded Monaco editor across project source trees",
-      "Direct archive extraction, permissions, and file previewing",
-      "Live PTY host terminal scoped behind admin auth",
+      "Syntax-highlighted editor with dirty-state save",
+      "500 MB uploads & symlink-escape protection",
     ],
     iconName: "folder",
   },
   {
     id: "telemetry",
-    title: "Sub-2 ms Telemetry & Auto-Updates",
-    eyebrow: "Low-overhead ops",
+    title: "Telemetry, RBAC & Updates",
+    eyebrow: "Operations",
     summary:
-      "Inspect CPU cores, RAM, disk saturation, and live alerts with minimal polling overhead, plus in-panel GitHub Releases upgrades",
+      "Real-time host CPU/RAM/disk/network charts, scoped user permissions, and SHA-256 verified self-updates.",
     specs: [
-      "~18.4 MB idle RSS leaves VPS memory free for workloads",
-      "One-click GitHub Release pull, verify, restart & auto reload",
-      "Alert channels for Discord, Slack, Telegram & custom webhooks",
+      "~20 MB daemon RAM preserves VPS headroom",
+      "GitHub Release binary swap with .old rollback",
     ],
     iconName: "activity",
   },
@@ -340,163 +216,143 @@ export const PANEL_SCREENS: PanelScreen[] = [
     id: "overview",
     title: "Overview Telemetry",
     subtitle:
-      "Real-time host CPU cores, memory/swap pressure, active PIDs, deployments, and instant service health in ~2.0 ms API cold P50.",
+      "Monitor panel overhead, total host CPU/RAM/disk/network throughput, and per-workload CPU, memory, PID, port, and disk utilization.",
     image: "./images/overview.png",
     highlights: [
-      "Live host utilization & process memory tracking",
-      "Deployment counts and instant health status overview",
-      "Zero external Prometheus/Grafana stack needed",
+      "Real-time network curve & host CPU/RAM/disk cards",
+      "Per-workload RSS memory, CPU%, PID, port, and disk view",
+      "Quick filter tabs across Websites, Services, and Databases",
     ],
   },
   {
     id: "websites",
-    title: "Websites & Deploy Pipeline",
+    title: "Hosted Websites",
     subtitle:
-      "Inspect domain routing, SSL status, build commands, webhook secrets, encrypted environment variables, and live SSE deployment logs.",
+      "Manage multi-framework web apps with automatic port allocation, custom domains, automated HTTPS via Caddy, and maintenance mode.",
     image: "./images/websites.png",
     highlights: [
-      "Live 7-stage pipeline progress & full rollback history",
-      "Custom domain + automatic Caddy upstream synchronization",
-      "Per-app AES-256-GCM encrypted env editor",
+      "Zero-conflict port allocation with {{PORT}} injection",
+      "Automated Caddyfile generation & one-click lifecycle actions",
+      "Maintenance page mode without tearing down config",
     ],
   },
   {
     id: "services",
-    title: "Background Services",
+    title: "Backend Services",
     subtitle:
-      "Supervise bots, workers, and daemons with live stdout/stderr streaming, crash recovery policies, and real-time PID metrics.",
+      "Run supervised 24/7 background daemons, Lavalink audio servers, and Node.js or Python bots via Git repos or manual file uploads.",
     image: "./images/services.png",
     highlights: [
-      "Live WebSocket console tailing without SSH",
-      "Capped restart backoff and crash notifications",
-      "Start / stop / restart controls per process",
+      "Built-in presets for Lavalink, Discord/Telegram bots, and workers",
+      "Git merge deploys preserve untracked .env and local data",
+      "Live PID tracking, start/stop controls, and stdout/stderr logs",
     ],
   },
   {
     id: "databases",
-    title: "PostgreSQL Clusters",
+    title: "Managed PostgreSQL",
     subtitle:
-      "Spin up isolated pg_ctl clusters, switch between Local, CIDR Allowlist, and Public firewall policies, run SQL, and snapshot backups.",
+      "Spin up isolated native pg_ctl clusters with SCRAM-SHA-256 auth, local / CIDR allowlist / public rules, and 1-click app linking.",
     image: "./images/databases.png",
     highlights: [
       "Isolated pg_ctl clusters per database instance",
-      "Automated pg_hba.conf + OS firewall synchronization",
-      "Built-in SQL console and downloadable pg_dump backups",
+      "Automated pg_hba.conf & UFW/netsh firewall synchronization",
+      "1-click DATABASE_URL injection into linked websites",
     ],
   },
   {
     id: "workspace",
-    title: "Workspace & Monaco IDE",
+    title: "Pipeline & Project Workspace",
     subtitle:
-      "Edit files, inspect configs, and run commands inside your project directory with built-in Monaco syntax highlighting and PTY shell.",
+      "Track Pending to Health Checking deployments, inspect commits, view per-app CPU/RAM/network charts, edit .env secrets, and roll back.",
     image: "./images/workspace.png",
     highlights: [
-      "In-browser Monaco code editor across workspaces",
-      "Interactive PTY shell directly inside the dashboard",
-      "Fast config tweaks paired with instant redeploy",
+      "Live 7-stage pipeline progress & full release history",
+      "Instant atomic symlink/junction rollback to prior releases",
+      "Per-app AES-256-GCM encrypted .env variable editor",
     ],
   },
   {
     id: "files",
-    title: "File & Archive Manager",
+    title: "File Explorer & Code Editor",
     subtitle:
-      "Browse host and app directories, upload bundles via drag-and-drop, inspect logs, and extract archives cleanly.",
+      "Upload, browse, create, rename, edit with syntax highlighting, and download release files contained within each project root.",
     image: "./images/files.png",
     highlights: [
-      "Drag-and-drop browser file uploads and downloads",
-      "Directory browsing across project workspaces",
-      "Built-in archive handling without external FTP tools",
+      "Drag-and-drop file uploads up to 500 MB per transfer",
+      "In-browser code editor with syntax highlighting & line numbers",
+      "Canonical path validation preventing symlink traversal",
     ],
   },
   {
     id: "settings",
-    title: "Security, RBAC & Updates",
+    title: "Settings, RBAC & Updates",
     subtitle:
-      "Enroll WebAuthn passkeys, configure TOTP 2FA, manage admin/viewer accounts, alert webhooks, and apply GitHub Releases cleanly.",
+      "Configure WebAuthn Passkeys, TOTP 2FA, GitHub tokens, SHA-256 verified release updates, 10 themes, and scoped team permissions.",
     image: "./images/settings.png",
     highlights: [
-      "WebAuthn Passkeys + TOTP 2FA + Argon2id hashing",
-      "Discord, Slack, Telegram & custom alert channels",
-      "In-panel self-update with automatic single-reload sync",
+      "WebAuthn Passkeys, TOTP 2FA & active session management",
+      "Per-user RBAC powers with Online/Idle/Offline presence",
+      "In-panel GitHub Release update with SHA-256 checksum verification",
     ],
   },
   {
     id: "login",
-    title: "Clean Sign-In Gate",
+    title: "Authentication & Passkeys",
     subtitle:
-      "Focused single-screen login supporting username/password with Argon2id verification, passkey challenges, and 2FA codes.",
+      "Strict pre-auth login gate supporting Argon2 password verification, rate-limited lockouts, TOTP two-factor challenges, and Passkeys.",
     image: "./images/login.png",
     highlights: [
-      "Hardware/platform Passkey sign-in support",
-      "TOTP two-factor challenge & session audit logs",
-      "Zero external auth service dependencies",
+      "Hardware & platform WebAuthn Passkey authentication",
+      "RFC 6238 TOTP two-factor challenge with recovery codes",
+      "Argon2 password hashing with rate-limited lockouts",
     ],
   },
 ];
 
 export const PROS_ITEMS = [
   {
-    title: "Small control-plane footprint (~20 MB RAM)",
+    title: "Minimal daemon footprint (~20 MB RAM)",
     detail:
-      "Written in Rust (~18.4 MB idle, ~23.7 MB under 25-project load), preserving RAM on 1 GB–2 GB VPS instances",
+      "Compiled Rust binary with tuned allocator settings leaves nearly all VPS memory free for your workloads",
   },
   {
-    title: "Native processes without Docker overhead",
+    title: "Zero Docker daemon overhead",
     detail:
-      "Runs native binaries and runtimes directly on Linux or Windows with no container layer tax or image bloat",
+      "Supervises native Linux and Windows OS processes directly without image layers or container daemons",
   },
   {
-    title: "Single binary with embedded UI",
+    title: "Integrated reverse proxy, Postgres & file workspace",
     detail:
-      "SQLite (WAL mode) and all dashboard assets compile inside the ~10.0 MB executable — one file to fetch and run",
+      "Generates Caddyfile routes for HTTPS, provisions isolated pg_ctl clusters, and includes an in-browser file editor",
   },
   {
-    title: "Database firewall automation",
+    title: "Hardened auth, RBAC & encrypted vault",
     detail:
-      "Manages isolated pg_ctl PostgreSQL clusters while keeping pg_hba.conf and OS firewall rules (UFW/iptables/netsh) aligned",
-  },
-  {
-    title: "Built-in workspace (Shell + Monaco + Files)",
-    detail:
-      "Interactive PTY shell, file manager, and Monaco editor ship out of the box without separate web IDE addons",
-  },
-  {
-    title: "Linux and Windows host support",
-    detail:
-      "Runs natively on headless Ubuntu/Debian servers and local or dedicated Windows hosts",
+      "WebAuthn Passkeys, TOTP 2FA, Argon2 password verification, scoped user powers, and AES-256-GCM SQLite secrets",
   },
 ];
 
 export const CONS_ITEMS = [
   {
-    title: "Single-node only (no Swarm or Kubernetes)",
+    title: "Single-node VPS architecture",
     detail:
-      "Built as a single-node VPS orchestrator; it does not federate across multi-host worker nodes",
+      "Built for single servers; does not cluster or schedule workloads across multiple remote hosts",
   },
   {
-    title: "No prebuilt Docker app marketplace",
+    title: "No container app template marketplace",
     detail:
-      "Does not bundle 100+ one-click community templates (WordPress, Ghost, Plausible) like container PaaS panels",
+      "Deploys your repositories, services, and PostgreSQL rather than prepackaged Docker Compose SaaS stacks",
   },
   {
-    title: "No container rootfs sandboxing",
+    title: "Shared host OS environment",
     detail:
-      "Processes share the host filesystem and installed runtimes rather than running inside Docker namespaces or cgroup quotas",
+      "Native processes run directly on the host rather than inside Docker container namespaces or cgroup quotas",
   },
   {
-    title: "Requires host language runtimes",
+    title: "Host runtimes & PostgreSQL-focused",
     detail:
-      "Node.js, Python, Go, or Rust toolchains must exist on the host machine when building apps directly on the VPS",
-  },
-  {
-    title: "PostgreSQL-first database tooling",
-    detail:
-      "First-class UI automation targets isolated PostgreSQL clusters; MySQL, Redis, or MongoDB run as separate host services",
-  },
-  {
-    title: "Smaller third-party ecosystem",
-    detail:
-      "Fewer third-party plugins and guides than multi-year Ruby or PHP panels",
+      "Relies on language toolchains installed on the host and focuses managed database automation on PostgreSQL",
   },
 ];
 
@@ -504,10 +360,10 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: "Control-Plane Runtime & Footprint",
     category: "architecture",
-    webdep: "Single ~10 MB Rust binary (~20 MB RAM)",
-    coolify: "Docker containers + PHP/Laravel (~500 MB-1 GB+ RAM)",
-    dokku: "Bash/Go plugins + Docker daemon (~200-400 MB+ RAM)",
-    pterodactyl: "PHP/Laravel Panel + MariaDB + Redis + Wings (~400-800 MB RAM)",
+    webdep: "Single static Rust binary (~20 MB daemon RAM)",
+    coolify: "Docker containers + PHP/Laravel (~500 MB–1 GB+ RAM)",
+    dokku: "Bash/Go plugins + Docker daemon (~200–400 MB+ RAM)",
+    pterodactyl: "PHP/Laravel Panel + MariaDB + Redis + Wings (~400–800 MB RAM)",
   },
   {
     feature: "Workload Isolation Model",
@@ -536,7 +392,7 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: "Web UI & Built-In Workspace",
     category: "operations",
-    webdep: "Embedded dashboard + Monaco IDE + SFTP + PTY terminal",
+    webdep: "Embedded UI + syntax-highlighted editor + file manager",
     coolify: "Rich web UI + container terminal",
     dokku: "CLI-first via SSH (third-party UI add-ons)",
     pterodactyl: "Game UI + console + SFTP/file manager",
@@ -544,7 +400,7 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: "Reverse Proxy & TLS",
     category: "operations",
-    webdep: "Managed Caddy integration with auto HTTPS",
+    webdep: "Auto-generated Caddyfile + Caddy reload (auto HTTPS)",
     coolify: "Traefik or Caddy managed proxy",
     dokku: "Nginx proxy + Let's Encrypt plugin",
     pterodactyl: "Manual Nginx/Caddy for panel + SFTP/game ports",
@@ -552,7 +408,7 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: "Database Provisioning & Firewall",
     category: "security",
-    webdep: "Isolated pg_ctl Postgres + pg_hba & OS firewall sync",
+    webdep: "Isolated pg_ctl Postgres + pg_hba & UFW/netsh sync",
     coolify: "Containerized Postgres, MySQL, Redis, MongoDB",
     dokku: "Official DB plugins (Postgres, Redis, etc.)",
     pterodactyl: "External MySQL/MariaDB database hosts",
@@ -560,7 +416,7 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: "Auth & Secrets Encryption",
     category: "security",
-    webdep: "Passkeys (WebAuthn), TOTP 2FA, Argon2id, AES-256-GCM",
+    webdep: "Passkeys (WebAuthn), TOTP 2FA, Argon2, AES-256-GCM",
     coolify: "Session auth + 2FA + Laravel team RBAC",
     dokku: "SSH keys / host UNIX permissions",
     pterodactyl: "Laravel auth + 2FA + subuser permissions",
@@ -568,37 +424,10 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   {
     feature: "Best-Fit Use Case",
     category: "operations",
-    webdep: "Small VPS, native websites, bots, agents & Postgres",
+    webdep: "Small VPS, native websites, bots, services & Postgres",
     coolify: "Self-hosted cloud, multi-server Compose apps & templates",
     dokku: "Git-push Heroku workflow for CLI minimalists",
     pterodactyl: "Commercial or community game-server hosting",
-  },
-];
-
-export const DECISION_GUIDE: DecisionRule[] = [
-  {
-    platform: "Choose WebDep",
-    fit: "Low-RAM VPS, Websites, Bots & Native Performance",
-    reason:
-      "Keep ~98% of a 1 GB-2 GB VPS free for your apps with a single ~10 MB Rust binary, built-in Monaco IDE, and real pg_ctl Postgres.",
-  },
-  {
-    platform: "Choose Coolify",
-    fit: "Multi-Server Container Fleets & 1-Click Templates",
-    reason:
-      "You run larger servers (4 GB+ RAM) and want Docker Compose previews plus dozens of prepackaged SaaS alternatives.",
-  },
-  {
-    platform: "Choose Dokku",
-    fit: "Pure CLI Git-Push Minimalism",
-    reason:
-      "You prefer living in SSH terminals (git push dokku main), do not want a web IDE, and want Heroku-style buildpacks.",
-  },
-  {
-    platform: "Choose Pterodactyl",
-    fit: "Game Server Allocation & SFTP Quotas",
-    reason:
-      "You host Minecraft, Rust, or Steam game servers that need per-user RAM/CPU/disk container limits and Egg installers.",
   },
 ];
 
@@ -606,80 +435,83 @@ export const INSTALL_METHODS: InstallMethod[] = [
   {
     id: "linux-prebuilt",
     label: "Linux Quick Install",
-    platform: "Ubuntu / Debian / RHEL",
-    note: "Recommended. Downloads the prebuilt x86_64 release binary, writes defaults to .env, and starts WebDep with live supervisor.",
-    command: `git clone https://github.com/ded-lmfao/WebDep.git
-cd WebDep
-chmod +x start.sh
-./start.sh`,
+    platform: "Ubuntu / Debian / RHEL (x86_64 & arm64)",
+    note: "Recommended. Fetches the SHA-256 verified GitHub Release binary, configures UFW/iptables ports, and can install a systemd service.",
+    command: `git clone https://github.com/ded-lmfao/WebDep.git webdep
+cd webdep
+./start.sh
+
+# Or install as a 24/7 systemd service
+sudo ./start.sh --service`,
     verify:
-      "Verify health locally: curl -i http://127.0.0.1:3000/healthz (includes X-WebDep-Boot token).",
+      "Verify health locally: curl -i http://127.0.0.1:4600/healthz (returns X-WebDep-Boot & X-WebDep-Version).",
   },
   {
     id: "source-cargo",
     label: "Build From Source",
-    platform: "Any Linux / macOS / Windows with Rust",
-    note: "Compiles the complete Rust workspace including embedded frontend UI and bundled SQLite engine.",
-    command: `git clone https://github.com/ded-lmfao/WebDep.git
-cd WebDep
+    platform: "Any Linux / Windows host with Rust",
+    note: "Compiles the Rust binary with bundled SQLite and RustEmbed dashboard assets directly from source.",
+    command: `git clone https://github.com/ded-lmfao/WebDep.git webdep
+cd webdep
+cp .env.example .env
 cargo build --release --locked
 ./target/release/webdep`,
     verify:
-      "Produces a standalone binary at target/release/webdep with zero runtime asset folders required.",
+      "Produces a standalone binary at target/release/webdep; open http://YOUR_SERVER_IP:4600.",
   },
   {
     id: "windows-host",
     label: "Windows Server / Local",
     platform: "Windows 10 / 11 / Server",
-    note: "Runs natively as a Windows binary with netsh firewall integration and local process supervision.",
-    command: `git clone https://github.com/ded-lmfao/WebDep.git
-cd WebDep
+    note: "Compiles if needed and starts WebDep natively on Windows with netsh firewall support.",
+    command: `git clone https://github.com/ded-lmfao/WebDep.git webdep
+cd webdep
 .\\start.bat`,
     verify:
-      "Also supports PowerShell orchestration via .\\start.ps1; visits http://127.0.0.1:3000.",
+      "Also supports PowerShell orchestration via .\\start.ps1; opens http://127.0.0.1:4600.",
   },
 ];
 
 export const ENV_VARIABLES: EnvVarRow[] = [
   {
+    name: "HOST",
+    defaultValue: "0.0.0.0",
+    description: "Network interface to bind the HTTP control-plane server.",
+  },
+  {
     name: "PORT",
-    defaultValue: "3000",
-    description: "TCP port where the WebDep control-plane HTTP server binds.",
-  },
-  {
-    name: "ADMIN_USER",
-    defaultValue: "admin",
-    description: "Bootstrap administrator account created on first launch.",
-  },
-  {
-    name: "ADMIN_PASS",
-    defaultValue: "(generated/custom)",
-    description: "Initial administrator password (hashed immediately via Argon2id).",
-  },
-  {
-    name: "JWT_SECRET",
-    defaultValue: "(auto-generated)",
-    description: "HMAC signing key for HTTP-only dashboard authentication cookies.",
-  },
-  {
-    name: "ENCRYPTION_KEY",
-    defaultValue: "(auto-generated)",
-    description: "32-byte key protecting .env secrets, TOTP secrets, and Git PATs via AES-256-GCM.",
-  },
-  {
-    name: "APPS_ROOT",
-    defaultValue: "./apps",
-    description: "Filesystem root storing cloned app repositories and workspaces.",
+    defaultValue: "4600",
+    description: "TCP port where the WebDep panel and API listen.",
   },
   {
     name: "DATA_DIR",
     defaultValue: "./data",
-    description: "Directory holding the SQLite WAL database, logs, and PostgreSQL cluster data.",
+    description: "Directory holding webdep.sqlite, master.key, Caddy configs, releases, and database clusters.",
   },
   {
-    name: "CADDY_ADMIN_URL",
-    defaultValue: "http://127.0.0.1:2019",
-    description: "Optional Caddy Admin API endpoint for automated domain + HTTPS routing.",
+    name: "ADMIN_USERNAME",
+    defaultValue: "admin",
+    description: "Main administrator username (live-reloaded directly from .env).",
+  },
+  {
+    name: "ADMIN_PASSWORD",
+    defaultValue: "admin123",
+    description: "Main administrator password (change immediately after first setup).",
+  },
+  {
+    name: "ADMIN_RESET_2FA",
+    defaultValue: "false",
+    description: "Temporarily set to true to clear TOTP 2FA on the Main Admin account.",
+  },
+  {
+    name: "SESSION_TTL_S",
+    defaultValue: "604800",
+    description: "HttpOnly session cookie lifetime in seconds (7 days default).",
+  },
+  {
+    name: "RUST_LOG",
+    defaultValue: "webdep=info",
+    description: "Tracing verbosity filter (debug, info, warn, error).",
   },
 ];
 
@@ -687,50 +519,32 @@ export const SUPPORTED_RUNTIMES: RuntimeRow[] = [
   {
     name: "Node.js / TypeScript",
     detection: "package.json",
-    notes: "Supports npm, pnpm, yarn, Next.js, Astro, Express, Fastify, Vite, or React builds.",
+    notes: "Next.js, Vite, Express, Fastify, bots, or APIs via npm/pnpm with {{PORT}} injection.",
   },
   {
     name: "Python",
-    detection: "requirements.txt / pyproject.toml",
-    notes: "FastAPI, Flask, Django, Uvicorn, Gunicorn, or standalone worker scripts.",
+    detection: "requirements.txt",
+    notes: "FastAPI, Flask, Django, Uvicorn, Discord/Telegram bots, and background workers.",
   },
   {
-    name: "Rust",
-    detection: "Cargo.toml",
-    notes: "Compiles release binaries cleanly via Cargo and supervises the executable directly.",
+    name: "Java",
+    detection: ".jar / pom.xml",
+    notes: "Lavalink audio servers, Spring Boot services, and JAR workers.",
   },
   {
     name: "Go",
     detection: "go.mod",
-    notes: "Builds static Go services with zero runtime dependencies.",
+    notes: "Compiles native Go web servers and daemons with zero external runtime overhead.",
   },
   {
-    name: "Static / Frontend",
-    detection: "index.html / dist/",
-    notes: "Served via WebDep's embedded static file handler or Caddy with Gzip compression.",
+    name: "Rust",
+    detection: "Cargo.toml",
+    notes: "Builds Cargo release binaries cleanly and supervises the compiled binary directly.",
   },
   {
-    name: "Custom Shell",
-    detection: "Any start command",
-    notes: "Executes arbitrary commands, cron daemons, shell scripts, or custom binaries.",
-  },
-];
-
-export const CI_COMMIT_RULES: CommitRule[] = [
-  {
-    pattern: "Default push to main",
-    effect: "Runs CI checks + SonarCloud gate, bumps patch release on pass",
-    example: "git commit -m 'fix: handle graceful worker shutdown'",
-  },
-  {
-    pattern: "docs:, chore(docs):, [skip release], [docs], [no-release]",
-    effect: "Skips release job completely while allowing repository updates",
-    example: "git commit -m 'docs: update .env firewall notes [skip release]'",
-  },
-  {
-    pattern: "fix!:, feat!:, [major] / feat:, [minor]",
-    effect: "Triggers SemVer major or minor version bump when SonarCloud passes",
-    example: "git commit -m 'feat: add passkey challenge endpoint'",
+    name: "Static / Custom",
+    detection: "Custom commands",
+    notes: "Runs static bundles or arbitrary shell install, build, and start commands.",
   },
 ];
 
@@ -739,30 +553,24 @@ export const FAQ_ITEMS: FaqEntry[] = [
     id: "docker-needed",
     question: "Does WebDep require Docker to run websites or databases?",
     answer:
-      "No. WebDep runs your websites, background workers, and PostgreSQL clusters as native OS processes supervised directly by its ~10 MB Rust binary. You can still run Docker containers separately if desired, but WebDep imposes zero container daemon overhead.",
+      "No. WebDep supervises websites, background workers, and isolated PostgreSQL (pg_ctl) clusters directly as native OS processes from a single static Rust binary with zero container daemon overhead.",
   },
   {
     id: "custom-domain",
-    question: "How does HTTPS and reverse proxying work without Nginx configs?",
+    question: "How does automatic HTTPS and custom domain routing work?",
     answer:
-      "Point CADDY_ADMIN_URL at Caddy's local admin endpoint (default http://127.0.0.1:2019). Whenever a project deploys onto its assigned loopback port, WebDep syncs the domain route in Caddy so automatic Let's Encrypt TLS works immediately.",
+      "WebDep writes per-website and master Caddyfile configs into data/caddy/ with strict token sanitization and reloads Caddy automatically, giving your custom domains managed HTTPS via Let's Encrypt / ZeroSSL.",
   },
   {
     id: "auto-update",
-    question: "What happens when I update WebDep from the Settings panel?",
+    question: "How do in-panel self-updates work?",
     answer:
-      "WebDep pulls the verified binary from GitHub Releases, replaces the executable cleanly, restarts itself with a fresh random X-WebDep-Boot boot token on /healthz, and instructs your active Settings session to run a single hard reload once the new boot ID responds.",
-  },
-  {
-    id: "ci-sonar",
-    question: "How are releases gated in CI/CD?",
-    answer:
-      "Releases on the main branch run behind a dedicated sonar_gate job in GitHub Actions. If the SonarCloud Quality Gate fails or errors, the release job is blocked. Documentation-only commits matching docs:, [skip release], or [docs] bypass releasing automatically.",
+      "From Platform Settings (or ./start.sh --update), WebDep downloads the SHA-256 verified static GitHub Release binary, runs a --version check, swaps the executable atomically with .old rollback support, and restarts seamlessly.",
   },
   {
     id: "security-model",
-    question: "How are database credentials, Git PATs, and .env secrets stored?",
+    question: "How are .env secrets, Git tokens, and logins secured?",
     answer:
-      "All secrets — project environment variables, GitHub/Git personal access tokens, and TOTP secrets — are encrypted at rest inside SQLite using AES-256-GCM before storage. Control-plane passwords use Argon2id, and WebAuthn hardware/platform passkeys are built in.",
+      "Project environment variables, GitHub tokens, SSH deploy keys, and TOTP secrets are encrypted at rest via AES-256-GCM using a 32-byte key in DATA_DIR/master.key. Authentication supports Argon2 password verification, WebAuthn Passkeys, TOTP 2FA, CSRF tokens, and scoped RBAC.",
   },
 ];
