@@ -103,7 +103,7 @@ fn main() {
             git_output(&["remote", "get-url", "origin"])
                 .and_then(|u| normalize_github_repo_slug(&u))
         })
-        .unwrap_or_else(|| "ded-lmfao/WebDeployer".to_string());
+        .unwrap_or_else(|| "ded-lmfao/WebDep".to_string());
 
     println!("cargo:rustc-env=WEBDEP_VERSION={}", pkg_version);
     println!("cargo:rustc-env=WEBDEP_COMMIT_SHA={}", commit_sha);

@@ -7,8 +7,8 @@
     <em>Turn any Linux or Windows VPS into your own private PaaS with zero container overhead.</em>
   </p>
   <p>
-    <a href="https://github.com/ded-lmfao/WebDeployer/releases/latest">
-      <img src="https://img.shields.io/github/v/release/ded-lmfao/WebDeployer?style=for-the-badge&color=4f8ef7&label=Release" alt="Latest Release">
+    <a href="https://github.com/ded-lmfao/WebDep/releases/latest">
+      <img src="https://img.shields.io/github/v/release/ded-lmfao/WebDep?style=for-the-badge&color=4f8ef7&label=Release" alt="Latest Release">
     </a>
     <img src="https://img.shields.io/badge/Rust-2021%20Edition-DEA584?style=for-the-badge&logo=rust&logoColor=black" alt="Rust">
     <img src="https://img.shields.io/badge/Tokio-Asynchronous-8A2BE2?style=for-the-badge&logo=tokio&logoColor=white" alt="Tokio">
@@ -149,10 +149,10 @@ Supports password sign-in with Argon2 verification, rate-limited lockouts, TOTP 
 ## Quick Start
 
 ### Option 1: Prebuilt Linux Release (Recommended)
-`start.sh` automatically fetches the latest SHA-256 verified static binary (`x86_64` or `aarch64`) from [GitHub Releases](https://github.com/ded-lmfao/WebDeployer/releases/latest) without needing to compile Rust on your VPS:
+`start.sh` automatically fetches the latest SHA-256 verified static binary (`x86_64` or `aarch64`) from [GitHub Releases](https://github.com/ded-lmfao/WebDep/releases/latest) without needing to compile Rust on your VPS:
 
 ```bash
-git clone https://github.com/ded-lmfao/WebDeployer.git webdep
+git clone https://github.com/ded-lmfao/WebDep.git webdep
 cd webdep
 
 # Run interactively
@@ -168,7 +168,7 @@ sudo ./start.sh --service
 ### Option 2: Build from Source with Cargo
 ```bash
 # 1. Clone repository
-git clone https://github.com/ded-lmfao/WebDeployer.git webdep
+git clone https://github.com/ded-lmfao/WebDep.git webdep
 cd webdep
 
 # 2. Configure environment
@@ -223,7 +223,7 @@ Pushes to `main` build static `x86_64-unknown-linux-musl` and `aarch64-unknown-l
 - **Default commit** → bumps **`patch`** (`v2.0.0` → `v2.0.1`)
 - **`[minor]` / `minor:`** in commit message → bumps **`minor`** (`v2.0.1` → `v2.1.0`)
 - **`[major]` / `major:` / `BREAKING CHANGE:` / `feat!:`** → bumps **`major`** (`v2.1.0` → `v3.0.0`)
-- **`[skip release]` / `[skip ci]`** → skips cutting a release
+- **`docs:` / `[docs]` / `[skip release]` / `[skip ci]`** → skips cutting a release
 
 ---
 

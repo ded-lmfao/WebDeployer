@@ -35,7 +35,7 @@ detect_repo_slug() {
         echo "${BASH_REMATCH[1]}"
         return 0
     fi
-    echo "ded-lmfao/WebDeployer"
+    echo "ded-lmfao/WebDep"
 }
 
 install_release_binary() {

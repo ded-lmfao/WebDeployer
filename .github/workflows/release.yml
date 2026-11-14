@@ -213,6 +213,13 @@ jobs:
               exit 1
             fi
 
+            if [[ "${HTTP_A}" == "404" && -z "${SONAR_PROJECT_KEY}" && "${PROJECT_KEY}" == "ded-lmfao_WebDep" ]]; then
+              echo "Note: SonarCloud key '${PROJECT_KEY}' returned 404; falling back to 'ded-lmfao_WebDeployer'."
+              PROJECT_KEY="ded-lmfao_WebDeployer"
+              HTTP_A=$(curl -sS -o "$TMP_ANALYSES" -w '%{http_code}' "${CURL_AUTH[@]}" \
+                "${SONAR_HOST_URL}/api/project_analyses/search?project=${PROJECT_KEY}&ps=50" || echo "000")
+            fi
+
             ANALYSIS_ID=""
             if [[ "${HTTP_A}" == "200" ]]; then
               ANALYSIS_ID=$(jq -r --arg sha "${TARGET_SHA}" \
