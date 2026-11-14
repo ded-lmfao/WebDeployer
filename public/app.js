@@ -145,6 +145,16 @@ window.addEventListener('keydown', (e) => {
 });
 
 
+// Strip single-shot hard-reload cache-buster query param if returning from self-update
+try {
+  const curUrl = new URL(window.location.href);
+  if (curUrl.searchParams.has('_updated')) {
+    curUrl.searchParams.delete('_updated');
+    const cleanUrl = curUrl.pathname + (curUrl.search || '') + (curUrl.hash || '');
+    window.history.replaceState(window.history.state, '', cleanUrl || '/');
+  }
+} catch (_) {}
+
 // Start application
 initGlobalMotionInteractions();
 void syncThemeFromServer();

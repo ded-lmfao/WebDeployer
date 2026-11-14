@@ -11,6 +11,9 @@ pub mod users;
 
 pub use common::AppState;
 
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use axum::{
     extract::DefaultBodyLimit,
     http::StatusCode,
@@ -19,6 +22,29 @@ use axum::{
     Router,
 };
 use tower_http::compression::CompressionLayer;
+
+fn server_boot_token() -> &'static str {
+    static BOOT: OnceLock<String> = OnceLock::new();
+    BOOT.get_or_init(|| {
+        let ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("{}-{:x}", std::process::id(), ns)
+    })
+}
+
+async fn healthz_handler() -> (StatusCode, [(&'static str, &'static str); 3], &'static str) {
+    (
+        StatusCode::OK,
+        [
+            ("Cache-Control", "no-store, no-cache, must-revalidate"),
+            ("X-WebDep-Boot", server_boot_token()),
+            ("X-WebDep-Version", env!("WEBDEP_VERSION")),
+        ],
+        "ok",
+    )
+}
 
 use self::auth::*;
 use self::projects::*;
@@ -152,10 +178,35 @@ pub fn create_router(state: AppState) -> Router {
             "/api/databases/:id/files/upload",
             post(db_files_upload_handler).layer(DefaultBodyLimit::max(500 * 1024 * 1024)),
         )
-        .route("/healthz", get(|| async { (StatusCode::OK, "ok") }))
+        .route("/healthz", get(healthz_handler))
         // Static assets fallback
         .fallback(axum_static_fallback)
         .layer(middleware::from_fn_with_state(state.clone(), security_middleware))
         .layer(CompressionLayer::new())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[tokio::test]
+    async fn test_healthz_returns_ok_and_boot_headers() {
+        let resp = healthz_handler().await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let boot = resp
+            .headers()
+            .get("X-WebDep-Boot")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(!boot.is_empty());
+        assert_eq!(boot, server_boot_token());
+        assert_eq!(
+            resp.headers()
+                .get("X-WebDep-Version")
+                .and_then(|v| v.to_str().ok()),
+            Some(env!("WEBDEP_VERSION"))
+        );
+    }
 }

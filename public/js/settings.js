@@ -388,6 +388,7 @@ document.getElementById('restart-panel-btn')?.addEventListener('click', async ()
   });
   if (!ok) return;
 
+  const initialHealth = await probeHealthBoot();
   try {
     await api('/api/system/restart', { method: 'POST' });
   } catch (err) {
@@ -396,18 +397,14 @@ document.getElementById('restart-panel-btn')?.addEventListener('click', async ()
   }
 
   toast('Panel is restarting. Reconnecting', 'info', 8000);
-  await new Promise((r) => setTimeout(r, 1500));
-  for (let i = 0; i < 60; i++) {
-    try {
-      const res = await fetch('/healthz', { cache: 'no-store' });
-      if (res.ok) {
-        window.location.reload();
-        return;
-      }
-    } catch (_) { /* still down */ }
-    await new Promise((r) => setTimeout(r, 1000));
+  const reconnected = await pollReconnectionAfterUpdate(initialHealth.boot, {
+    maxAttempts: 60,
+    initialDelayMs: 1500,
+    useModal: false,
+  });
+  if (!reconnected) {
+    toast('Panel did not come back within 60s. Start it manually.', 'error', 10000);
   }
-  toast('Panel did not come back within 60s. Start it manually.', 'error', 10000);
 });
 
 document.getElementById('clear-cache-btn')?.addEventListener('click', async () => {
@@ -559,6 +556,7 @@ export async function startPlatformUpdate() {
   if (closeBtn) closeBtn.style.display = 'none';
 
   openModal('modal-platform-update');
+  const initialHealth = await probeHealthBoot();
 
   try {
     await api('/api/system/update', { method: 'POST', body: { tag: v?.remote_tag || null } });
@@ -612,7 +610,7 @@ export async function startPlatformUpdate() {
         if (spinner) spinner.style.display = 'block';
         if (bannerMsg) bannerMsg.textContent = 'Restarting WebDep panel now. Reconnecting automatically.';
 
-        void pollReconnectionAfterUpdate();
+        void pollReconnectionAfterUpdate(initialHealth.boot);
       }
     } catch (_) {
       // transient network poll error
@@ -644,13 +642,14 @@ export async function executePostUpdateRestart() {
   if (dismissBtn) dismissBtn.disabled = true;
   if (closeBtn) closeBtn.style.display = 'none';
 
+  const initialHealth = await probeHealthBoot();
   try {
     await api('/api/system/restart', { method: 'POST' });
   } catch (err) {
     toast(`Restart trigger returned: ${err.message}`, 'info');
   }
 
-  void pollReconnectionAfterUpdate();
+  void pollReconnectionAfterUpdate(initialHealth.boot);
 }
 
 export function copyUpdateLogs() {
@@ -663,42 +662,93 @@ export function copyUpdateLogs() {
   });
 }
 
-export async function pollReconnectionAfterUpdate() {
-  const stepText = document.getElementById('update-step-text');
-  const bannerMsg = document.getElementById('update-banner-msg');
-  const progressBar = document.getElementById('update-progress-bar');
-  const spinner = document.getElementById('update-active-spinner');
+let hardReloadTriggered = false;
+
+async function probeHealthBoot() {
+  try {
+    const res = await fetch('/healthz', { cache: 'no-store' });
+    if (!res.ok) return { ok: false, boot: null };
+    return {
+      ok: true,
+      boot: res.headers.get('X-WebDep-Boot') || null,
+    };
+  } catch (_) {
+    return { ok: false, boot: null };
+  }
+}
+
+async function performSingleHardReload(bootToken) {
+  if (hardReloadTriggered) return;
+  hardReloadTriggered = true;
+
+  if ('caches' in window) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (_) {}
+  }
+
+  await Promise.allSettled([
+    fetch('/', { cache: 'reload', credentials: 'same-origin' }),
+    fetch('/style.css', { cache: 'reload', credentials: 'same-origin' }),
+    fetch('/app.js', { cache: 'reload', credentials: 'same-origin' }),
+  ]);
+
+  try {
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('_updated', bootToken || String(Date.now()));
+    window.location.replace(nextUrl.toString());
+  } catch (_) {
+    window.location.reload();
+  }
+}
+
+export async function pollReconnectionAfterUpdate(previousBoot = null, options = {}) {
+  const maxAttempts = Number.isFinite(options.maxAttempts) ? options.maxAttempts : 90;
+  const initialDelayMs = Number.isFinite(options.initialDelayMs) ? options.initialDelayMs : 2000;
+  const useModal = options.useModal !== false;
+
+  const stepText = useModal ? document.getElementById('update-step-text') : null;
+  const bannerMsg = useModal ? document.getElementById('update-banner-msg') : null;
+  const progressBar = useModal ? document.getElementById('update-progress-bar') : null;
+  const spinner = useModal ? document.getElementById('update-active-spinner') : null;
 
   if (progressBar) {
     progressBar.style.width = '100%';
     progressBar.style.background = 'var(--success)';
   }
 
-  await new Promise((r) => setTimeout(r, 2000));
+  await new Promise((r) => setTimeout(r, initialDelayMs));
 
-  for (let attempt = 1; attempt <= 90; attempt++) {
-    if (bannerMsg) bannerMsg.textContent = `Probing WebDep service (Attempt ${attempt}/90)`;
-    try {
-      const res = await fetch('/healthz', { cache: 'no-store' });
-      if (res.ok) {
+  let sawDown = false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (bannerMsg) bannerMsg.textContent = `Probing WebDep service (Attempt ${attempt}/${maxAttempts})`;
+    const probe = await probeHealthBoot();
+    if (!probe.ok) {
+      sawDown = true;
+    } else {
+      const bootChanged = Boolean(probe.boot && probe.boot !== previousBoot);
+      const fallbackReady = !probe.boot && (sawDown || attempt >= 6);
+      if (bootChanged || fallbackReady) {
         if (stepText) stepText.textContent = 'WebDep is back online.';
-        if (bannerMsg) bannerMsg.textContent = 'Updated release verified live. Reloading dashboard in 1.5s';
+        if (bannerMsg) bannerMsg.textContent = 'Updated release verified live. Performing hard reload';
         if (spinner) spinner.style.display = 'none';
-        toast('WebDep updated and restarted.', 'success', 4000);
-        setTimeout(() => window.location.reload(), 1500);
-        return;
+        toast('WebDep updated and restarted. Reloading...', 'success', 3500);
+        setTimeout(() => {
+          void performSingleHardReload(probe.boot);
+        }, 600);
+        return true;
       }
-    } catch (_) {
-      // Still restarting
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
 
   if (bannerMsg) bannerMsg.textContent = 'Panel took longer than expected to reconnect. Please refresh your browser or check terminal status: sudo systemctl status webdep';
-  const dismissBtn = document.getElementById('update-dismiss-btn');
+  const dismissBtn = useModal ? document.getElementById('update-dismiss-btn') : null;
   if (dismissBtn) dismissBtn.disabled = false;
-  const closeBtn = document.getElementById('modal-platform-update-close');
+  const closeBtn = useModal ? document.getElementById('modal-platform-update-close') : null;
   if (closeBtn) closeBtn.style.display = 'block';
+  return false;
 }
 
 // Bind globals for onclick inline HTML handlers
