@@ -85,22 +85,6 @@ impl AppCache {
         })
     }
 
-    /// Returns pre-serialized JSON bytes directly as an `axum::body::Bytes`.
-    /// Zero allocations, zero deserialization, zero copy when converting to Axum response body.
-    pub fn get_bytes(&self, key: &str) -> Option<Bytes> {
-        let now = Instant::now();
-        if let Ok(map) = self.store.read() {
-            if let Some(entry) = map.get(key) {
-                if entry.expires_at > now {
-                    self.hits.fetch_add(1, Ordering::Relaxed);
-                    return Some(entry.bytes.clone());
-                }
-            }
-        }
-        self.misses.fetch_add(1, Ordering::Relaxed);
-        None
-    }
-
     /// Returns cached payload along with an encoded gzip copy when requested by the caller.
     /// Lazily compresses payloads >= 1 KiB once per cache entry using shared read locking.
     pub fn get_bytes_negotiated(&self, key: &str, want_gzip: bool) -> Option<(Bytes, bool)> {
@@ -148,13 +132,6 @@ impl AppCache {
                     expires_at: now + ttl,
                 },
             );
-        }
-    }
-
-    /// Stores pre-serialized Bytes only if no invalidation happened since `expected_gen`.
-    pub fn set_bytes_if_gen(&self, key: String, bytes: Bytes, ttl: Duration, expected_gen: u64) {
-        if self.generation.load(Ordering::Acquire) == expected_gen {
-            self.set_bytes(key, bytes, ttl);
         }
     }
 
