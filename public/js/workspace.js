@@ -101,11 +101,19 @@ function navigateTo(viewName, entityParam = null) {
   if (curPath !== targetPath || window.location.hash) {
     try {
       window.history.pushState({ view: viewName, param: routeParam ?? null }, '', targetPath);
-    } catch (_) {}
+    } catch (_) { }
   }
   renderCurrentView();
 }
 window.navigateTo = navigateTo;
+
+function trimEdgeSlashes(path) {
+  let start = 0;
+  let end = path.length;
+  while (start < end && path.charCodeAt(start) === 47) start += 1;
+  while (end > start && path.charCodeAt(end - 1) === 47) end -= 1;
+  return path.slice(start, end);
+}
 
 function handleHashRoute() {
   if (!state.user || !state.csrf || state.pendingMfaToken) {
@@ -118,7 +126,7 @@ function handleHashRoute() {
   if (window.location.hash && window.location.hash.startsWith('#/')) {
     rawPath = window.location.hash.slice(2);
   } else {
-    rawPath = (window.location.pathname || '/').replace(/^\/+|\/+$/g, '');
+    rawPath = trimEdgeSlashes(window.location.pathname || '/');
   }
 
   const parts = (rawPath || 'overview').split('/').filter(Boolean);
@@ -146,7 +154,7 @@ function handleHashRoute() {
   if ((window.location.pathname || '/') !== canonicalPath || window.location.hash) {
     try {
       window.history.replaceState({ view, param: routeParam }, '', canonicalPath);
-    } catch (_) {}
+    } catch (_) { }
   }
 
   state.currentView = view;

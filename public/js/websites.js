@@ -232,9 +232,9 @@ function renderProjectsList() {
         <div class="project-card-actions" onclick="event.stopPropagation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 2px;">
           <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             ${hasPower('process') ? (isOnline
-              ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Stop</button>`
-              : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Start</button>`
-            ) : ''}
+        ? `<button class="btn btn-danger btn-sm" onclick="stopProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Stop</button>`
+        : `<button class="btn btn-success btn-sm" onclick="startProject(${p.id})" style="padding: 4px 10px; font-size: 11.5px;">Start</button>`
+      ) : ''}
             ${hasAnyPower(['files', 'files_write']) ? `<button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'files')" style="padding: 4px 10px; font-size: 11.5px;" title="Manage files">Files</button>` : ''}
             ${hasPower('logs') ? `<button class="btn btn-secondary btn-sm" onclick="openWebsiteWorkspace(${p.id}, 'logs')" style="padding: 4px 10px; font-size: 11.5px;" title="Live console logs">Logs</button>` : ''}
             ${hasPower('projects_manage') ? `

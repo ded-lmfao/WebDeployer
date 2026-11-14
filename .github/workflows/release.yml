@@ -106,7 +106,7 @@ jobs:
               BUMP_KIND="${INPUT_BUMP:-patch}"
             fi
           else
-            if printf '%s\n' "$FULL_MSG" | grep -Eiq '(^[[:space:]]*chore\(release\):|\[[[:space:]]*(skip ci|ci skip|skip release|no release)[[:space:]]*\])'; then
+            if printf '%s\n' "$FULL_MSG" | grep -Eiq '(^[[:space:]]*(docs|doc)(\([^)]*\))?:|^[[:space:]]*chore\((release|docs)\):|\[[[:space:]]*(skip[-_ ]*ci|ci[-_ ]*skip|skip[-_ ]*release|no[-_ ]*release|docs([-_ ]*only)?)[[:space:]]*\]|(^|[[:space:]])(bump|release)[[:space:]]*:[[:space:]]*(none|skip|false)\b)'; then
               SHOULD_RELEASE="false"
               BUMP_KIND="none"
               NEXT_VER="$BASE_VER"
@@ -168,9 +168,95 @@ jobs:
             node --check "$f"
           done
 
+  sonar_gate:
+    name: SonarCloud Quality Gate
+    needs: meta_and_test
+    if: needs.meta_and_test.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for SonarCloud analysis & verify Quality Gate
+        shell: bash
+        env:
+          SONAR_HOST_URL: https://sonarcloud.io
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || '' }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          TARGET_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          PROJECT_KEY="${SONAR_PROJECT_KEY}"
+          if [[ -z "${PROJECT_KEY}" ]]; then
+            PROJECT_KEY="${GH_REPO//\//_}"
+          fi
+
+          CURL_AUTH=()
+          if [[ -n "${SONAR_TOKEN:-}" ]]; then
+            CURL_AUTH=(-u "${SONAR_TOKEN}:")
+          fi
+
+          echo "Checking SonarCloud Quality Gate for '${PROJECT_KEY}' at commit ${TARGET_SHA}..."
+          echo "Dashboard: ${SONAR_HOST_URL}/dashboard?id=${PROJECT_KEY}"
+
+          MAX_ATTEMPTS=60
+          POLL_INTERVAL_SEC=10
+          TMP_ANALYSES=$(mktemp)
+          TMP_QG=$(mktemp)
+          trap 'rm -f "$TMP_ANALYSES" "$TMP_QG"' EXIT
+
+          for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+            HTTP_A=$(curl -sS -o "$TMP_ANALYSES" -w '%{http_code}' "${CURL_AUTH[@]}" \
+              "${SONAR_HOST_URL}/api/project_analyses/search?project=${PROJECT_KEY}&ps=50" || echo "000")
+
+            if [[ "${HTTP_A}" == "401" || "${HTTP_A}" == "403" ]]; then
+              echo "Error: SonarCloud API returned HTTP ${HTTP_A}. Ensure SONAR_TOKEN secret is set if the project is private." >&2
+              exit 1
+            fi
+
+            ANALYSIS_ID=""
+            if [[ "${HTTP_A}" == "200" ]]; then
+              ANALYSIS_ID=$(jq -r --arg sha "${TARGET_SHA}" \
+                '[.analyses[]? | select(.revision == $sha)] | .[0].key // empty' \
+                "$TMP_ANALYSES" 2>/dev/null || true)
+            else
+              echo "Attempt ${attempt}/${MAX_ATTEMPTS}: SonarCloud analyses API returned HTTP ${HTTP_A}, retrying..."
+            fi
+
+            if [[ -n "${ANALYSIS_ID}" ]]; then
+              HTTP_Q=$(curl -sS -o "$TMP_QG" -w '%{http_code}' "${CURL_AUTH[@]}" \
+                "${SONAR_HOST_URL}/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}" || echo "000")
+
+              if [[ "${HTTP_Q}" == "200" ]]; then
+                QG_STATUS=$(jq -r '.projectStatus.status // empty' "$TMP_QG" 2>/dev/null || true)
+                if [[ -n "${QG_STATUS}" && "${QG_STATUS}" != "NONE" ]]; then
+                  echo "SonarCloud analysisId=${ANALYSIS_ID} Quality Gate status=${QG_STATUS}"
+                  jq -r '.projectStatus.conditions[]? | "  - \(.metricKey): \(.status) (actual=\(.actualValue // "n/a"), threshold=\(.errorThreshold // "n/a"))"' \
+                    "$TMP_QG" 2>/dev/null || true
+
+                  if [[ "${QG_STATUS}" == "OK" ]]; then
+                    echo "SonarCloud Quality Gate passed; release may proceed."
+                    exit 0
+                  fi
+
+                  echo "Error: SonarCloud Quality Gate failed (${QG_STATUS}). Aborting release." >&2
+                  echo "Issues: ${SONAR_HOST_URL}/project/issues?id=${PROJECT_KEY}&issueStatuses=OPEN%2CCONFIRMED" >&2
+                  exit 1
+                fi
+              else
+                echo "Attempt ${attempt}/${MAX_ATTEMPTS}: SonarCloud Quality Gate API returned HTTP ${HTTP_Q}, retrying..."
+              fi
+            fi
+
+            echo "Attempt ${attempt}/${MAX_ATTEMPTS}: waiting for SonarCloud analysis of ${TARGET_SHA}..."
+            sleep "${POLL_INTERVAL_SEC}"
+          done
+
+          echo "Error: Timed out waiting for SonarCloud analysis of commit ${TARGET_SHA}. Aborting release." >&2
+          exit 1
+
   build:
     name: Build Static Binary (${{ matrix.asset_arch }})
-    needs: meta_and_test
+    needs: [meta_and_test, sonar_gate]
     if: needs.meta_and_test.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -282,7 +368,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [meta_and_test, build]
+    needs: [meta_and_test, sonar_gate, build]
     if: needs.meta_and_test.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:

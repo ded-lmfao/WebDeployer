@@ -58,14 +58,26 @@ function trackAnim(el, ctrl) {
   return ctrl;
 }
 
+function afterFinished(ctrl) {
+  const finished = ctrl?.finished;
+  if (typeof finished?.then === 'function') {
+    return finished.catch(() => {});
+  }
+  return Promise.resolve();
+}
+
+function clearInlineStyles(elements, props) {
+  for (const el of elements) {
+    for (const prop of props) {
+      if (el.style[prop]) el.style[prop] = '';
+    }
+  }
+}
+
 function clearStylesWhenDone(ctrl, el, props = ['transform', 'opacity', 'filter']) {
-  if (!ctrl || !ctrl.finished || !el) return;
-  ctrl.finished
-    .then(() => {
-      for (const prop of props) {
-        if (el.style[prop]) el.style[prop] = '';
-      }
-    })
+  if (!ctrl || !el) return;
+  void afterFinished(ctrl)
+    .then(() => clearInlineStyles([el], props))
     .catch(() => {});
 }
 
@@ -234,16 +246,9 @@ export function staggerElements(elements, options = {}) {
     trackAnim(item, ctrl);
   }
 
-  if (ctrl?.finished) {
-    ctrl.finished
-      .then(() => {
-        for (const item of items) {
-          item.style.transform = '';
-          item.style.opacity = '';
-        }
-      })
-      .catch(() => {});
-  }
+  void afterFinished(ctrl)
+    .then(() => clearInlineStyles(items, ['transform', 'opacity']))
+    .catch(() => {});
 }
 
 /**
@@ -287,18 +292,16 @@ export function animateModalOpen(modalTarget) {
       SPRING_SNAPPY,
     );
     entry.ctrls.push(boxCtrl);
-    if (boxCtrl?.finished) {
-      boxCtrl.finished
-        .then(() => {
-          const latest = modalState.get(overlay);
-          if (latest && latest.token === myToken) {
-            overlay.style.opacity = '';
-            container.style.opacity = '';
-            container.style.transform = '';
-          }
-        })
-        .catch(() => {});
-    }
+    void afterFinished(boxCtrl)
+      .then(() => {
+        const latest = modalState.get(overlay);
+        if (latest && latest.token === myToken) {
+          overlay.style.opacity = '';
+          container.style.opacity = '';
+          container.style.transform = '';
+        }
+      })
+      .catch(() => {});
   }
 }
 
@@ -338,21 +341,18 @@ export function animateModalClose(modalTarget) {
     entry.ctrls.push(boxCtrl);
   }
 
-  const settle = Promise.all([
-    overlayCtrl?.finished?.catch(() => {}) || Promise.resolve(),
-    boxCtrl?.finished?.catch(() => {}) || Promise.resolve(),
-  ]);
-
-  settle.then(() => {
-    const latest = modalState.get(overlay);
-    if (latest && latest.token !== myToken) return;
-    overlay.classList.remove('active');
-    overlay.style.opacity = '';
-    if (container) {
-      container.style.opacity = '';
-      container.style.transform = '';
-    }
-  });
+  void Promise.all([afterFinished(overlayCtrl), afterFinished(boxCtrl)])
+    .then(() => {
+      const latest = modalState.get(overlay);
+      if (latest && latest.token !== myToken) return;
+      overlay.classList.remove('active');
+      overlay.style.opacity = '';
+      if (container) {
+        container.style.opacity = '';
+        container.style.transform = '';
+      }
+    })
+    .catch(() => {});
 }
 
 /**
@@ -416,8 +416,8 @@ export function animateToastExit(toastEl) {
     el.remove();
   };
 
-  if (ctrl?.finished) {
-    ctrl.finished.then(finishRemove).catch(finishRemove);
+  if (typeof ctrl?.finished?.then === 'function') {
+    void ctrl.finished.then(finishRemove, finishRemove);
   }
   setTimeout(finishRemove, 260);
 }
@@ -453,17 +453,15 @@ export function animateMobileDrawer(sidebarEl, backdropEl, shouldOpen) {
       { duration: 0.2, ease: EASE_OUT, reduceMotion: false },
     );
     prev.ctrls.push(sCtrl, bCtrl);
-    if (sCtrl?.finished) {
-      sCtrl.finished
-        .then(() => {
-          const latest = drawerState.get(sidebarEl);
-          if (latest && latest.token === myToken) {
-            sidebarEl.style.transform = '';
-            backdropEl.style.opacity = '';
-          }
-        })
-        .catch(() => {});
-    }
+    void afterFinished(sCtrl)
+      .then(() => {
+        const latest = drawerState.get(sidebarEl);
+        if (latest && latest.token === myToken) {
+          sidebarEl.style.transform = '';
+          backdropEl.style.opacity = '';
+        }
+      })
+      .catch(() => {});
     return;
   }
 
@@ -479,17 +477,16 @@ export function animateMobileDrawer(sidebarEl, backdropEl, shouldOpen) {
   );
   prev.ctrls.push(sCtrl, bCtrl);
 
-  Promise.all([
-    sCtrl?.finished?.catch(() => {}) || Promise.resolve(),
-    bCtrl?.finished?.catch(() => {}) || Promise.resolve(),
-  ]).then(() => {
-    const latest = drawerState.get(sidebarEl);
-    if (latest && latest.token !== myToken) return;
-    sidebarEl.classList.remove('mobile-open');
-    backdropEl.classList.remove('active');
-    sidebarEl.style.transform = '';
-    backdropEl.style.opacity = '';
-  });
+  void Promise.all([afterFinished(sCtrl), afterFinished(bCtrl)])
+    .then(() => {
+      const latest = drawerState.get(sidebarEl);
+      if (latest && latest.token !== myToken) return;
+      sidebarEl.classList.remove('mobile-open');
+      backdropEl.classList.remove('active');
+      sidebarEl.style.transform = '';
+      backdropEl.style.opacity = '';
+    })
+    .catch(() => {});
 }
 
 /**
@@ -633,16 +630,9 @@ export function animateTableRowsStagger(tbodyTarget) {
   for (const row of rows) {
     trackAnim(row, ctrl);
   }
-  if (ctrl?.finished) {
-    ctrl.finished
-      .then(() => {
-        for (const row of rows) {
-          row.style.opacity = '';
-          row.style.transform = '';
-        }
-      })
-      .catch(() => {});
-  }
+  void afterFinished(ctrl)
+    .then(() => clearInlineStyles(rows, ['opacity', 'transform']))
+    .catch(() => {});
 }
 
 /**
