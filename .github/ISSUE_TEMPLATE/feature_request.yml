@@ -1,0 +1,42 @@
+name: Feature Request
+description: Propose a new capability, integration, or UI/UX improvement for WebDep.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What limitation or workflow pain point does this address?
+      placeholder: I'm trying to deploy / monitor / configure...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe how you would expect this to work in WebDep.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Target Area
+      options:
+        - Websites & Deployment Pipeline
+        - Background Services
+        - PostgreSQL / Databases
+        - Security & Authentication
+        - Workspace / Terminal / Files
+        - Telemetry & Notifications
+        - CLI / Packaging / Docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or alternative designs you considered.

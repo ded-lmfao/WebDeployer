@@ -1,0 +1,79 @@
+name: Bug Report
+description: Report a crash, deployment failure, UI regression, or unexpected behavior in WebDep.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! For security vulnerabilities, please use our private advisory form instead of a public issue:
+        https://github.com/ded-lmfao/WebDep/security/advisories/new
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: Describe the issue you encountered...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps or commands needed to reproduce the issue.
+      value: |
+        1. Go to '...'
+        2. Click or run '...'
+        3. Observe error '...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      options:
+        - Overview / Telemetry
+        - Websites & Deployment Pipeline
+        - Background Services
+        - PostgreSQL Clusters / Firewall
+        - Workspace / Terminal / File Manager
+        - Auth (Login / Passkeys / 2FA / RBAC)
+        - Self-Updater / CLI / Installer
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: WebDep Version
+      description: Check the sidebar/settings footer or run `./webdep --version`.
+      placeholder: e.g. v2.0.4 or main commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Host OS & Architecture
+      placeholder: e.g. Ubuntu 24.04 x86_64, Debian 12 aarch64, Windows 11 x64
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact any secrets, tokens, or passwords before pasting logs.
+      render: text

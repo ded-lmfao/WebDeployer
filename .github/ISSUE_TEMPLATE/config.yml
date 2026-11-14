@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a Security Vulnerability (Private)
+    url: https://github.com/ded-lmfao/WebDep/security/advisories/new
+    about: Please report security issues privately instead of opening a public issue.
+  - name: Project Documentation & Overview
+    url: https://github.com/ded-lmfao/WebDep#readme
+    about: Check setup steps, .env configuration, and supported runtimes first.
