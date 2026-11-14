@@ -3,18 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none';"
+    />
     <title>WebDep — Single-Binary Rust PaaS &amp; Native Process Orchestrator</title>
     <meta
       name="description"
-      content="Turn any Linux or Windows VPS into a self-hosted PaaS with zero container overhead. Host websites, 24/7 services, and isolated PostgreSQL clusters from a ~20 MB Rust control plane."
+      content="Turn any Linux or Windows VPS into a self-hosted PaaS with zero container overhead. Host websites, 24/7 services, and isolated PostgreSQL clusters in ~20 MB RAM."
     />
     <link rel="icon" type="image/png" href="./images/logo.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
   </head>
   <body class="bg-background text-foreground antialiased selection:bg-[#4f8ef7]/25">
     <div id="root"></div>

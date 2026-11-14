@@ -495,8 +495,8 @@ export const ENV_VARIABLES: EnvVarRow[] = [
   },
   {
     name: "ADMIN_PASSWORD",
-    defaultValue: "admin123",
-    description: "Main administrator password (change immediately after first setup).",
+    defaultValue: "(auto-generated)",
+    description: "20-character bootstrap password generated at first launch (.env written with 0600 permissions on Unix).",
   },
   {
     name: "ADMIN_RESET_2FA",
@@ -506,7 +506,17 @@ export const ENV_VARIABLES: EnvVarRow[] = [
   {
     name: "SESSION_TTL_S",
     defaultValue: "604800",
-    description: "HttpOnly session cookie lifetime in seconds (7 days default).",
+    description: "Absolute HttpOnly session cookie lifetime in seconds (7 days default).",
+  },
+  {
+    name: "SESSION_IDLE_TIMEOUT_S",
+    defaultValue: "1800",
+    description: "Idle inactivity session expiration in seconds (30 minutes default; 0 disables).",
+  },
+  {
+    name: "FORCE_SECURE_COOKIES",
+    defaultValue: "false",
+    description: "Force Secure session cookies unconditionally (also auto-enabled on HTTPS / X-Forwarded-Proto: https).",
   },
   {
     name: "RUST_LOG",
@@ -571,6 +581,6 @@ export const FAQ_ITEMS: FaqEntry[] = [
     id: "security-model",
     question: "How are .env secrets, Git tokens, and logins secured?",
     answer:
-      "Project environment variables, GitHub tokens, SSH deploy keys, and TOTP secrets are encrypted at rest via AES-256-GCM using a 32-byte key in DATA_DIR/master.key. Authentication supports Argon2 password verification, WebAuthn Passkeys, TOTP 2FA, CSRF tokens, and scoped RBAC.",
+      "First startup generates a random 20-character bootstrap password rather than using static defaults. Environment variables, GitHub tokens, SSH deploy keys, and TOTP secrets are encrypted at rest via AES-256-GCM (DATA_DIR/master.key). Auth includes Argon2id hashing, WebAuthn Passkeys, TOTP 2FA, HttpOnly/SameSite=Strict/HTTPS-Secure cookies, CSRF validation, CSP + HSTS headers, absolute & idle session expiration, and scrubbed child process environments.",
   },
 ];
