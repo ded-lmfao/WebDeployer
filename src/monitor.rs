@@ -325,7 +325,6 @@ impl Monitor {
         results
     }
 
-    #[cfg(test)]
     pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
         self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
         if root_pids.is_empty() {
@@ -356,6 +355,19 @@ impl Monitor {
         let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
         let tree = Self::sum_tree_metrics_from_index(&children_map, &metrics_map, root_pids);
         (panel_metrics, tree)
+    }
+
+    /// Returns (cpu_usage, resident_memory_bytes) strictly for a single process
+    /// without traversing into descendant or child processes.
+    pub fn get_process_metrics(&self, pid: u32) -> (f32, u64) {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+        let sys = self.sys.lock().unwrap();
+        let pid_obj = sysinfo::Pid::from_u32(pid);
+        if let Some(p) = sys.process(pid_obj) {
+            (p.cpu_usage(), p.memory())
+        } else {
+            (0.0, 0)
+        }
     }
 
     /// Instantaneous (< 1 microsecond) lock-free/read-lock read of the cached telemetry snapshot.
