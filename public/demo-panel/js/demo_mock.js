@@ -11,7 +11,7 @@
   const nowSec = () => Math.floor(Date.now() / 1000);
   const nowMs = () => Date.now();
 
-  let signedIn = true;
+  let signedIn = false;
   let activeTheme = (() => {
     try {
       return localStorage.getItem('webdep.theme') || 'midnight-ink';
@@ -947,4 +947,57 @@ export function verifyWebhook(sigHeader) {
     }
   }
   window.EventSource = DemoEventSource;
+
+  // Start from the Hello -> Welcome -> Sign In splash screen with demo credentials ready
+  function prefillDemoLogin() {
+    setTimeout(() => {
+      const userInput = document.getElementById('login-username');
+      const passInput = document.getElementById('login-password');
+      if (userInput && !userInput.value) userInput.value = 'admin';
+      if (passInput && !passInput.value) passInput.value = 'admin123';
+    }, 0);
+  }
+
+  function setupDemoLoginHelpers() {
+    const loginView = document.getElementById('login-view');
+    if (loginView) {
+      if (loginView.style.display === 'flex') prefillDemoLogin();
+      const observer = new MutationObserver(() => {
+        if (loginView.style.display === 'flex') prefillDemoLogin();
+      });
+      observer.observe(loginView, { attributes: true, attributeFilter: ['style'] });
+    }
+
+    const passkeyBtn = document.getElementById('login-passkey-btn');
+    if (passkeyBtn) {
+      passkeyBtn.addEventListener(
+        'click',
+        async (e) => {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          passkeyBtn.disabled = true;
+          try {
+            const resp = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: 'admin' }),
+            });
+            const data = await resp.json();
+            if (typeof window.applyAuthSuccess === 'function') {
+              await window.applyAuthSuccess(data);
+            }
+          } finally {
+            passkeyBtn.disabled = false;
+          }
+        },
+        true
+      );
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupDemoLoginHelpers);
+  } else {
+    setupDemoLoginHelpers();
+  }
 })();
