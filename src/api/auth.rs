@@ -81,15 +81,15 @@ pub(crate) async fn login_handler(
         }))
         .into_response();
         // Ensure no session cookie exists while awaiting 2FA completion
-        res.headers_mut().insert(
-            header::SET_COOKIE,
-            HeaderValue::from_static("nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
-        );
+        let is_https = is_https_request(&headers, state.auth.force_secure_cookies);
+        if let Ok(hv) = HeaderValue::from_str(&clear_session_cookie_value(is_https)) {
+            res.headers_mut().insert(header::SET_COOKIE, hv);
+        }
         return Ok(res);
     }
 
     log_audit(&state, &user.username, "auth.login", Some(&user.username), Some("User signed in"));
-    create_authenticated_response(&state, user)
+    create_authenticated_response(&state, &headers, user)
 }
 
 #[derive(Deserialize)]
@@ -101,6 +101,7 @@ pub(crate) struct Verify2faLoginPayload {
 
 pub(crate) async fn verify_2fa_login_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<Verify2faLoginPayload>,
 ) -> Result<Response, (StatusCode, String)> {
     let lock_key = format!("2fa:{}", payload.mfa_token);
@@ -161,7 +162,7 @@ pub(crate) async fn verify_2fa_login_handler(
         Some("User signed in with 2FA verification"),
     );
 
-    create_authenticated_response(&state, user)
+    create_authenticated_response(&state, &headers, user)
 }
 
 pub(crate) async fn logout_handler(
@@ -171,11 +172,11 @@ pub(crate) async fn logout_handler(
     if let Some(session_id) = extract_session_id(&headers) {
         state.auth.delete_session(&session_id);
     }
+    let is_https = is_https_request(&headers, state.auth.force_secure_cookies);
     let mut res = (StatusCode::OK, "Logged out").into_response();
-    res.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_static("nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
-    );
+    if let Ok(hv) = HeaderValue::from_str(&clear_session_cookie_value(is_https)) {
+        res.headers_mut().insert(header::SET_COOKIE, hv);
+    }
     res.headers_mut().insert(
         header::HeaderName::from_static("clear-site-data"),
         HeaderValue::from_static("\"cache\", \"storage\""),
@@ -219,17 +220,17 @@ pub(crate) async fn presence_handler(
     Json(payload): Json<PresencePayload>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let session_id = extract_session_id(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
-    let (_, user) = state
-        .auth
-        .get_session(&session_id)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let normalized = match payload.state.trim().to_ascii_lowercase().as_str() {
         "online" => "online",
         "idle" => "idle",
         "offline" => "offline",
         _ => "online",
     };
+    let (_, user) = state
+        .auth
+        .get_session_with_touch(&session_id, normalized == "online")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
     state.auth.set_session_presence(&session_id, user.id, normalized);
 
     Ok(Json(serde_json::json!({
@@ -706,7 +707,7 @@ pub(crate) async fn passkey_login_finish_handler(
         Some(&format!("User signed in via Passkey / Biometrics ({})", passkey_name)),
     );
 
-    create_authenticated_response(&state, user)
+    create_authenticated_response(&state, &headers, user)
 }
 
 // ---------------------------------------------------------------------------

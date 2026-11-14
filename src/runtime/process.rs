@@ -165,9 +165,18 @@ impl Runtime {
             cmd.pre_exec(|| {
                 // Detach into independent session so panel restarts never signal or terminate the workload
                 libc::setsid();
+                // Restrictive file creation mask and disable core dumps so decrypted app env vars never hit disk
+                libc::umask(0o027);
+                let no_core = libc::rlimit {
+                    rlim_cur: 0,
+                    rlim_max: 0,
+                };
+                libc::setrlimit(libc::RLIMIT_CORE, &no_core);
                 Ok(())
             });
         }
+
+        crate::config::Config::scrub_control_plane_env(&mut cmd);
 
         // Force UTF-8 output so Python/Node apps printing emoji or arrows never crash on the
         // Windows 'charmap' codec when stdout is piped. User env vars below can still override these.

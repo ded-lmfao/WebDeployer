@@ -431,8 +431,40 @@ function getWorkloadIconInfo(r) {
 // ============================================================================
 // View 1: Overview & Live Resource Consumption
 // ============================================================================
+const _ovDomCache = {
+  els: null,
+};
+
+function getOverviewDomEls() {
+  const cached = _ovDomCache.els;
+  if (cached && cached.badgeWeb && cached.badgeWeb.isConnected !== false) {
+    return cached;
+  }
+  const els = {
+    badgeWeb: document.getElementById('badge-projects-count'),
+    badgeSvc: document.getElementById('badge-services-count'),
+    badgeDb: document.getElementById('badge-databases-count'),
+    cpuBar: document.getElementById('stat-cpu-bar'),
+    cpuMeta: document.getElementById('stat-cpu-meta'),
+    memBar: document.getElementById('stat-mem-bar'),
+    memMeta: document.getElementById('stat-mem-meta'),
+    diskBar: document.getElementById('stat-disk-bar'),
+    resPanelUsage: document.getElementById('res-panel-usage'),
+    resWorkloadsUsage: document.getElementById('res-workloads-usage'),
+    resSystemUsage: document.getElementById('res-system-usage'),
+    resFreeMem: document.getElementById('res-free-memory'),
+    resCountBadge: document.getElementById('res-workloads-count-badge'),
+    resTable: document.getElementById('resource-breakdown-table'),
+    actBox: document.getElementById('overview-active-deployment-box'),
+    actName: document.getElementById('active-dep-project-name'),
+    actKind: document.getElementById('active-dep-kind'),
+  };
+  _ovDomCache.els = els;
+  return els;
+}
+
 function renderResourceBreakdown(resources) {
-  const tbody = document.getElementById('resource-breakdown-table');
+  const tbody = getOverviewDomEls().resTable || document.getElementById('resource-breakdown-table');
   if (!tbody) return;
   const list = resources || state.overview?.resources || [];
   const filter = state.resourceFilter || 'all';
@@ -607,21 +639,32 @@ async function loadOverview() {
       }
     }
 
+    const els = getOverviewDomEls();
+
     // Server Stats & Sidebar Counts
     const m = data.monitor || {};
-    const ovWeb = (data.projects || []).filter((x) => x.project.project_kind !== 'service');
-    const ovSvc = (data.projects || []).filter((x) => x.project.project_kind === 'service');
+    let webCount = 0;
+    let svcCount = 0;
+    const dataProjects = Array.isArray(data.projects) ? data.projects : [];
+    for (let i = 0; i < dataProjects.length; i++) {
+      const p = dataProjects[i]?.project;
+      if (!p) continue;
+      if (p.project_kind === 'service') svcCount++;
+      else webCount++;
+    }
 
     // Keep navigation sidebar counts updated immediately without extra network calls
-    const badgeWebEl = document.getElementById('badge-projects-count');
-    if (badgeWebEl) badgeWebEl.textContent = ovWeb.length;
-    const badgeSvcEl = document.getElementById('badge-services-count');
-    if (badgeSvcEl) badgeSvcEl.textContent = ovSvc.length;
-    const badgeDbEl = document.getElementById('badge-databases-count');
-    if (badgeDbEl) {
-      const dbCountFromResources = Array.isArray(data.resources) ? data.resources.filter((r) => r.kind === 'database').length : 0;
+    setElText(els.badgeWeb, String(webCount));
+    setElText(els.badgeSvc, String(svcCount));
+    if (els.badgeDb) {
+      let dbCountFromResources = 0;
+      if (Array.isArray(data.resources)) {
+        for (let i = 0; i < data.resources.length; i++) {
+          if (data.resources[i]?.kind === 'database') dbCountFromResources++;
+        }
+      }
       const dbCountFromState = Array.isArray(state.databases) ? state.databases.length : 0;
-      badgeDbEl.textContent = Math.max(dbCountFromResources, dbCountFromState);
+      setElText(els.badgeDb, String(Math.max(dbCountFromResources, dbCountFromState)));
     }
 
     if (data.network) {
@@ -632,34 +675,35 @@ async function loadOverview() {
     const cpuPct = m.cpu?.pct || 0;
     const cpuCores = m.cpu?.cores || 1;
     animateNumberValue('stat-cpu-pct', cpuPct, (v) => `${Math.round(v)}%`);
-    const cpuBar = document.getElementById('stat-cpu-bar');
+    const cpuBar = els.cpuBar;
     if (cpuBar) {
-      cpuBar.className = `progress-fill ${cpuPct > 80 ? 'rose' : cpuPct > 50 ? 'amber' : 'green'}`;
+      const nextCls = `progress-fill ${cpuPct > 80 ? 'rose' : cpuPct > 50 ? 'amber' : 'green'}`;
+      if (cpuBar.className !== nextCls) cpuBar.className = nextCls;
       animateProgressBar(cpuBar, cpuPct);
     }
-    const cpuMeta = document.getElementById('stat-cpu-meta');
-    if (cpuMeta) cpuMeta.textContent = `${cpuCores} Core${cpuCores === 1 ? '' : 's'} (${cpuPct}% total)`;
+    setElText(els.cpuMeta, `${cpuCores} Core${cpuCores === 1 ? '' : 's'} (${cpuPct}% total)`);
 
     const memPct = m.memory?.pct || 0;
     const usedMb = ((m.memory?.used || 0) / 1048576).toFixed(0);
     const totalMb = ((m.memory?.total || 0) / 1048576).toFixed(0);
     animateNumberValue('stat-mem-pct', memPct, (v) => `${Math.round(v)}%`);
-    const memBar = document.getElementById('stat-mem-bar');
+    const memBar = els.memBar;
     if (memBar) {
-      memBar.className = `progress-fill ${memPct > 85 ? 'rose' : memPct > 65 ? 'amber' : 'green'}`;
+      const nextCls = `progress-fill ${memPct > 85 ? 'rose' : memPct > 65 ? 'amber' : 'green'}`;
+      if (memBar.className !== nextCls) memBar.className = nextCls;
       animateProgressBar(memBar, memPct);
     }
-    const memMeta = document.getElementById('stat-mem-meta');
-    if (memMeta) memMeta.textContent = `${usedMb} MB / ${totalMb} MB`;
+    setElText(els.memMeta, `${usedMb} MB / ${totalMb} MB`);
 
     if (m.disk) {
       const diskPct = Math.min(100, Math.max(0, Number(m.disk.pct) || 0));
       const freeGb = Number((m.disk.free / 1073741824).toFixed(1));
       const totalGb = (m.disk.total / 1073741824).toFixed(1);
       animateNumberValue('stat-disk-free', freeGb, (v) => `${v.toFixed(1)} GB`);
-      const diskBar = document.getElementById('stat-disk-bar');
+      const diskBar = els.diskBar;
       if (diskBar) {
-        diskBar.className = `progress-fill ${diskPct > 85 ? 'rose' : diskPct > 70 ? 'amber' : 'green'}`;
+        const nextCls = `progress-fill ${diskPct > 85 ? 'rose' : diskPct > 70 ? 'amber' : 'green'}`;
+        if (diskBar.className !== nextCls) diskBar.className = nextCls;
         animateProgressBar(diskBar, diskPct);
       }
       setText('stat-disk-meta', `${totalGb} GB total (${diskPct}% used)`);
@@ -667,29 +711,16 @@ async function loadOverview() {
 
     // Active resource summary bar
     const sum = data.summary || {};
-    const panelUsageEl = document.getElementById('res-panel-usage');
-    if (panelUsageEl) {
-      panelUsageEl.textContent = `${sum.panelMemoryFormatted || '--'} • ${(sum.panelCpu || 0).toFixed(1)}% CPU`;
+    setElText(els.resPanelUsage, `${sum.panelMemoryFormatted || '--'} • ${(sum.panelCpu || 0).toFixed(1)}% CPU`);
+    setElText(els.resWorkloadsUsage, `${sum.totalManagedMemoryFormatted || '--'} • ${(sum.totalManagedCpu || 0).toFixed(1)}% CPU`);
+    setElText(els.resSystemUsage, `${sum.systemOverheadMemoryFormatted || '--'} • ${(sum.systemOverheadCpu || 0).toFixed(1)}% CPU`);
+    if (els.resFreeMem) {
+      const totalMbInt = Math.round((m.memory?.total || 0) / 1048576);
+      const usedMbInt = Math.round((m.memory?.used || 0) / 1048576);
+      const availMb = Math.max(0, totalMbInt - usedMbInt);
+      setElText(els.resFreeMem, `${availMb} MB available`);
     }
-    const workloadsUsageEl = document.getElementById('res-workloads-usage');
-    if (workloadsUsageEl) {
-      workloadsUsageEl.textContent = `${sum.totalManagedMemoryFormatted || '--'} • ${(sum.totalManagedCpu || 0).toFixed(1)}% CPU`;
-    }
-    const sysUsageEl = document.getElementById('res-system-usage');
-    if (sysUsageEl) {
-      sysUsageEl.textContent = `${sum.systemOverheadMemoryFormatted || '--'} • ${(sum.systemOverheadCpu || 0).toFixed(1)}% CPU`;
-    }
-    const freeMemEl = document.getElementById('res-free-memory');
-    if (freeMemEl) {
-      const totalMb = Math.round((m.memory?.total || 0) / 1048576);
-      const usedMb = Math.round((m.memory?.used || 0) / 1048576);
-      const availMb = Math.max(0, totalMb - usedMb);
-      freeMemEl.textContent = `${availMb} MB available`;
-    }
-    const countBadgeEl = document.getElementById('res-workloads-count-badge');
-    if (countBadgeEl) {
-      countBadgeEl.textContent = `${sum.runningWorkloadsCount || 0} / ${sum.totalWorkloadsCount || 0} Running`;
-    }
+    setElText(els.resCountBadge, `${sum.runningWorkloadsCount || 0} / ${sum.totalWorkloadsCount || 0} Running`);
 
     // Render active resources telemetry table
     renderResourceBreakdown(data.resources);
@@ -701,24 +732,28 @@ async function loadOverview() {
       });
     }
 
-    // Active deployment box
-    const active = data.projects.find((x) => x.active);
-    const actBox = document.getElementById('overview-active-deployment-box');
-    const wasActBoxHidden = actBox && getComputedStyle(actBox).display === 'none';
+    // Active deployment box (check inline style instead of getComputedStyle to avoid forced reflow)
+    const active = dataProjects.find((x) => x.active);
+    const actBox = els.actBox;
+    const wasActBoxHidden = actBox && (actBox.style.display === 'none' || actBox.style.display === '');
     const pOverview = waterPipelines['overview-pipeline-track'];
     if (active && active.active) {
-      actBox.style.display = 'block';
-      if (wasActBoxHidden) animateSectionShow(actBox);
-      document.getElementById('active-dep-project-name').textContent = active.project.name;
+      if (actBox) {
+        if (actBox.style.display !== 'block') actBox.style.display = 'block';
+        if (wasActBoxHidden) animateSectionShow(actBox);
+      }
+      setElText(els.actName, active.project.name);
       const kindRaw = active.active.kind || 'deploy';
-      document.getElementById('active-dep-kind').textContent = kindRaw.charAt(0).toUpperCase() + kindRaw.slice(1).toLowerCase();
+      setElText(els.actKind, kindRaw.charAt(0).toUpperCase() + kindRaw.slice(1).toLowerCase());
       renderPipelineStages('overview-pipeline-track', active.active.stage, active.active.status, active.active.id);
     } else if (pOverview && pOverview.isLooping && pOverview.currentProgress < 6.95) {
-      actBox.style.display = 'block';
-      if (wasActBoxHidden) animateSectionShow(actBox);
-      document.getElementById('active-dep-kind').textContent = 'Deployed';
+      if (actBox) {
+        if (actBox.style.display !== 'block') actBox.style.display = 'block';
+        if (wasActBoxHidden) animateSectionShow(actBox);
+      }
+      setElText(els.actKind, 'Deployed');
       renderPipelineStages('overview-pipeline-track', 'health_checking', 'success', pOverview.lastDeploymentId);
-    } else {
+    } else if (actBox && actBox.style.display !== 'none') {
       actBox.style.display = 'none';
     }
 

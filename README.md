@@ -196,9 +196,11 @@ WebDep loads configuration from `.env` in the working directory or process envir
 | `PORT` | `4600` | HTTP port for the WebDep panel and API. |
 | `DATA_DIR` | `./data` | Directory for `webdep.sqlite`, releases, backups, databases, and vault key. |
 | `ADMIN_USERNAME` | `admin` | Main administrator login username. |
-| `ADMIN_PASSWORD` | `admin123` | Main administrator password (change immediately after setup). |
+| `ADMIN_PASSWORD` | `(auto-generated on 1st boot)` | Main administrator password (random 20-char secret generated at startup if empty/default). |
 | `ADMIN_RESET_2FA` | `false` | Set to `true` temporarily to reset Main Admin TOTP 2FA on startup. |
-| `SESSION_TTL_S` | `604800` | Session lifetime in seconds (7 days default). |
+| `SESSION_TTL_S` | `604800` | Absolute session lifetime in seconds (7 days default). |
+| `SESSION_IDLE_TIMEOUT_S` | `1800` | Idle inactivity session expiration in seconds (30 minutes default; `0` disables). |
+| `FORCE_SECURE_COOKIES` | `false` | Force `Secure` cookie flag unconditionally (`true` recommended behind reverse proxy if headers are stripped; auto-enabled on `X-Forwarded-Proto: https`). |
 | `RUST_LOG` | `webdep=info` | Tracing log filter (`debug`, `info`, `warn`, `error`). |
 
 ---

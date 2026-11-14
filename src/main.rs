@@ -74,7 +74,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let db = open_db(&config.data_dir)?;
     let vault = Arc::new(Vault::new(&config.data_dir)?);
-    let auth = Arc::new(Auth::new(db.clone(), config.session_ttl_s));
+    let mut auth_mgr = Auth::with_timeouts(
+        db.clone(),
+        config.session_ttl_s,
+        config.session_idle_timeout_s,
+    );
+    auth_mgr.force_secure_cookies = config.force_secure_cookies;
+    let auth = Arc::new(auth_mgr);
     let projects = Arc::new(Projects::new(db.clone(), vault.clone()));
     let logs = Arc::new(Logs::new(db.clone()));
     tracing::info!("WebDep engine initialized (SQLite database connected and live log stream active)");

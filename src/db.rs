@@ -192,10 +192,12 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             expires_at INTEGER NOT NULL,
+            last_active_at INTEGER NOT NULL DEFAULT 0,
             csrf_token TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at) WHERE last_active_at > 0;
 
         CREATE TABLE IF NOT EXISTS backups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,6 +290,28 @@ fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     if !has_db_started_at {
         let _ = conn.execute("ALTER TABLE databases ADD COLUMN started_at INTEGER", []);
     }
+
+    let has_session_last_active: bool = conn
+        .prepare("PRAGMA table_info(sessions)")
+        .and_then(|mut s| {
+            let rows = s.query_map([], |r| r.get::<_, String>(1))?;
+            Ok(rows.flatten().any(|name| name == "last_active_at"))
+        })
+        .unwrap_or(false);
+    if !has_session_last_active {
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN last_active_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+    }
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let _ = conn.execute(
+        "UPDATE sessions SET last_active_at = ? WHERE last_active_at = 0",
+        [now_s],
+    );
 
     // Auto-seed github_token into SQLite settings if not yet configured
     let existing_token: String = conn
@@ -556,6 +580,79 @@ mod tests {
         assert!(joined.contains("idx_audit_ts_id"), "expected idx_audit_ts_id in {}", joined);
         assert!(!joined.contains("TEMP B-TREE"), "unexpected temp sort in {}", joined);
         drop(stmt);
+        drop(conn);
+        drop(pool);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_overview_and_sessions_query_plans_use_indexes() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-db-eqp2-{}", now()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let pool = open_db(&temp_dir).unwrap();
+        let conn = pool.lock().unwrap();
+
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'eqp', 'h', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO projects (id, name, slug, repo_url, branch, deploy_dir, created_at, updated_at) VALUES (1, 'Eqp', 'eqp', 'https://example.com/a.git', 'main', '/tmp/eqp', 1, 1)",
+            [],
+        )
+        .unwrap();
+        for i in 0..300 {
+            let status = if i == 0 { "running" } else { "success" };
+            conn.execute(
+                "INSERT INTO deployments (project_id, kind, status, stage, trigger, actor, started_at) VALUES (1, 'deploy', ?, 'done', 'manual', 'eqp', ?)",
+                rusqlite::params![status, i as i64],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions (id, user_id, expires_at, last_active_at, csrf_token) VALUES (?, 1, ?, ?, 'csrf')",
+                rusqlite::params![format!("sess-{}", i), 1000 + i as i64, 500 + i as i64],
+            )
+            .unwrap();
+        }
+        conn.execute_batch("ANALYZE;").unwrap();
+
+        let eqp = |sql: &str| -> String {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {}", sql)).unwrap();
+            let plans: Vec<String> = stmt.query_map([], |r| r.get(3)).unwrap().flatten().collect();
+            plans.join(" | ")
+        };
+
+        let active_plan = eqp(
+            "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at \
+             FROM deployments WHERE status IN ('running', 'pending')",
+        );
+        assert!(
+            active_plan.contains("idx_deployments_active"),
+            "expected idx_deployments_active in {}",
+            active_plan
+        );
+        assert!(
+            !active_plan.contains("TEMP B-TREE"),
+            "unexpected temp B-tree in {}",
+            active_plan
+        );
+
+        let exp_purge_plan = eqp("DELETE FROM sessions WHERE expires_at <= 100");
+        assert!(
+            exp_purge_plan.contains("idx_sessions_expires"),
+            "expected idx_sessions_expires in {}",
+            exp_purge_plan
+        );
+
+        let idle_purge_plan =
+            eqp("DELETE FROM sessions WHERE last_active_at > 0 AND last_active_at <= 100");
+        assert!(
+            idle_purge_plan.contains("idx_sessions_last_active"),
+            "expected idx_sessions_last_active in {}",
+            idle_purge_plan
+        );
+
         drop(conn);
         drop(pool);
         std::fs::remove_dir_all(&temp_dir).ok();

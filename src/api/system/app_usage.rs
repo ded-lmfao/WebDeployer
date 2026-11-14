@@ -237,48 +237,52 @@ pub(crate) async fn project_usage_handler(
 ) -> Result<Json<AppUsageResponse>, (StatusCode, String)> {
     let _actor = verify_project_access(&state, &headers, id)?;
 
-    let p = state
-        .projects
-        .get(id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    tokio::task::spawn_blocking(move || {
+        let p = state
+            .projects
+            .get(id)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    static CACHED_CWD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    let cwd = CACHED_CWD
-        .get_or_init(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
-        .as_path();
-    let deploy_dir = Path::new(&p.deploy_dir);
-    let seed_pids = collect_project_seed_pids(
-        &state,
-        p.id,
-        &p.slug,
-        &p.app_status,
-        deploy_dir,
-        p.port,
-        p.app_pid.map(i64::from),
-        cwd,
-    );
+        static CACHED_CWD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let cwd = CACHED_CWD
+            .get_or_init(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
+            .as_path();
+        let deploy_dir = Path::new(&p.deploy_dir);
+        let seed_pids = collect_project_seed_pids(
+            &state,
+            p.id,
+            &p.slug,
+            &p.app_status,
+            deploy_dir,
+            p.port,
+            p.app_pid.map(i64::from),
+            cwd,
+        );
 
-    // Include workspace deploy directory plus container persistent data outside deploy_dir.
-    let mut disk_dirs = vec![deploy_dir.to_path_buf()];
-    let container_dir = cwd.join("data").join("containers").join(&p.slug);
-    if !container_dir.starts_with(deploy_dir) {
-        disk_dirs.push(container_dir);
-    }
+        // Include workspace deploy directory plus container persistent data outside deploy_dir.
+        let mut disk_dirs = vec![deploy_dir.to_path_buf()];
+        let container_dir = cwd.join("data").join("containers").join(&p.slug);
+        if !container_dir.starts_with(deploy_dir) {
+            disk_dirs.push(container_dir);
+        }
 
-    Ok(Json(compute_entity_usage(
-        &state,
-        EntityUsageInput {
-            tracker_key: p.id,
-            public_id: p.id,
-            entity_kind: &p.project_kind,
-            status_str: &p.app_status,
-            port: p.port,
-            seed_pids,
-            runtime_running: state.runtime.is_running(p.id),
-            disk_dirs,
-        },
-    )))
+        Ok(Json(compute_entity_usage(
+            &state,
+            EntityUsageInput {
+                tracker_key: p.id,
+                public_id: p.id,
+                entity_kind: &p.project_kind,
+                status_str: &p.app_status,
+                port: p.port,
+                seed_pids,
+                runtime_running: state.runtime.is_running(p.id),
+                disk_dirs,
+            },
+        )))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 /// Returns live per-database CPU, RAM, Disk, and Network Inbound/Outbound usage for a managed database.
@@ -294,49 +298,53 @@ pub(crate) async fn database_usage_handler(
         id,
     )?;
 
-    let mut seeds: HashSet<u32> = HashSet::new();
-    if let Some(pid) = db
-        .container_id
-        .as_deref()
-        .and_then(|s| s.strip_prefix("pid-"))
-        .and_then(|s| s.parse::<u32>().ok())
-    {
-        if pid > 0 && crate::runtime::is_pid_alive(pid) {
-            seeds.insert(pid);
-        }
-    }
-
-    let db_root = PathBuf::from(&db.data_dir);
-    if let Some(pid) = crate::databases::read_pg_pid(&db_root.join("data")) {
-        if pid > 0 && crate::runtime::is_pid_alive(pid) {
-            seeds.insert(pid);
-        }
-    }
-
-    if db.status == "running" {
-        for port_pid in Runtime::find_pids_on_port_cached(db.port) {
-            if port_pid > 0 && crate::runtime::is_pid_alive(port_pid) {
-                seeds.insert(port_pid);
+    tokio::task::spawn_blocking(move || {
+        let mut seeds: HashSet<u32> = HashSet::new();
+        if let Some(pid) = db
+            .container_id
+            .as_deref()
+            .and_then(|s| s.strip_prefix("pid-"))
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            if pid > 0 && crate::runtime::is_pid_alive(pid) {
+                seeds.insert(pid);
             }
         }
-    }
 
-    let seed_pids: Vec<u32> = seeds.into_iter().collect();
-    let runtime_running = !seed_pids.is_empty();
+        let db_root = PathBuf::from(&db.data_dir);
+        if let Some(pid) = crate::databases::read_pg_pid(&db_root.join("data")) {
+            if pid > 0 && crate::runtime::is_pid_alive(pid) {
+                seeds.insert(pid);
+            }
+        }
 
-    Ok(Json(compute_entity_usage(
-        &state,
-        EntityUsageInput {
-            tracker_key: -db.id,
-            public_id: db.id,
-            entity_kind: "database",
-            status_str: &db.status,
-            port: Some(db.port),
-            seed_pids,
-            runtime_running,
-            disk_dirs: vec![db_root],
-        },
-    )))
+        if db.status == "running" {
+            for port_pid in Runtime::find_pids_on_port_cached(db.port) {
+                if port_pid > 0 && crate::runtime::is_pid_alive(port_pid) {
+                    seeds.insert(port_pid);
+                }
+            }
+        }
+
+        let seed_pids: Vec<u32> = seeds.into_iter().collect();
+        let runtime_running = !seed_pids.is_empty();
+
+        Ok(Json(compute_entity_usage(
+            &state,
+            EntityUsageInput {
+                tracker_key: -db.id,
+                public_id: db.id,
+                entity_kind: "database",
+                status_str: &db.status,
+                port: Some(db.port),
+                seed_pids,
+                runtime_running,
+                disk_dirs: vec![db_root],
+            },
+        )))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 #[cfg(test)]

@@ -3,8 +3,10 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
+use flate2::{write::GzEncoder, Compression};
 use rust_embed::RustEmbed;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -14,6 +16,7 @@ pub struct Assets;
 
 struct EmbeddedAssetEntry {
     data: Bytes,
+    gzip_data: Option<Bytes>,
     mime: &'static str,
     etag: String,
     etag_hdr: HeaderValue,
@@ -28,6 +31,56 @@ struct DiskCacheEntry {
     etag: String,
     etag_hdr: HeaderValue,
     data: Bytes,
+    gzip_data: Option<Bytes>,
+}
+
+const MIN_GZIP_BYTES: usize = 1024;
+
+pub(crate) fn is_compressible_mime(mime: &str) -> bool {
+    mime.starts_with("text/html")
+        || mime.starts_with("text/css")
+        || mime.starts_with("application/javascript")
+        || mime.starts_with("application/json")
+        || mime.starts_with("image/svg+xml")
+}
+
+pub(crate) fn gzip_compress_bytes(data: &[u8]) -> Option<Bytes> {
+    if data.len() < MIN_GZIP_BYTES {
+        return None;
+    }
+    let mut encoder = GzEncoder::new(Vec::with_capacity(data.len() / 2), Compression::default());
+    encoder.write_all(data).ok()?;
+    let compressed = encoder.finish().ok()?;
+    (compressed.len() < data.len()).then(|| Bytes::from(compressed))
+}
+
+pub(crate) fn accepts_gzip(req_headers: &HeaderMap) -> bool {
+    let Some(raw) = req_headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    for part in raw.split(',') {
+        let mut segments = part.trim().split(';');
+        let encoding = segments.next().unwrap_or("").trim();
+        if !encoding.eq_ignore_ascii_case("gzip") && !encoding.eq_ignore_ascii_case("x-gzip") {
+            continue;
+        }
+        let mut disabled = false;
+        for param in segments {
+            let param = param.trim();
+            if let Some(q) = param.strip_prefix("q=").or_else(|| param.strip_prefix("Q=")) {
+                if q.trim().parse::<f32>().ok().is_some_and(|v| v <= 0.0) {
+                    disabled = true;
+                }
+            }
+        }
+        if !disabled {
+            return true;
+        }
+    }
+    false
 }
 
 static DISK_ASSET_CACHE: OnceLock<std::sync::RwLock<HashMap<String, DiskCacheEntry>>> = OnceLock::new();
@@ -89,10 +142,12 @@ fn get_embedded_assets() -> &'static HashMap<String, EmbeddedAssetEntry> {
                 if let Some((bundled, bundled_etag)) = get_bundled_embedded_css() {
                     let etag_hdr = HeaderValue::from_str(bundled_etag)
                         .unwrap_or_else(|_| HeaderValue::from_static(""));
+                    let gzip_data = gzip_compress_bytes(bundled);
                     map.insert(
                         key,
                         EmbeddedAssetEntry {
                             data: bundled.clone(),
+                            gzip_data,
                             mime,
                             etag: bundled_etag.clone(),
                             etag_hdr,
@@ -110,10 +165,16 @@ fn get_embedded_assets() -> &'static HashMap<String, EmbeddedAssetEntry> {
                     std::borrow::Cow::Borrowed(slice) => Bytes::from_static(slice),
                     std::borrow::Cow::Owned(vec) => Bytes::from(vec),
                 };
+                let gzip_data = if is_compressible_mime(mime) {
+                    gzip_compress_bytes(&data)
+                } else {
+                    None
+                };
                 map.insert(
                     key,
                     EmbeddedAssetEntry {
                         data,
+                        gzip_data,
                         mime,
                         etag,
                         etag_hdr,
@@ -302,15 +363,21 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
             r.and_then(|map| {
                 if let Some(entry) = map.get(clean_path) {
                     if entry.mtime == mtime {
-                        return Some((entry.etag.clone(), entry.etag_hdr.clone(), entry.data.clone()));
+                        return Some((
+                            entry.etag.clone(),
+                            entry.etag_hdr.clone(),
+                            entry.data.clone(),
+                            entry.gzip_data.clone(),
+                        ));
                     }
                 }
                 None
             })
         };
 
-        let (etag, etag_hdr, data, is_ram_hit) = if let Some((etag, etag_hdr, data)) = cached {
-            (etag, etag_hdr, data, true)
+        let mime = get_mime(clean_path);
+        let (etag, etag_hdr, data, gzip_data, is_ram_hit) = if let Some((etag, etag_hdr, data, gzip_data)) = cached {
+            (etag, etag_hdr, data, gzip_data, true)
         } else if let Ok(raw_data) = tokio::fs::read(&disk_path).await {
             let final_vec = if clean_path == "style.css" {
                 bundle_css_imports_from_disk(&disk_path, &raw_data)
@@ -318,6 +385,11 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
                 raw_data
             };
             let data = Bytes::from(final_vec);
+            let gzip_data = if is_compressible_mime(mime) {
+                gzip_compress_bytes(&data)
+            } else {
+                None
+            };
             let mtime_secs = mtime
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
@@ -332,10 +404,11 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
                         etag: etag.clone(),
                         etag_hdr: etag_hdr.clone(),
                         data: data.clone(),
+                        gzip_data: gzip_data.clone(),
                     },
                 );
             }
-            (etag, etag_hdr, data, false)
+            (etag, etag_hdr, data, gzip_data, false)
         } else {
             return (StatusCode::NOT_FOUND, "Not Found").into_response();
         };
@@ -353,16 +426,16 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
             }
         }
 
-        let mime = get_mime(clean_path);
         let cache_status = if is_ram_hit { "DISK-RAM-HIT" } else { "DISK-LIVE" };
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
-            .header(header::ETAG, etag_hdr)
-            .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
-            .header("x-cache", HeaderValue::from_static(cache_status))
-            .body(Body::from(data))
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        return build_asset_response(
+            mime,
+            etag_hdr,
+            cache_control,
+            cache_status,
+            data,
+            gzip_data,
+            accepts_gzip(req_headers),
+        );
         }
     }
 
@@ -384,13 +457,51 @@ pub async fn static_handler(path: &str, req_headers: &HeaderMap, query: Option<&
         }
     }
 
-    Response::builder()
+    build_asset_response(
+        entry.mime,
+        entry.etag_hdr.clone(),
+        cache_control,
+        "MEMORY-EMBED",
+        entry.data.clone(),
+        entry.gzip_data.clone(),
+        accepts_gzip(req_headers),
+    )
+}
+
+fn build_asset_response(
+    mime: &'static str,
+    etag_hdr: HeaderValue,
+    cache_control: &'static str,
+    cache_status: &'static str,
+    data: Bytes,
+    gzip_data: Option<Bytes>,
+    client_accepts_gzip: bool,
+) -> Response {
+    let has_gzip = gzip_data.is_some();
+    let mut builder = Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, HeaderValue::from_static(entry.mime))
-        .header(header::ETAG, entry.etag_hdr.clone())
+        .header(header::CONTENT_TYPE, HeaderValue::from_static(mime))
+        .header(header::ETAG, etag_hdr)
         .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
-        .header("x-cache", HeaderValue::from_static("MEMORY-EMBED"))
-        .body(Body::from(entry.data.clone()))
+        .header("x-cache", HeaderValue::from_static(cache_status));
+
+    if has_gzip {
+        builder = builder.header(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+    }
+
+    let body = if client_accepts_gzip {
+        if let Some(gz) = gzip_data {
+            builder = builder.header(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+            Body::from(gz)
+        } else {
+            Body::from(data)
+        }
+    } else {
+        Body::from(data)
+    };
+
+    builder
+        .body(body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
@@ -449,5 +560,52 @@ mod tests {
 
         let unknown_route = static_handler("/not-a-real-view", &HeaderMap::new(), None).await;
         assert_eq!(unknown_route.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_accepts_gzip_header_parsing() {
+        let mut h = HeaderMap::new();
+        assert!(!accepts_gzip(&h));
+
+        h.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br"));
+        assert!(accepts_gzip(&h));
+
+        h.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("br, gzip;q=0"));
+        assert!(!accepts_gzip(&h));
+
+        h.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("br, x-gzip;q=0.8"));
+        assert!(accepts_gzip(&h));
+    }
+
+    #[tokio::test]
+    async fn test_static_handler_precompressed_gzip_parity() {
+        use axum::body::to_bytes;
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+
+        let raw_resp = static_handler("/style.css", &HeaderMap::new(), None).await;
+        assert_eq!(raw_resp.status(), StatusCode::OK);
+        assert!(raw_resp.headers().get(header::CONTENT_ENCODING).is_none());
+        let raw_body = to_bytes(raw_resp.into_body(), usize::MAX).await.unwrap();
+
+        let mut gz_headers = HeaderMap::new();
+        gz_headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
+        let gz_resp = static_handler("/style.css", &gz_headers, None).await;
+        assert_eq!(gz_resp.status(), StatusCode::OK);
+        assert_eq!(
+            gz_resp.headers().get(header::CONTENT_ENCODING).and_then(|v| v.to_str().ok()),
+            Some("gzip")
+        );
+        assert_eq!(
+            gz_resp.headers().get(header::VARY).and_then(|v| v.to_str().ok()),
+            Some("Accept-Encoding")
+        );
+        let gz_body = to_bytes(gz_resp.into_body(), usize::MAX).await.unwrap();
+        assert!(gz_body.len() < raw_body.len());
+
+        let mut decoder = GzDecoder::new(&gz_body[..]);
+        let mut decoded = Vec::with_capacity(raw_body.len());
+        decoder.read_to_end(&mut decoded).unwrap();
+        assert_eq!(decoded.as_slice(), &raw_body[..]);
     }
 }

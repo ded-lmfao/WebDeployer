@@ -137,7 +137,7 @@ pub(crate) async fn list_databases_handler(
     let can_creds = user.has_any_power(&["databases_manage", "env"]);
     let cache_key = format!("databases:u{}:c{}", user.id, u8::from(can_creds));
 
-    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(4), || async {
+    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(4), &headers, || async {
         let state = state.clone();
         let user = user.clone();
         tokio::task::spawn_blocking(move || {

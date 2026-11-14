@@ -35,8 +35,18 @@ status updates as the fix is verified and prepared for release.
 ## Security Architecture Notes
 
 - **Password Storage**: Account passwords are hashed with Argon2id.
-- **Sessions & CSRF**: Authenticated sessions use `HttpOnly; SameSite=Strict`
-  cookies paired with per-session CSRF tokens (`SESSION_TTL_S` defaults to 7 days).
+- **Bootstrap Credentials**: First launch auto-generates a random 20-character
+  `ADMIN_PASSWORD` with restricted `.env` permissions (`0600` on Unix) rather
+  than using a static default password.
+- **Sessions, Cookies & CSP**: Authenticated sessions use `HttpOnly; SameSite=Strict`
+  cookies (with `Secure` and `Strict-Transport-Security` enabled on HTTPS),
+  per-session CSRF tokens, absolute expiry (`SESSION_TTL_S`), idle expiration
+  (`SESSION_IDLE_TIMEOUT_S`), and response `Content-Security-Policy` headers.
+- **Process Boundary Hygiene**: Spawned app and build commands scrub
+  control-plane `.env` secrets, apply restrictive `umask`/`RLIMIT_CORE=0` on
+  Linux, and confine file APIs canonically within app roots. Native processes
+  still share host OS boundaries and are intended for trusted workloads unless
+  additionally sandboxed by the host administrator.
 - **Secrets at Rest**: Environment variables, Git PATs, and TOTP secrets are
   encrypted with AES-256-GCM before storage in SQLite.
 - **Database Access Modes**: PostgreSQL clusters default to host-managed local,

@@ -1,28 +1,22 @@
+use rand::Rng;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
-const DEFAULT_DOTENV: &str = "\
-# ============================================================================
-# WebDep — Main Admin Login ID & Password Configuration
-# ============================================================================
-# Edit ADMIN_USERNAME and ADMIN_PASSWORD below to set or change the Main Admin
-# login ID and password. Changes take effect immediately (even without restart).
-# ============================================================================
-
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
-
-# Set to true if you ever need to reset 2FA on the Main Admin account
-ADMIN_RESET_2FA=false
-
-# ============================================================================
-# Platform Server Settings
-# ============================================================================
-HOST=0.0.0.0
-PORT=4600
-DATA_DIR=./data
-SESSION_TTL_S=604800
-";
+const CONTROL_PLANE_SENSITIVE_ENV_KEYS: &[&str] = &[
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "ADMIN_USER",
+    "ADMIN_PASS",
+    "ADMIN_RESET_2FA",
+    "SESSION_TTL_S",
+    "SESSION_IDLE_TIMEOUT_S",
+    "FORCE_SECURE_COOKIES",
+    "ENCRYPTION_KEY",
+    "JWT_SECRET",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+];
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -30,6 +24,8 @@ pub struct Config {
     pub host: String,
     pub data_dir: PathBuf,
     pub session_ttl_s: u64,
+    pub session_idle_timeout_s: u64,
+    pub force_secure_cookies: bool,
 }
 
 impl Config {
@@ -47,6 +43,52 @@ impl Config {
             }
         }
         cwd_env
+    }
+
+    pub fn generate_bootstrap_password() -> String {
+        const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        let mut rng = rand::thread_rng();
+        (0..20)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect()
+    }
+
+    fn render_default_dotenv(admin_pass: &str) -> String {
+        format!(
+            "# ============================================================================\n\
+             # WebDep — Main Admin Login ID & Password Configuration\n\
+             # ============================================================================\n\
+             # Edit ADMIN_USERNAME and ADMIN_PASSWORD below to set or change the Main Admin\n\
+             # login ID and password. Changes take effect immediately (even without restart).\n\
+             # ============================================================================\n\n\
+             ADMIN_USERNAME=admin\n\
+             ADMIN_PASSWORD={}\n\n\
+             # Set to true if you ever need to reset 2FA on the Main Admin account\n\
+             ADMIN_RESET_2FA=false\n\n\
+             # ============================================================================\n\
+             # Platform Server & Security Settings\n\
+             # ============================================================================\n\
+             HOST=0.0.0.0\n\
+             PORT=4600\n\
+             DATA_DIR=./data\n\
+             SESSION_TTL_S=604800\n\
+             SESSION_IDLE_TIMEOUT_S=1800\n\
+             FORCE_SECURE_COOKIES=false\n",
+            admin_pass
+        )
+    }
+
+    fn write_private_file(path: &Path, content: &str) {
+        if std::fs::write(path, content).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
     }
 
     pub fn parse_dotenv_file(path: &Path) -> HashMap<String, String> {
@@ -79,9 +121,33 @@ impl Config {
     pub fn load_dotenv() -> HashMap<String, String> {
         let path = Self::dotenv_path();
         if !path.exists() {
-            let _ = std::fs::write(&path, DEFAULT_DOTENV);
+            let generated = Self::generate_bootstrap_password();
+            Self::write_private_file(&path, &Self::render_default_dotenv(&generated));
+            warn!(
+                "Generated first-boot Main Admin password in {} -> ADMIN_USERNAME=admin ADMIN_PASSWORD={} (change immediately or keep .env private)",
+                path.display(),
+                generated
+            );
         }
-        let map = Self::parse_dotenv_file(&path);
+
+        let mut map = Self::parse_dotenv_file(&path);
+        let cur_pass = map
+            .get("ADMIN_PASSWORD")
+            .or_else(|| map.get("ADMIN_PASS"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+        if cur_pass.is_empty() || cur_pass == "admin123" {
+            let generated = Self::generate_bootstrap_password();
+            Self::sync_dotenv_admin(None, Some(&generated));
+            map.insert("ADMIN_PASSWORD".to_string(), generated.clone());
+            warn!(
+                "Replaced empty or legacy default ADMIN_PASSWORD in {} -> new bootstrap password: {}",
+                path.display(),
+                generated
+            );
+        }
+
         for (k, v) in &map {
             std::env::set_var(k, v);
         }
@@ -101,12 +167,12 @@ impl Config {
             .or_else(|| std::env::var("ADMIN_USERNAME").ok())
             .unwrap_or_else(|| "admin".to_string());
 
-        let password = map
+        let raw_password = map
             .get("ADMIN_PASSWORD")
             .or_else(|| map.get("ADMIN_PASS"))
             .cloned()
             .or_else(|| std::env::var("ADMIN_PASSWORD").ok())
-            .unwrap_or_else(|| "admin123".to_string());
+            .unwrap_or_default();
 
         let reset_2fa = map
             .get("ADMIN_RESET_2FA")
@@ -118,10 +184,22 @@ impl Config {
         } else {
             username.trim().to_string()
         };
-        let clean_pass = if password.trim().is_empty() {
-            "admin123".to_string()
+
+        let trimmed_pass = raw_password.trim();
+        let clean_pass = if trimmed_pass.is_empty() || trimmed_pass == "admin123" {
+            let generated = Self::generate_bootstrap_password();
+            if path.exists() {
+                Self::sync_dotenv_admin(None, Some(&generated));
+                warn!(
+                    "Generated secure replacement ADMIN_PASSWORD in {} (user '{}'): {}",
+                    path.display(),
+                    clean_user,
+                    generated
+                );
+            }
+            generated
         } else {
-            password.trim().to_string()
+            trimmed_pass.to_string()
         };
 
         (clean_user, clean_pass, reset_2fa)
@@ -130,7 +208,8 @@ impl Config {
     /// Updates `ADMIN_USERNAME` and/or `ADMIN_PASSWORD` in `.env` when the Main Admin changes their credentials via the UI.
     pub fn sync_dotenv_admin(new_username: Option<&str>, new_password: Option<&str>) {
         let path = Self::dotenv_path();
-        let existing = std::fs::read_to_string(&path).unwrap_or_else(|_| DEFAULT_DOTENV.to_string());
+        let existing = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| Self::render_default_dotenv(new_password.unwrap_or("")));
         let mut lines: Vec<String> = Vec::new();
         let mut found_user = false;
         let mut found_pass = false;
@@ -180,7 +259,14 @@ impl Config {
         if !output.ends_with('\n') {
             output.push('\n');
         }
-        let _ = std::fs::write(&path, output);
+        Self::write_private_file(&path, &output);
+    }
+
+    /// Removes WebDep control-plane secrets from spawned build/runtime child processes.
+    pub fn scrub_control_plane_env(cmd: &mut tokio::process::Command) {
+        for key in CONTROL_PLANE_SENSITIVE_ENV_KEYS {
+            cmd.env_remove(key);
+        }
     }
 
     pub fn from_env() -> Self {
@@ -198,6 +284,13 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(60 * 60 * 24 * 7); // 7 days
+        let session_idle_timeout_s = std::env::var("SESSION_IDLE_TIMEOUT_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1800); // 30 minutes idle timeout (0 disables)
+        let force_secure_cookies = std::env::var("FORCE_SECURE_COOKIES")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
 
         std::fs::create_dir_all(&data_dir).ok();
 
@@ -206,6 +299,22 @@ impl Config {
             host,
             data_dir,
             session_ttl_s,
+            session_idle_timeout_s,
+            force_secure_cookies,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bootstrap_password_strength() {
+        let p1 = Config::generate_bootstrap_password();
+        let p2 = Config::generate_bootstrap_password();
+        assert!(p1.len() >= 20);
+        assert_ne!(p1, "admin123");
+        assert_ne!(p1, p2);
     }
 }

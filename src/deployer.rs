@@ -145,6 +145,14 @@ impl Deployer {
 
     pub fn list_deployments(&self, project_id: Option<i64>, limit: usize) -> Vec<Deployment> {
         let conn = self.db.lock().unwrap();
+        Self::list_deployments_conn(&conn, project_id, limit)
+    }
+
+    pub fn list_deployments_conn(
+        conn: &rusqlite::Connection,
+        project_id: Option<i64>,
+        limit: usize,
+    ) -> Vec<Deployment> {
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match project_id {
             Some(pid) => (
                 format!(
@@ -164,7 +172,7 @@ impl Deployer {
             ),
         };
 
-        let mut stmt = match conn.prepare(&sql) {
+        let mut stmt = match conn.prepare_cached(&sql) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };

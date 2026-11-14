@@ -63,7 +63,7 @@ pub(crate) async fn list_projects_handler(
     let user = require_current_user(&state, &headers).map_err(|(c, _)| c)?;
     let cache_key = format!("projects:u{}", user.id);
 
-    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(4), || async {
+    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(4), &headers, || async {
         let state = state.clone();
         let user = user.clone();
         tokio::task::spawn_blocking(move || {

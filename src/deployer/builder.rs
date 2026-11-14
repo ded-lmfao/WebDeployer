@@ -113,6 +113,8 @@ pub async fn run_shell_cmd(
     #[cfg(unix)]
     cmd.args(["-c", &resolved_shell_cmd]);
 
+    crate::config::Config::scrub_control_plane_env(&mut cmd);
+
     cmd.current_dir(cwd)
         .env("CI", "true")
         .env("npm_config_jobs", "1")

@@ -69,7 +69,10 @@ function paginateAndRender(items, pageKey, paginationElId, renderPageFn) {
   if (!bar) return;
 
   if (total === 0) {
-    bar.innerHTML = '';
+    if (bar.getAttribute('data-sig') !== '') {
+      bar.setAttribute('data-sig', '');
+      bar.innerHTML = '';
+    }
     return;
   }
 

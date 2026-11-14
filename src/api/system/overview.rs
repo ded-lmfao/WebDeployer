@@ -248,7 +248,7 @@ fn load_overview_deployments(
 
     if let Ok(mut active_stmt) = conn.prepare_cached(
         "SELECT id, project_id, release_id, from_release_id, kind, status, stage, sha, trigger, actor, error, started_at, finished_at \
-         FROM deployments WHERE status IN ('running', 'pending') ORDER BY id DESC",
+         FROM deployments WHERE status IN ('running', 'pending')",
     ) {
         if let Ok(rows) = active_stmt.query_map([], |r| {
             let pid: i64 = r.get(1)?;
@@ -257,7 +257,14 @@ fn load_overview_deployments(
         }) {
             for dep in rows.flatten() {
                 if proj_names.contains_key(&dep.project_id) {
-                    active_map.entry(dep.project_id).or_insert(dep);
+                    active_map
+                        .entry(dep.project_id)
+                        .and_modify(|existing| {
+                            if dep.id > existing.id {
+                                *existing = dep.clone();
+                            }
+                        })
+                        .or_insert(dep);
                 }
             }
         }
@@ -292,7 +299,7 @@ pub(crate) async fn overview_handler(
     state.monitor.touch_activity();
     let cache_key = format!("overview:u{}", user.id);
 
-    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(2), || async {
+    singleflight_json_bytes(&state.cache, cache_key, std::time::Duration::from_secs(2), &headers, || async {
         let state = state.clone();
         let user = user.clone();
         tokio::task::spawn_blocking(move || compute_overview_bytes(&state, &user))
@@ -317,8 +324,6 @@ fn compute_overview_bytes(
     let cwd = cached_cwd();
 
     let panel_pid = std::process::id();
-    // Isolate panel daemon metrics to the WebDep process itself so child workloads are never double-counted into the panel
-    let (panel_raw_cpu, panel_mem) = state.monitor.get_process_metrics(panel_pid);
     let mut pids_to_query = Vec::new();
 
     let mut proj_effective_pids = std::collections::HashMap::with_capacity(projs.len());
@@ -374,7 +379,9 @@ fn compute_overview_bytes(
         Vec::new()
     };
 
-    let proc_metrics = state.monitor.get_tree_metrics(&pids_to_query);
+    // Isolate panel daemon metrics to the WebDep process itself so child workloads are never double-counted into the panel
+    let ((panel_raw_cpu, panel_mem), proc_metrics) =
+        state.monitor.get_panel_and_tree_metrics(panel_pid, &pids_to_query);
     let mut resources = Vec::with_capacity(1 + projs.len() + db_entries.len());
 
     // 1. WebDep Panel daemon self metrics
@@ -409,11 +416,15 @@ fn compute_overview_bytes(
         start_cmd: None,
     });
 
-    let (mut last_success_map, mut active_map) = if projs.is_empty() {
-        (std::collections::HashMap::new(), std::collections::HashMap::new())
-    } else {
+    let (mut last_success_map, mut active_map, mut recent) = {
         let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        load_overview_deployments(&conn, &projs)
+        let (last_s, active_m) = if projs.is_empty() {
+            (std::collections::HashMap::new(), std::collections::HashMap::new())
+        } else {
+            load_overview_deployments(&conn, &projs)
+        };
+        let rec = crate::deployer::Deployer::list_deployments_conn(&conn, None, 25);
+        (last_s, active_m, rec)
     };
 
     let mut items = Vec::with_capacity(projs.len());
@@ -580,7 +591,6 @@ fn compute_overview_bytes(
         total_workloads_count: total_count,
     };
 
-    let mut recent = state.deployer.list_deployments(None, 25);
     recent.retain(|d| user.can_access_project(d.project_id));
     recent.truncate(10);
 

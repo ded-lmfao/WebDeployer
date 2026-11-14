@@ -276,14 +276,11 @@ impl Monitor {
         (children_map, metrics_map)
     }
 
-    pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
-        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
-        if root_pids.is_empty() {
-            return HashMap::new();
-        }
-        let sys = self.sys.lock().unwrap();
-        let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
-
+    fn sum_tree_metrics_from_index(
+        children_map: &HashMap<u32, Vec<u32>>,
+        metrics_map: &HashMap<u32, (f32, u64)>,
+        root_pids: &[u32],
+    ) -> HashMap<u32, (f32, u64)> {
         let root_set: Option<HashSet<u32>> = (root_pids.len() > 8)
             .then(|| root_pids.iter().copied().collect());
         let mut results = HashMap::with_capacity(root_pids.len());
@@ -325,21 +322,40 @@ impl Monitor {
 
             results.insert(root, (total_cpu, total_mem));
         }
-
         results
     }
 
-    /// Returns (cpu_usage, resident_memory_bytes) strictly for a single process
-    /// without traversing into descendant or child processes.
-    pub fn get_process_metrics(&self, pid: u32) -> (f32, u64) {
+    #[cfg(test)]
+    pub fn get_tree_metrics(&self, root_pids: &[u32]) -> HashMap<u32, (f32, u64)> {
+        self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
+        if root_pids.is_empty() {
+            return HashMap::new();
+        }
+        let sys = self.sys.lock().unwrap();
+        let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
+        Self::sum_tree_metrics_from_index(&children_map, &metrics_map, root_pids)
+    }
+
+    /// Reads strict single-process panel metrics plus descendant-aggregated tree metrics for
+    /// all managed root PIDs under a single `sys` lock. Skips process-table map allocation when
+    /// no workload PIDs need inspection.
+    pub fn get_panel_and_tree_metrics(
+        &self,
+        panel_pid: u32,
+        root_pids: &[u32],
+    ) -> ((f32, u64), HashMap<u32, (f32, u64)>) {
         self.last_queried_ms.store(epoch_ms(), Ordering::Relaxed);
         let sys = self.sys.lock().unwrap();
-        let pid_obj = sysinfo::Pid::from_u32(pid);
-        if let Some(p) = sys.process(pid_obj) {
-            (p.cpu_usage(), p.memory())
-        } else {
-            (0.0, 0)
+        let panel_metrics = sys
+            .process(sysinfo::Pid::from_u32(panel_pid))
+            .map(|p| (p.cpu_usage(), p.memory()))
+            .unwrap_or((0.0, 0));
+        if root_pids.is_empty() {
+            return (panel_metrics, HashMap::new());
         }
+        let (children_map, metrics_map) = Self::build_process_tree_index(&sys);
+        let tree = Self::sum_tree_metrics_from_index(&children_map, &metrics_map, root_pids);
+        (panel_metrics, tree)
     }
 
     /// Instantaneous (< 1 microsecond) lock-free/read-lock read of the cached telemetry snapshot.

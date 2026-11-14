@@ -37,11 +37,68 @@ pub struct AppState {
 }
 
 
+pub(crate) fn is_https_request(headers: &HeaderMap, force_secure: bool) -> bool {
+    if force_secure {
+        return true;
+    }
+    if let Some(proto) = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
+        if proto
+            .split(',')
+            .next()
+            .map(|s| s.trim().eq_ignore_ascii_case("https"))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    if let Some(ssl) = headers.get("x-forwarded-ssl").and_then(|v| v.to_str().ok()) {
+        if ssl.trim().eq_ignore_ascii_case("on") {
+            return true;
+        }
+    }
+    if let Some(fwd) = headers.get("forwarded").and_then(|v| v.to_str().ok()) {
+        let lower = fwd.to_ascii_lowercase();
+        if lower.contains("proto=https") {
+            return true;
+        }
+    }
+    false
+}
+
+pub(crate) fn clear_session_cookie_value(is_https: bool) -> String {
+    if is_https {
+        "nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure".to_string()
+    } else {
+        "nd_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".to_string()
+    }
+}
+
+fn should_touch_session_activity(path: &str, method: &Method) -> bool {
+    if matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        return path != "/api/auth/logout" && path != "/api/auth/presence";
+    }
+    !matches!(
+        path,
+        "/api/overview"
+            | "/api/overview/network"
+            | "/api/monitor"
+            | "/api/logs/stream"
+            | "/api/users"
+            | "/api/system/update/status"
+            | "/api/system/version"
+            | "/healthz"
+    )
+}
+
 pub(crate) async fn security_middleware(
     State(state): State<AppState>,
     req: Request,
     next: Next,
 ) -> Response {
+    let is_https = is_https_request(req.headers(), state.auth.force_secure_cookies);
     let is_mutating = matches!(
         *req.method(),
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
@@ -64,7 +121,10 @@ pub(crate) async fn security_middleware(
 
             if !is_public_auth {
                 let sid_opt = extract_session_id(req.headers());
-                let session_pair = sid_opt.as_deref().and_then(|sid| state.auth.get_session(sid));
+                let touch = should_touch_session_activity(path, req.method());
+                let session_pair = sid_opt
+                    .as_deref()
+                    .and_then(|sid| state.auth.get_session_with_touch(sid, touch));
 
                 let Some((session, _user)) = session_pair else {
                     let mut res = (
@@ -72,7 +132,7 @@ pub(crate) async fn security_middleware(
                         Json(serde_json::json!({ "error": "Unauthorized. Please sign in." })),
                     )
                         .into_response();
-                    attach_security_headers(&mut res, true);
+                    attach_security_headers(&mut res, true, is_https);
                     return res;
                 };
 
@@ -88,7 +148,7 @@ pub(crate) async fn security_middleware(
                             Json(serde_json::json!({ "error": "Invalid or missing CSRF security token. Please refresh the page." })),
                         )
                             .into_response();
-                        attach_security_headers(&mut res, true);
+                        attach_security_headers(&mut res, true, is_https);
                         return res;
                     }
                 }
@@ -105,11 +165,11 @@ pub(crate) async fn security_middleware(
             state.auth.invalidate_sessions();
         }
     }
-    attach_security_headers(&mut res, is_api);
+    attach_security_headers(&mut res, is_api, is_https);
     res
 }
 
-pub(crate) fn attach_security_headers(res: &mut Response, is_api: bool) {
+pub(crate) fn attach_security_headers(res: &mut Response, is_api: bool, is_https: bool) {
     let headers = res.headers_mut();
     headers.insert(
         header::HeaderName::from_static("x-content-type-options"),
@@ -131,10 +191,27 @@ pub(crate) fn attach_security_headers(res: &mut Response, is_api: bool) {
         header::HeaderName::from_static("cross-origin-opener-policy"),
         HeaderValue::from_static("same-origin"),
     );
+    if is_https {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        );
+    }
     if is_api {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
         headers.insert(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+        );
+    } else {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+            ),
         );
     }
 }
@@ -280,6 +357,7 @@ pub(crate) fn log_audit(state: &AppState, actor: &str, action: &str, target: Opt
 
 pub(crate) fn create_authenticated_response(
     state: &AppState,
+    headers: &HeaderMap,
     user: User,
 ) -> Result<Response, (StatusCode, String)> {
     let session = state
@@ -289,9 +367,14 @@ pub(crate) fn create_authenticated_response(
 
     let active_sessions = state.auth.count_active_sessions(user.id);
     let passkey_count = state.auth.count_user_passkeys(user.id);
+    let secure_attr = if is_https_request(headers, state.auth.force_secure_cookies) {
+        "; Secure"
+    } else {
+        ""
+    };
     let cookie_val = format!(
-        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
-        session.id, state.auth.session_ttl_s
+        "nd_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}",
+        session.id, state.auth.session_ttl_s, secure_attr
     );
 
     let body = Json(LoginResponse {
@@ -309,17 +392,27 @@ pub(crate) fn create_authenticated_response(
 }
 
 pub(crate) fn check_api_cache(cache: &crate::cache::AppCache, cache_key: &str) -> Option<Response> {
-    if let Some(cached_bytes) = cache.get_bytes(cache_key) {
-        let res = Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "application/json")
-            .header("x-cache", HeaderValue::from_static("HIT"))
-            .body(axum::body::Body::from(cached_bytes))
-            .unwrap_or_else(|_| Json(serde_json::json!({})).into_response());
-        Some(res)
-    } else {
-        None
+    check_api_cache_negotiated(cache, cache_key, false)
+}
+
+pub(crate) fn check_api_cache_negotiated(
+    cache: &crate::cache::AppCache,
+    cache_key: &str,
+    want_gzip: bool,
+) -> Option<Response> {
+    let (cached_bytes, is_gzip) = cache.get_bytes_negotiated(cache_key, want_gzip)?;
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::VARY, HeaderValue::from_static("Accept-Encoding"))
+        .header("x-cache", HeaderValue::from_static("HIT"));
+    if is_gzip {
+        builder = builder.header(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
     }
+    let res = builder
+        .body(axum::body::Body::from(cached_bytes))
+        .unwrap_or_else(|_| Json(serde_json::json!({})).into_response());
+    Some(res)
 }
 
 pub(crate) fn cached_json_response<T: Serialize>(
@@ -341,12 +434,18 @@ pub(crate) fn cached_json_response<T: Serialize>(
 
 pub(crate) fn json_bytes_response(
     bytes: axum::body::Bytes,
+    is_gzip: bool,
     cache_tag: &'static str,
 ) -> Result<Response, StatusCode> {
-    Response::builder()
+    let mut builder = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
-        .header("x-cache", HeaderValue::from_static(cache_tag))
+        .header(header::VARY, HeaderValue::from_static("Accept-Encoding"))
+        .header("x-cache", HeaderValue::from_static(cache_tag));
+    if is_gzip {
+        builder = builder.header(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    }
+    builder
         .body(axum::body::Body::from(bytes))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -357,39 +456,49 @@ pub(crate) async fn singleflight_json_bytes<F, Fut>(
     cache: &crate::cache::AppCache,
     cache_key: String,
     ttl: std::time::Duration,
+    req_headers: &HeaderMap,
     mut compute: F,
 ) -> Result<Response, StatusCode>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<axum::body::Bytes, StatusCode>>,
 {
+    let want_gzip = crate::static_assets::accepts_gzip(req_headers);
     for _attempt in 0..3 {
-        if let Some(res) = check_api_cache(cache, &cache_key) {
+        if let Some(res) = check_api_cache_negotiated(cache, &cache_key, want_gzip) {
             return Ok(res);
         }
         match cache.acquire_inflight(&cache_key) {
             crate::cache::InflightRole::Leader(_guard) => {
                 // Re-check inside leader in case a previous leader stored just before we acquired
-                if let Some(res) = check_api_cache(cache, &cache_key) {
+                if let Some(res) = check_api_cache_negotiated(cache, &cache_key, want_gzip) {
                     return Ok(res);
                 }
                 let start_gen = cache.generation();
                 let bytes = compute().await?;
-                cache.set_bytes_if_gen(cache_key, bytes.clone(), ttl, start_gen);
-                return json_bytes_response(bytes, "MISS");
+                let gz = if want_gzip {
+                    crate::static_assets::gzip_compress_bytes(&bytes)
+                } else {
+                    None
+                };
+                cache.set_bytes_with_gzip_if_gen(cache_key, bytes.clone(), gz.clone(), ttl, start_gen);
+                if let Some(gz_bytes) = gz {
+                    return json_bytes_response(gz_bytes, true, "MISS");
+                }
+                return json_bytes_response(bytes, false, "MISS");
             }
             crate::cache::InflightRole::Follower(mut rx) => {
                 if !*rx.borrow() {
                     let _ = rx.changed().await;
                 }
-                if let Some(res) = check_api_cache(cache, &cache_key) {
+                if let Some(res) = check_api_cache_negotiated(cache, &cache_key, want_gzip) {
                     return Ok(res);
                 }
             }
         }
     }
     let bytes = compute().await?;
-    json_bytes_response(bytes, "MISS")
+    json_bytes_response(bytes, false, "MISS")
 }
 
 pub(crate) fn fetch_project(
@@ -490,4 +599,58 @@ pub(crate) struct LoginResponse {
 pub(crate) struct ActionResponse {
     #[serde(rename = "deploymentId")]
     pub(crate) deployment_id: i64,
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn test_is_https_request_detection() {
+        let mut hdrs = HeaderMap::new();
+        assert!(!is_https_request(&hdrs, false));
+        assert!(is_https_request(&hdrs, true));
+
+        hdrs.insert("x-forwarded-proto", HeaderValue::from_static("https, http"));
+        assert!(is_https_request(&hdrs, false));
+
+        hdrs.clear();
+        hdrs.insert("forwarded", HeaderValue::from_static("for=1.2.3.4;proto=https"));
+        assert!(is_https_request(&hdrs, false));
+
+        hdrs.clear();
+        hdrs.insert("x-forwarded-ssl", HeaderValue::from_static("on"));
+        assert!(is_https_request(&hdrs, false));
+    }
+
+    #[test]
+    fn test_security_headers_and_csp() {
+        let mut api_res = (StatusCode::OK, "ok").into_response();
+        attach_security_headers(&mut api_res, true, true);
+        assert_eq!(
+            api_res.headers().get(header::CONTENT_SECURITY_POLICY).and_then(|v| v.to_str().ok()),
+            Some("default-src 'none'; frame-ancestors 'none'")
+        );
+        assert!(api_res.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+
+        let mut ui_res = (StatusCode::OK, "<html></html>").into_response();
+        attach_security_headers(&mut ui_res, false, false);
+        let ui_csp = ui_res
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ui_csp.contains("object-src 'none'"));
+        assert!(ui_csp.contains("frame-ancestors 'none'"));
+        assert!(!ui_res.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+    }
+
+    #[test]
+    fn test_should_touch_session_activity_excludes_polls() {
+        assert!(!should_touch_session_activity("/api/overview", &Method::GET));
+        assert!(!should_touch_session_activity("/api/monitor", &Method::GET));
+        assert!(!should_touch_session_activity("/api/auth/presence", &Method::POST));
+        assert!(should_touch_session_activity("/api/projects", &Method::GET));
+        assert!(should_touch_session_activity("/api/projects/1/deploy", &Method::POST));
+    }
 }

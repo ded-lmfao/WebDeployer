@@ -48,9 +48,8 @@ Get-NetTCPConnection -LocalPort 4600 -ErrorAction SilentlyContinue | ForEach-Obj
 
 Write-Host "[*] Starting WebDep server on $url" -ForegroundColor Green
 Write-Host "[*] SQLite Database: data\webdep.sqlite" -ForegroundColor Cyan
-Write-Host "[*] Default Credentials:" -ForegroundColor Yellow
-Write-Host "    - Username: admin" -ForegroundColor White
-Write-Host "    - Password: admin123" -ForegroundColor White
+Write-Host "[*] Admin credentials are stored in .env (ADMIN_USERNAME / ADMIN_PASSWORD)." -ForegroundColor Yellow
+Write-Host "    (On first boot, a random password is generated in .env and logged once.)" -ForegroundColor Gray
 Write-Host ""
 
 # Auto-open browser after 500ms

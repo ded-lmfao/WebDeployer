@@ -2,12 +2,13 @@ use axum::body::Bytes;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 struct CacheEntry {
     bytes: Bytes,
+    gzip: OnceLock<Option<Bytes>>,
     expires_at: Instant,
 }
 
@@ -84,15 +85,23 @@ impl AppCache {
         })
     }
 
-    /// Returns pre-serialized JSON bytes directly as an `axum::body::Bytes`.
-    /// Zero allocations, zero deserialization, zero copy when converting to Axum response body.
-    pub fn get_bytes(&self, key: &str) -> Option<Bytes> {
+    /// Returns cached payload along with an encoded gzip copy when requested by the caller.
+    /// Lazily compresses payloads >= 1 KiB once per cache entry using shared read locking.
+    pub fn get_bytes_negotiated(&self, key: &str, want_gzip: bool) -> Option<(Bytes, bool)> {
         let now = Instant::now();
         if let Ok(map) = self.store.read() {
             if let Some(entry) = map.get(key) {
                 if entry.expires_at > now {
                     self.hits.fetch_add(1, Ordering::Relaxed);
-                    return Some(entry.bytes.clone());
+                    if want_gzip {
+                        let gz = entry
+                            .gzip
+                            .get_or_init(|| crate::static_assets::gzip_compress_bytes(&entry.bytes));
+                        if let Some(gz_bytes) = gz {
+                            return Some((gz_bytes.clone(), true));
+                        }
+                    }
+                    return Some((entry.bytes.clone(), false));
                 }
             }
         }
@@ -102,7 +111,15 @@ impl AppCache {
 
     /// Stores pre-serialized Bytes directly.
     pub fn set_bytes(&self, key: String, bytes: Bytes, ttl: Duration) {
+        self.set_bytes_with_gzip(key, bytes, None, ttl);
+    }
+
+    pub fn set_bytes_with_gzip(&self, key: String, bytes: Bytes, pre_gzip: Option<Bytes>, ttl: Duration) {
         let now = Instant::now();
+        let gzip = OnceLock::new();
+        if let Some(gz) = pre_gzip {
+            let _ = gzip.set(Some(gz));
+        }
         if let Ok(mut map) = self.store.write() {
             if map.len() >= 64 {
                 map.retain(|_, v| v.expires_at > now);
@@ -111,16 +128,23 @@ impl AppCache {
                 key,
                 CacheEntry {
                     bytes,
+                    gzip,
                     expires_at: now + ttl,
                 },
             );
         }
     }
 
-    /// Stores pre-serialized Bytes only if no invalidation happened since `expected_gen`.
-    pub fn set_bytes_if_gen(&self, key: String, bytes: Bytes, ttl: Duration, expected_gen: u64) {
+    pub fn set_bytes_with_gzip_if_gen(
+        &self,
+        key: String,
+        bytes: Bytes,
+        pre_gzip: Option<Bytes>,
+        ttl: Duration,
+        expected_gen: u64,
+    ) {
         if self.generation.load(Ordering::Acquire) == expected_gen {
-            self.set_bytes(key, bytes, ttl);
+            self.set_bytes_with_gzip(key, bytes, pre_gzip, ttl);
         }
     }
 

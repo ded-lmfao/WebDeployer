@@ -21,6 +21,8 @@ const PRESENCE_TTL_MS: u64 = 95_000;
 pub struct Auth {
     pub(crate) db: DbPool,
     pub session_ttl_s: u64,
+    pub session_idle_timeout_s: u64,
+    pub force_secure_cookies: bool,
     pub(crate) mfa_challenges: Mutex<HashMap<String, (i64, u64)>>,
     pub(crate) passkey_challenges: Mutex<HashMap<String, (Option<i64>, String, u64)>>,
     pub(crate) failures: Mutex<HashMap<String, FailureRecord>>,
@@ -30,10 +32,17 @@ pub struct Auth {
 
 
 impl Auth {
+    #[cfg(test)]
     pub fn new(db: DbPool, session_ttl_s: u64) -> Self {
+        Self::with_timeouts(db, session_ttl_s, 1800)
+    }
+
+    pub fn with_timeouts(db: DbPool, session_ttl_s: u64, session_idle_timeout_s: u64) -> Self {
         let auth = Self {
             db,
             session_ttl_s,
+            session_idle_timeout_s,
+            force_secure_cookies: false,
             mfa_challenges: Mutex::new(HashMap::new()),
             passkey_challenges: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
@@ -358,16 +367,23 @@ impl Auth {
         .ok()
     }
 
+    fn is_idle_expired(&self, last_active_at: i64, now_s: u64) -> bool {
+        self.session_idle_timeout_s > 0
+            && last_active_at > 0
+            && (now_s as i64).saturating_sub(last_active_at) > (self.session_idle_timeout_s as i64)
+    }
+
     pub fn create_session(&self, user_id: i64) -> Result<Session, rusqlite::Error> {
         let session_id = random_token(32);
         let csrf_token = random_token(24);
         let now_s = Self::now_secs();
         let expires_at = (now_s + self.session_ttl_s) as i64;
+        let last_active_at = now_s as i64;
 
         let conn = self.db.lock().unwrap();
         conn.execute(
-            "INSERT INTO sessions(id, user_id, expires_at, csrf_token) VALUES(?, ?, ?, ?)",
-            params![session_id, user_id, expires_at, csrf_token],
+            "INSERT INTO sessions(id, user_id, expires_at, last_active_at, csrf_token) VALUES(?, ?, ?, ?, ?)",
+            params![session_id, user_id, expires_at, last_active_at, csrf_token],
         )?;
         drop(conn);
 
@@ -377,26 +393,63 @@ impl Auth {
             id: session_id,
             user_id,
             expires_at,
+            last_active_at,
             csrf_token,
         })
     }
 
+    fn touch_session_activity(&self, session_id: &str, prev_active: i64, now_s: u64) {
+        let now_i64 = now_s as i64;
+        if now_i64.saturating_sub(prev_active) < 30 {
+            return;
+        }
+        if let Ok(mut cache) = self.session_cache.write() {
+            if let Some((sess, _, _)) = cache.get_mut(session_id) {
+                sess.last_active_at = now_i64;
+            }
+        }
+        let conn = self.db.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE sessions SET last_active_at = ? WHERE id = ?",
+            params![now_i64, session_id],
+        );
+    }
+
     pub fn get_session(&self, session_id: &str) -> Option<(Session, User)> {
+        self.get_session_with_touch(session_id, false)
+    }
+
+    pub fn get_session_with_touch(&self, session_id: &str, touch_activity: bool) -> Option<(Session, User)> {
         let now_s = Self::now_secs();
 
         // Fast-path: check in-memory session cache (30s TTL)
         if let Ok(cache) = self.session_cache.read() {
             if let Some((sess, usr, cached_until)) = cache.get(session_id) {
                 if *cached_until > now_s && sess.expires_at > (now_s as i64) && !usr.disabled {
-                    self.ensure_session_presence(session_id, usr.id);
-                    return Some((sess.clone(), usr.clone()));
+                    if self.is_idle_expired(sess.last_active_at, now_s) {
+                        drop(cache);
+                        self.delete_session(session_id);
+                        return None;
+                    }
+                    let prev_active = sess.last_active_at;
+                    let mut out_sess = sess.clone();
+                    let out_usr = usr.clone();
+                    drop(cache);
+                    if touch_activity {
+                        self.touch_session_activity(session_id, prev_active, now_s);
+                        if (now_s as i64).saturating_sub(prev_active) >= 30 {
+                            out_sess.last_active_at = now_s as i64;
+                        }
+                    }
+                    self.ensure_session_presence(session_id, out_usr.id);
+                    return Some((out_sess, out_usr));
                 }
             }
         }
 
         let conn = self.db.lock().unwrap();
         let res = conn.query_row(
-            "SELECT s.id, s.user_id, s.expires_at, s.csrf_token, u.username, u.disabled, u.permissions, u.allowed_projects, COALESCE(u.totp_enabled, 0), u.created_at
+            "SELECT s.id, s.user_id, s.expires_at, s.last_active_at, s.csrf_token, u.username, u.disabled, u.permissions, u.allowed_projects, COALESCE(u.totp_enabled, 0), u.created_at
              FROM sessions s
              JOIN users u ON u.id = s.user_id
              WHERE s.id = ? AND s.expires_at > ?",
@@ -406,23 +459,32 @@ impl Auth {
                     id: r.get(0)?,
                     user_id: r.get(1)?,
                     expires_at: r.get(2)?,
-                    csrf_token: r.get(3)?,
+                    last_active_at: r.get(3)?,
+                    csrf_token: r.get(4)?,
                 };
                 let user = User::from_db(
                     r.get(1)?,
-                    r.get(4)?,
-                    r.get::<_, Option<i64>>(5)?.unwrap_or(0),
-                    r.get::<_, Option<String>>(6)?.unwrap_or_else(|| "[\"*\"]".into()),
+                    r.get(5)?,
+                    r.get::<_, Option<i64>>(6)?.unwrap_or(0),
                     r.get::<_, Option<String>>(7)?.unwrap_or_else(|| "[\"*\"]".into()),
-                    r.get::<_, Option<i64>>(8)?.unwrap_or(0),
-                    r.get(9)?,
+                    r.get::<_, Option<String>>(8)?.unwrap_or_else(|| "[\"*\"]".into()),
+                    r.get::<_, Option<i64>>(9)?.unwrap_or(0),
+                    r.get(10)?,
                 );
                 Ok((session, user))
             },
         );
         drop(conn);
 
-        let valid = res.ok().filter(|(_, u)| !u.disabled)?;
+        let mut valid = res.ok().filter(|(_, u)| !u.disabled)?;
+        if self.is_idle_expired(valid.0.last_active_at, now_s) {
+            self.delete_session(session_id);
+            return None;
+        }
+        if touch_activity && (now_s as i64).saturating_sub(valid.0.last_active_at) >= 30 {
+            self.touch_session_activity(session_id, valid.0.last_active_at, now_s);
+            valid.0.last_active_at = now_s as i64;
+        }
         self.ensure_session_presence(session_id, valid.1.id);
         if let Ok(mut cache) = self.session_cache.write() {
             if cache.len() > 256 {
@@ -474,12 +536,20 @@ impl Auth {
 
     pub fn purge_expired_sessions(&self) {
         let now_s = Self::now_secs();
+        let idle_cutoff = (now_s as i64).saturating_sub(self.session_idle_timeout_s as i64);
         if let Ok(mut cache) = self.session_cache.write() {
-            cache.retain(|_, (_, _, exp)| *exp > now_s);
+            cache.retain(|_, (sess, _, exp)| *exp > now_s && !self.is_idle_expired(sess.last_active_at, now_s));
         }
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", params![now_s as i64])
             .ok();
+        if self.session_idle_timeout_s > 0 {
+            conn.execute(
+                "DELETE FROM sessions WHERE last_active_at > 0 AND last_active_at <= ?",
+                params![idle_cutoff],
+            )
+            .ok();
+        }
     }
 
     /// Evict stale in-memory auth state (MFA/WebAuthn challenges, expired failure lockouts,
@@ -540,6 +610,46 @@ mod tests {
 
         auth.set_session_presence("sid-b", 2, "offline");
         assert_eq!(auth.presence_for_user(2), "offline");
+
+        drop(auth);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_session_idle_expiration_and_activity_refresh() {
+        let temp_dir = std::env::temp_dir().join(format!("webdep-auth-idle-{}", Auth::now_millis()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db = crate::db::open_db(&temp_dir).unwrap();
+        let auth = Auth::with_timeouts(db.clone(), 3600, 120);
+
+        let sess = auth.create_session(1).unwrap();
+        assert!(auth.get_session(&sess.id).is_some());
+
+        // Backdate last_active_at by 60s (still within 120s idle window) and touch activity
+        let now_i64 = Auth::now_secs() as i64;
+        {
+            let conn = db.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET last_active_at = ? WHERE id = ?",
+                params![now_i64 - 60, &sess.id],
+            )
+            .unwrap();
+        }
+        auth.invalidate_sessions();
+        let (refreshed, _) = auth.get_session_with_touch(&sess.id, true).expect("session should refresh within idle window");
+        assert!(refreshed.last_active_at >= now_i64 - 1);
+
+        // Backdate past idle timeout (200s > 120s) without touching -> must auto-expire and delete
+        {
+            let conn = db.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET last_active_at = ? WHERE id = ?",
+                params![now_i64 - 200, &sess.id],
+            )
+            .unwrap();
+        }
+        auth.invalidate_sessions();
+        assert!(auth.get_session(&sess.id).is_none());
 
         drop(auth);
         std::fs::remove_dir_all(&temp_dir).ok();

@@ -1580,6 +1580,7 @@ dependencies = [
  "argon2",
  "axum",
  "base64",
+ "flate2",
  "futures-util",
  "hex",
  "libc",
